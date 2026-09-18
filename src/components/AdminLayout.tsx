@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, FileBarChart, ClipboardCheck, Users, CalendarCheck, CalendarOff,
-  Building2, Target, Megaphone, Settings, Menu, X, type LucideIcon,
+  Building2, Target, Megaphone, Settings, Menu, X, TrendingUp, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
@@ -18,7 +18,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Sales',
     items: [
-      { label: 'Daily Reports', path: '/admin/reports', icon: FileBarChart, ready: false },
+      { label: 'Sales Performance', path: '/admin/performance', icon: TrendingUp, ready: true },
       { label: 'Evolution Forms', path: '/admin/evolution', icon: ClipboardCheck, ready: false },
       { label: 'Sales Targets', path: '/admin/targets', icon: Target, ready: false },
     ],

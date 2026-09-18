@@ -4,13 +4,14 @@ import LoginPage from './pages/LoginPage'
 import AdminDashboard from './pages/admin/Dashboard'
 import SalesDashboard from './pages/sales/Dashboard'
 import HRDashboard from './pages/hr/Dashboard'
+import AdminSalesPerformance from './pages/admin/SalesPerformance'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
 
   if (loading) return (
     <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center">
-      <div className="text-orange-500 text-xl">Loading...</div>
+      <div className="text-orange-500 text-xl">JK BrandOS™...</div>
     </div>
   )
 
@@ -19,7 +20,10 @@ function AppRoutes() {
   return (
     <Routes>
       {role === 'super_admin' && (
-        <Route path="/admin/*" element={<AdminDashboard />} />
+        <>
+          <Route path="/admin/performance" element={<AdminSalesPerformance />} />
+          <Route path="/admin/*" element={<AdminDashboard />} />
+        </>
       )}
       {role === 'sales' && (
         <Route path="/sales/*" element={<SalesDashboard />} />
