@@ -2,13 +2,24 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import PerformanceView from './PerformanceView'
 import { istDate, addDays, weekStart, inr } from '../lib/format'
+import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../lib/targets'
 
 type Branch = { id: string; name: string }
 type Person = { id: string; full_name: string | null; branch_id: string | null }
 type Period = 'week' | 'month' | 'year'
+type ReportRow = {
+  user_id: string
+  branch_id: string | null
+  calls: number | null
+  positive_leads: number | null
+  hot_leads: number | null
+  deals_closed: number | null
+  revenue: number | null
+}
 type Stat = {
   userId: string
   name: string
+  branchId: string | null
   branch: string
   calls: number
   positive: number
@@ -50,8 +61,19 @@ async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ da
   return out
 }
 
+const fetchReports = (from: string, to: string) =>
+  fetchAll<ReportRow>((a, z) =>
+    supabase
+      .from('daily_reports')
+      .select('user_id, branch_id, calls, positive_leads, hot_leads, deals_closed, revenue')
+      .gte('work_date', from)
+      .lte('work_date', to)
+      .range(a, z),
+  )
+
 export default function SalesPerformance() {
   const today = istDate()
+  const ym = today.slice(0, 7)
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [people, setPeople] = useState<Person[]>([])
@@ -62,6 +84,11 @@ export default function SalesPerformance() {
   const [stats, setStats] = useState<Stat[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // This month's targets + achievement (for zones)
+  const [branchTargets, setBranchTargets] = useState<Map<string, number>>(new Map())
+  const [empTargets, setEmpTargets] = useState<Map<string, number>>(new Map())
+  const [monthReports, setMonthReports] = useState<ReportRow[]>([])
 
   // Branches + sales employees
   useEffect(() => {
@@ -79,6 +106,24 @@ export default function SalesPerformance() {
       setPeople(salesIds.size > 0 ? all.filter((x) => salesIds.has(x.id)) : all)
     })()
   }, [])
+
+  // This month: targets + reports
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const [bt, et, reports] = await Promise.all([
+          supabase.from('branch_targets').select('branch_id, target_amount').eq('month', monthFirst(ym)),
+          supabase.from('employee_targets').select('user_id, target_amount').eq('month', monthFirst(ym)),
+          fetchReports(monthFirst(ym), monthLast(ym)),
+        ])
+        setBranchTargets(new Map((bt.data ?? []).map((x) => [x.branch_id, Number(x.target_amount)])))
+        setEmpTargets(new Map((et.data ?? []).map((x) => [x.user_id, Number(x.target_amount)])))
+        setMonthReports(reports)
+      } catch (e) {
+        setError((e as Error).message)
+      }
+    })()
+  }, [ym])
 
   const branchName = useMemo(() => new Map(branches.map((b) => [b.id, b.name])), [branches])
   const visiblePeople = people.filter((p) => branchId === 'all' || p.branch_id === branchId)
@@ -98,15 +143,7 @@ export default function SalesPerformance() {
       const from = periodStart(period, today)
       try {
         const [reports, evolutions] = await Promise.all([
-          fetchAll<{ user_id: string; calls: number | null; positive_leads: number | null; hot_leads: number | null; deals_closed: number | null; revenue: number | null }>(
-            (a, z) =>
-              supabase
-                .from('daily_reports')
-                .select('user_id, calls, positive_leads, hot_leads, deals_closed, revenue')
-                .gte('work_date', from)
-                .lte('work_date', today)
-                .range(a, z),
-          ),
+          fetchReports(from, today),
           fetchAll<{ user_id: string }>((a, z) =>
             supabase.from('daily_evolution').select('user_id').gte('evolution_date', from).lte('evolution_date', today).range(a, z),
           ),
@@ -118,6 +155,7 @@ export default function SalesPerformance() {
             {
               userId: p.id,
               name: p.full_name || 'Unnamed',
+              branchId: p.branch_id,
               branch: branchName.get(p.branch_id ?? '') ?? '—',
               calls: 0, positive: 0, hot: 0, deals: 0, revenue: 0, reports: 0, evolutions: 0,
             },
@@ -145,8 +183,30 @@ export default function SalesPerformance() {
     })()
   }, [period, people, branchName, today])
 
+  // Branch comparison (this month)
+  const branchRows = useMemo(() => {
+    return branches
+      .map((b) => {
+        const rs = monthReports.filter((r) => r.branch_id === b.id)
+        const achieved = rs.reduce((s, r) => s + Number(r.revenue ?? 0), 0)
+        const target = branchTargets.get(b.id) ?? 0
+        return {
+          id: b.id,
+          name: b.name,
+          target,
+          achieved,
+          pct: pctOf(achieved, target),
+          calls: rs.reduce((s, r) => s + Number(r.calls ?? 0), 0),
+          deals: rs.reduce((s, r) => s + Number(r.deals_closed ?? 0), 0),
+          team: people.filter((p) => p.branch_id === b.id).length,
+        }
+      })
+      .sort((a, c) => c.pct - a.pct || c.achieved - a.achieved)
+  }, [branches, monthReports, branchTargets, people])
+
   const days = workingDays(periodStart(period, today), today)
-  const rows = stats.filter((s) => branchId === 'all' || people.find((p) => p.id === s.userId)?.branch_id === branchId)
+  const showTargets = period === 'month'
+  const rows = stats.filter((s) => branchId === 'all' || s.branchId === branchId)
 
   const selectCls =
     'rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500'
@@ -157,7 +217,7 @@ export default function SalesPerformance() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Sales Performance</h1>
-          <p className="mt-1 text-sm text-gray-400">Track every sales employee, or the whole team.</p>
+          <p className="mt-1 text-sm text-gray-400">Track every branch and every sales employee.</p>
         </div>
         <div className="flex flex-wrap gap-3">
           <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className={selectCls} aria-label="Branch">
@@ -179,6 +239,62 @@ export default function SalesPerformance() {
         <div className="mt-6 rounded-lg border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">Could not load data: {error}</div>
       )}
 
+      {/* Branch comparison */}
+      {branchId === 'all' && userId === 'all' && (
+        <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">
+          <div className="mb-4">
+            <h2 className="text-sm font-medium text-gray-300">Branch comparison · {monthTitle(ym)}</h2>
+            <p className="mt-0.5 text-xs text-gray-500">Click a branch to see only that branch.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead>
+                <tr className="border-b border-[#242424] text-left text-gray-400">
+                  <th className="py-2 pr-4 font-normal">Branch</th>
+                  <th className="py-2 pr-4 font-normal">Target progress</th>
+                  <th className="py-2 pr-4 text-right font-normal">Achieved</th>
+                  <th className="py-2 pr-4 text-right font-normal">Target</th>
+                  <th className="py-2 pr-4 text-right font-normal">Calls</th>
+                  <th className="py-2 pr-4 text-right font-normal">Deals</th>
+                  <th className="py-2 text-right font-normal">Team</th>
+                </tr>
+              </thead>
+              <tbody>
+                {branchRows.map((b) => {
+                  const zone = zoneOf(b.pct)
+                  return (
+                    <tr
+                      key={b.id}
+                      onClick={() => setBranchId(b.id)}
+                      className="cursor-pointer border-b border-[#1c1c1c] last:border-0 hover:bg-[#1a1a1a]"
+                    >
+                      <td className="py-3 pr-4 font-medium">{b.name}</td>
+                      <td className="w-[32%] py-3 pr-4">
+                        {b.target > 0 ? (
+                          <div className="flex items-center gap-3">
+                            <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#222]">
+                              <div className={`h-full rounded-full ${zone.bar}`} style={{ width: `${Math.min(b.pct, 100)}%` }} />
+                            </div>
+                            <span className={`w-12 text-right text-xs font-semibold tabular-nums ${zone.text}`}>{b.pct.toFixed(0)}%</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-600">No target set</span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-right font-medium tabular-nums">{inr(b.achieved)}</td>
+                      <td className="py-3 pr-4 text-right tabular-nums text-gray-400">{b.target > 0 ? inr(b.target) : '—'}</td>
+                      <td className="py-3 pr-4 text-right tabular-nums">{b.calls.toLocaleString('en-IN')}</td>
+                      <td className="py-3 pr-4 text-right tabular-nums">{b.deals}</td>
+                      <td className="py-3 text-right tabular-nums text-gray-400">{b.team}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* Charts */}
       <div className="mt-8">
         <PerformanceView
@@ -195,7 +311,10 @@ export default function SalesPerformance() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-medium text-gray-300">Leaderboard</h2>
-            <p className="mt-0.5 text-xs text-gray-500">Click a name to see their charts. Forms are counted against {days} working days.</p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              Click a name to see their charts. Forms are counted against {days} working days.
+              {showTargets && ' Target zones use this month’s targets.'}
+            </p>
           </div>
           <div className="flex rounded-lg border border-[#2a2a2a] bg-[#161616] p-1">
             {PERIODS.map((p) => (
@@ -213,7 +332,7 @@ export default function SalesPerformance() {
         </div>
 
         <div className={`overflow-x-auto ${loading ? 'opacity-50' : ''}`}>
-          <table className="w-full min-w-[760px] text-sm">
+          <table className={`w-full text-sm ${showTargets ? 'min-w-[980px]' : 'min-w-[760px]'}`}>
             <thead>
               <tr className="border-b border-[#242424] text-left text-gray-400">
                 <th className="py-2 pr-3 font-normal">#</th>
@@ -224,43 +343,68 @@ export default function SalesPerformance() {
                 <th className="py-2 pr-4 text-right font-normal">Hot</th>
                 <th className="py-2 pr-4 text-right font-normal">Deals</th>
                 <th className="py-2 pr-4 text-right font-normal">Revenue</th>
-                <th className="py-2 pr-4 text-right font-normal">Evolution forms</th>
-                <th className="py-2 text-right font-normal">Daily reports</th>
+                {showTargets && (
+                  <>
+                    <th className="py-2 pr-4 text-right font-normal">Target</th>
+                    <th className="py-2 pr-4 font-normal">Zone</th>
+                  </>
+                )}
+                <th className="py-2 pr-4 text-right font-normal">Evolution</th>
+                <th className="py-2 text-right font-normal">Reports</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-8 text-center text-gray-500">No sales employees found.</td>
+                  <td colSpan={showTargets ? 12 : 10} className="py-8 text-center text-gray-500">No sales employees found.</td>
                 </tr>
               ) : (
-                rows.map((s, i) => (
-                  <tr
-                    key={s.userId}
-                    onClick={() => {
-                      setUserId(s.userId)
-                      window.scrollTo({ top: 0, behavior: 'smooth' })
-                    }}
-                    className={`cursor-pointer border-b border-[#1c1c1c] last:border-0 hover:bg-[#1a1a1a] ${
-                      s.userId === userId ? 'bg-orange-500/5' : ''
-                    }`}
-                  >
-                    <td className="py-2.5 pr-3 text-gray-500">{i + 1}</td>
-                    <td className={`py-2.5 pr-4 ${s.userId === userId ? 'font-medium text-orange-400' : ''}`}>{s.name}</td>
-                    <td className="py-2.5 pr-4 text-gray-400">{s.branch}</td>
-                    <td className="py-2.5 pr-4 text-right tabular-nums">{s.calls.toLocaleString('en-IN')}</td>
-                    <td className="py-2.5 pr-4 text-right tabular-nums">{s.positive}</td>
-                    <td className="py-2.5 pr-4 text-right tabular-nums">{s.hot}</td>
-                    <td className="py-2.5 pr-4 text-right tabular-nums">{s.deals}</td>
-                    <td className="py-2.5 pr-4 text-right font-medium tabular-nums">{inr(s.revenue)}</td>
-                    <td className="py-2.5 pr-4 text-right tabular-nums">
-                      <Discipline done={s.evolutions} total={days} />
-                    </td>
-                    <td className="py-2.5 text-right tabular-nums">
-                      <Discipline done={s.reports} total={days} />
-                    </td>
-                  </tr>
-                ))
+                rows.map((s, i) => {
+                  const target = empTargets.get(s.userId) ?? 0
+                  const pct = pctOf(s.revenue, target)
+                  const zone = zoneOf(pct)
+                  return (
+                    <tr
+                      key={s.userId}
+                      onClick={() => {
+                        setUserId(s.userId)
+                        window.scrollTo({ top: 0, behavior: 'smooth' })
+                      }}
+                      className={`cursor-pointer border-b border-[#1c1c1c] last:border-0 hover:bg-[#1a1a1a] ${
+                        s.userId === userId ? 'bg-orange-500/5' : ''
+                      }`}
+                    >
+                      <td className="py-2.5 pr-3 text-gray-500">{i + 1}</td>
+                      <td className={`py-2.5 pr-4 ${s.userId === userId ? 'font-medium text-orange-400' : ''}`}>{s.name}</td>
+                      <td className="py-2.5 pr-4 text-gray-400">{s.branch}</td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums">{s.calls.toLocaleString('en-IN')}</td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums">{s.positive}</td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums">{s.hot}</td>
+                      <td className="py-2.5 pr-4 text-right tabular-nums">{s.deals}</td>
+                      <td className="py-2.5 pr-4 text-right font-medium tabular-nums">{inr(s.revenue)}</td>
+                      {showTargets && (
+                        <>
+                          <td className="py-2.5 pr-4 text-right tabular-nums text-gray-400">{target > 0 ? inr(target) : '—'}</td>
+                          <td className="py-2.5 pr-4">
+                            {target > 0 ? (
+                              <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs ${zone.chip}`}>
+                                {pct.toFixed(0)}% · {zone.label.replace(' zone', '')}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-600">No target</span>
+                            )}
+                          </td>
+                        </>
+                      )}
+                      <td className="py-2.5 pr-4 text-right tabular-nums">
+                        <Discipline done={s.evolutions} total={days} />
+                      </td>
+                      <td className="py-2.5 text-right tabular-nums">
+                        <Discipline done={s.reports} total={days} />
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
