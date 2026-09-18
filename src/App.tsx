@@ -5,6 +5,7 @@ import AdminDashboard from './pages/admin/Dashboard'
 import SalesDashboard from './pages/sales/Dashboard'
 import HRDashboard from './pages/hr/Dashboard'
 import AdminSalesPerformance from './pages/admin/SalesPerformance'
+import AdminSalesTargets from './pages/admin/SalesTargets'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
@@ -22,6 +23,7 @@ function AppRoutes() {
       {role === 'super_admin' && (
         <>
           <Route path="/admin/performance" element={<AdminSalesPerformance />} />
+          <Route path="/admin/targets" element={<AdminSalesTargets />} />
           <Route path="/admin/*" element={<AdminDashboard />} />
         </>
       )}

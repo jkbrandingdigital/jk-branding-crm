@@ -20,7 +20,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: 'Sales Performance', path: '/admin/performance', icon: TrendingUp, ready: true },
       { label: 'Evolution Forms', path: '/admin/evolution', icon: ClipboardCheck, ready: false },
-      { label: 'Sales Targets', path: '/admin/targets', icon: Target, ready: false },
+      { label: 'Sales Targets', path: '/admin/targets', icon: Target, ready: true },
     ],
   },
   {
