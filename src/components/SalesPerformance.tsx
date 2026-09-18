@@ -71,14 +71,34 @@ const fetchReports = (from: string, to: string) =>
       .range(a, z),
   )
 
-export default function SalesPerformance() {
+export default function SalesPerformance({ lockedBranchId }: { lockedBranchId?: string } = {}) {
   const today = istDate()
   const ym = today.slice(0, 7)
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [people, setPeople] = useState<Person[]>([])
-  const [branchId, setBranchId] = useState('all')
+  const [branchId, setBranchId] = useState(lockedBranchId ?? 'all')
   const [userId, setUserId] = useState('all')
+  
+  // Branch managers are always locked to their own branch (even if no prop is passed)
+  const [autoLock, setAutoLock] = useState<string | null>(null)
+  const lock = lockedBranchId ?? autoLock
+
+  useEffect(() => {
+    ;(async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: roleRow } = await supabase.from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
+      if (roleRow?.role !== 'branch_manager') return
+      const { data: prof } = await supabase.from('profiles').select('branch_id').eq('id', user.id).maybeSingle()
+      if (prof?.branch_id) {
+        setAutoLock(prof.branch_id)
+        setBranchId(prof.branch_id)
+      }
+    })()
+  }, [])
 
   const [period, setPeriod] = useState<Period>('month')
   const [stats, setStats] = useState<Stat[]>([])
@@ -220,7 +240,7 @@ export default function SalesPerformance() {
           <p className="mt-1 text-sm text-gray-400">Track every branch and every sales employee.</p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className={selectCls} aria-label="Branch">
+          <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className={selectCls} aria-label="Branch" disabled={!!lock}>
             <option value="all">All branches</option>
             {branches.map((b) => (
               <option key={b.id} value={b.id}>{b.name}</option>
@@ -240,7 +260,7 @@ export default function SalesPerformance() {
       )}
 
       {/* Branch comparison */}
-      {branchId === 'all' && userId === 'all' && (
+      {!lock && branchId === 'all' && userId === 'all' && (
         <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">
           <div className="mb-4">
             <h2 className="text-sm font-medium text-gray-300">Branch comparison · {monthTitle(ym)}</h2>
