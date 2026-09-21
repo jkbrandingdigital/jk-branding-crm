@@ -19,14 +19,15 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: 'Sales',
     items: [
       { label: 'Sales Performance', path: '/admin/performance', icon: TrendingUp, ready: true },
-      { label: 'Evolution Forms', path: '/admin/evolution', icon: ClipboardCheck, ready: false },
+      { label: 'Daily Reports', path: '/admin/reports', icon: FileBarChart, ready: true },
+      { label: 'Evolution Forms', path: '/admin/evolution', icon: ClipboardCheck, ready: true },
       { label: 'Sales Targets', path: '/admin/targets', icon: Target, ready: true },
     ],
   },
   {
     title: 'HR',
     items: [
-      { label: 'Employees', path: '/admin/employees', icon: Users, ready: false },
+      { label: 'Employees', path: '/admin/employees', icon: Users, ready: true },
       { label: 'Attendance', path: '/admin/attendance', icon: CalendarCheck, ready: false },
       { label: 'Leave Requests', path: '/admin/leaves', icon: CalendarOff, ready: false },
     ],

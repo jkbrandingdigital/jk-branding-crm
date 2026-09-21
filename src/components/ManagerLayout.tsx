@@ -16,7 +16,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: 'Sales Performance', path: '/manager/performance', icon: TrendingUp, ready: true },
       { label: 'Team Targets', path: '/manager/targets', icon: Target, ready: true },
-      { label: 'Daily Reports', path: '/manager/reports', icon: FileBarChart, ready: false },
+      { label: 'Daily Reports', path: '/manager/reports', icon: FileBarChart, ready: true },
     ],
   },
   {
