@@ -8,6 +8,7 @@ import SalesDashboard from './pages/sales/Dashboard'
 import HRDashboard from './pages/hr/Dashboard'
 import ManagerDashboard from './pages/manager/Dashboard'
 import ManagerPerformance from './pages/manager/Performance'
+import ManagerTargets from './pages/manager/Targets'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
@@ -39,6 +40,7 @@ function AppRoutes() {
         <>
           <Route path="/manager/performance" element={<ManagerPerformance />} />
           <Route path="/manager/*" element={<ManagerDashboard />} />
+          <Route path="/manager/targets" element={<ManagerTargets />} />
         </>
       )}
       {role === 'sales' && (

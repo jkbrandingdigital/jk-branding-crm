@@ -4,6 +4,7 @@ import {
 } from 'recharts'
 import { supabase } from '../../lib/supabase'
 import AdminLayout from '../../components/AdminLayout'
+import DonutChart, { PIE_COLORS } from '../../components/DonutChart'
 
 // ---------- Types ----------
 type Branch = { id: string; name: string; city: string | null }
@@ -227,15 +228,6 @@ export default function AdminDashboard() {
   ]
   const funnelMax = Math.max(totals.calls, 1)
 
-  const sources = [
-    { label: 'IndiaMART', value: totals.indiamart },
-    { label: 'Facebook', value: totals.fb },
-    { label: 'Incoming calls', value: totals.incoming },
-    { label: 'Bulk WhatsApp', value: totals.whatsapp },
-    { label: 'Old client reference', value: totals.oldRef },
-  ].sort((a, b) => b.value - a.value)
-  const sourcesMax = Math.max(...sources.map((s) => s.value), 1)
-
   // ---------- UI ----------
   return (
     <AdminLayout>
@@ -360,19 +352,16 @@ export default function AdminDashboard() {
             </Panel>
 
             <Panel title="Inquiry sources">
-              <div className="space-y-3">
-                {sources.map((s) => (
-                  <div key={s.label} className="text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-300">{s.label}</span>
-                      <span className="tabular-nums">{s.value.toLocaleString('en-IN')}</span>
-                    </div>
-                    <div className="mt-1 h-1.5 rounded bg-[#1f1f1f]">
-                      <div className="h-full rounded bg-orange-500/80" style={{ width: `${(s.value / sourcesMax) * 100}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <DonutChart
+                data={[
+                  { name: 'IndiaMART', value: totals.indiamart, color: PIE_COLORS[0] },
+                  { name: 'Facebook', value: totals.fb, color: PIE_COLORS[1] },
+                  { name: 'Incoming calls', value: totals.incoming, color: PIE_COLORS[2] },
+                  { name: 'Old client reference', value: totals.oldRef, color: PIE_COLORS[4] },
+                ]}
+                centerLabel="Inquiries"
+                empty="No inquiries in this period."
+              />
             </Panel>
           </section>
 
@@ -386,7 +375,7 @@ export default function AdminDashboard() {
                       <CartesianGrid stroke="#222" vertical={false} />
                       <XAxis dataKey="name" tick={{ fill: '#bbb', fontSize: 12 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} width={64} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10000)]} tickFormatter={(v) => formatINR(Number(v))} />
-                      <Tooltip cursor={{ fill: '#1c1c1c' }} contentStyle={tooltipStyle} formatter={(v) => [formatINR(Number(v)), 'Revenue']} />
+                      <Tooltip cursor={{ fill: '#1c1c1c' }} contentStyle={tooltipStyle} itemStyle={{ color: '#e5e5e5' }} formatter={(v) => [formatINR(Number(v)), 'Revenue']} />
                       <Bar dataKey="revenue" fill="#f97316" radius={[6, 6, 0, 0]} maxBarSize={56} />
                     </BarChart>
                   </ResponsiveContainer>

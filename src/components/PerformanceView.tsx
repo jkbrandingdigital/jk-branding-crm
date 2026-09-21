@@ -3,6 +3,7 @@ import {
   BarChart, Bar, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react'
+import DonutChart, { PIE_COLORS } from './DonutChart'
 import { supabase } from '../lib/supabase'
 import { istDate, addDays, weekStart, addMonths, shortDate, monthLabel, inr, inrCompact } from '../lib/format'
 
@@ -15,6 +16,10 @@ type Row = {
   hot_leads: number | null
   deals_closed: number | null
   revenue: number | null
+  indiamart_inquiry: number | null
+  facebook_inquiry: number | null
+  incoming_calls: number | null
+  old_client_ref: number | null
 }
 type Bucket = { key: string; label: string; revenue: number; calls: number; positive: number; hot: number; deals: number }
 
@@ -53,7 +58,7 @@ async function fetchReports(from: string, userId?: string | null, branchId?: str
   for (let start = 0; ; start += page) {
     let q = supabase
       .from('daily_reports')
-      .select('work_date, calls, quality_leads, positive_leads, hot_leads, deals_closed, revenue')
+      .select('work_date, calls, quality_leads, positive_leads, hot_leads, deals_closed, revenue, indiamart_inquiry, facebook_inquiry, incoming_calls, old_client_ref')
       .gte('work_date', from)
       .order('work_date')
       .range(start, start + page - 1)
@@ -124,6 +129,17 @@ export default function PerformanceView({
   ]
 
   const periodTotal = buckets.reduce((s, b) => s + b.revenue, 0)
+
+  // Inquiry sources across the whole view
+  const firstKey = cfg.keys[0]
+  const inView = rows.filter((r) => cfg.keyOf(r.work_date) >= firstKey)
+  const sum = (k: keyof Row) => inView.reduce((s, r) => s + Number(r[k] ?? 0), 0)
+  const sources = [
+    { name: 'IndiaMART', value: sum('indiamart_inquiry'), color: PIE_COLORS[0] },
+    { name: 'Facebook', value: sum('facebook_inquiry'), color: PIE_COLORS[1] },
+    { name: 'Incoming calls', value: sum('incoming_calls'), color: PIE_COLORS[2] },
+    { name: 'Old client reference', value: sum('old_client_ref'), color: PIE_COLORS[4] },
+  ]
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -199,7 +215,7 @@ export default function PerformanceView({
                   domain={[0, (max: number) => Math.max(max, 10000)]}
                   tickFormatter={(v) => inrCompact(Number(v))}
                 />
-                <Tooltip cursor={{ fill: '#1c1c1c' }} contentStyle={tooltipStyle} formatter={(v) => [inr(Number(v)), 'Revenue']} />
+                <Tooltip cursor={{ fill: '#1c1c1c' }} contentStyle={tooltipStyle} itemStyle={{ color: '#e5e5e5' }} formatter={(v) => [inr(Number(v)), 'Revenue']} />
                 <Bar dataKey="revenue" radius={[5, 5, 0, 0]} maxBarSize={44}>
                   {buckets.map((b, i) => (
                     <Cell key={b.key} fill={i === buckets.length - 1 ? '#f97316' : '#7c3a12'} />
@@ -210,8 +226,9 @@ export default function PerformanceView({
           </div>
         </section>
 
-        {/* Activity chart */}
-        <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">
+        {/* Activity chart + inquiry sources */}
+        <div className="mt-6 grid gap-6 lg:grid-cols-5">
+        <section className="rounded-2xl border border-[#242424] bg-[#151515] p-5 lg:col-span-3">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-gray-300">Calls and leads</h2>
             <div className="flex gap-4 text-xs text-gray-400">
@@ -234,6 +251,12 @@ export default function PerformanceView({
             </ResponsiveContainer>
           </div>
         </section>
+
+        <section className="rounded-2xl border border-[#242424] bg-[#151515] p-5 lg:col-span-2">
+          <h2 className="mb-4 text-sm font-medium text-gray-300">Inquiry sources</h2>
+          <DonutChart data={sources} centerLabel="Inquiries" empty="No inquiries in this period." />
+        </section>
+        </div>
       </div>
     </div>
   )

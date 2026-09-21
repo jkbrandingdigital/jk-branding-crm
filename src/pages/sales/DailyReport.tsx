@@ -3,6 +3,7 @@ import { Plus, Trash2, CheckCircle2, Lock, AlertCircle } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { getCurrentUser, getUserProfile } from '../../lib/auth'
 import { istDate, addDays, prettyDate, inr, notifySaved } from '../../lib/format'
+import MyTargetCard from '../../components/MyTargetCard'
 
 // ---------- Field config (same order as the Excel sheet) ----------
 const GROUPS = [
@@ -41,14 +42,13 @@ const GROUPS = [
 ] as const
 
 const NUM_KEYS = GROUPS.flatMap((g) => g.fields.map(([k]) => k))
-const TARGET_KEYS = ['yearly_target', 'daily_target', 'daily_archive_target'] as const
 
 type Nums = Record<string, string>
 type DealRow = { client_name: string; amount: string; note: string }
 type Report = { id: string; created_at: string; admin_note: string | null; help_status: string | null } & Record<string, unknown>
 type RecentReport = { id: string; work_date: string; calls: number | null; deals_closed: number | null; revenue: number | null }
 
-const emptyNums = (): Nums => Object.fromEntries([...NUM_KEYS, ...TARGET_KEYS].map((k) => [k, '']))
+const emptyNums = (): Nums => Object.fromEntries(NUM_KEYS.map((k) => [k, '']))
 const emptyDeal = (): DealRow => ({ client_name: '', amount: '', note: '' })
 const str = (v: unknown) => (v == null ? '' : String(v))
 
@@ -109,25 +109,14 @@ export default function DailyReport() {
     setExisting(report)
 
     if (!report) {
-      // New report: carry yearly + daily target forward from the last report
-      const { data: prev } = await supabase
-        .from('daily_reports')
-        .select('yearly_target, daily_target')
-        .eq('user_id', uid)
-        .lt('work_date', date)
-        .order('work_date', { ascending: false })
-        .limit(1)
-      const fresh = emptyNums()
-      fresh.yearly_target = str(prev?.[0]?.yearly_target)
-      fresh.daily_target = str(prev?.[0]?.daily_target)
-      setNums(fresh)
+      setNums(emptyNums())
       setOtherActivity('')
       setDeals([])
       setLoading(false)
       return
     }
 
-    setNums(Object.fromEntries([...NUM_KEYS, ...TARGET_KEYS].map((k) => [k, str(report[k])])))
+    setNums(Object.fromEntries(NUM_KEYS.map((k) => [k, str(report[k])])))
     setOtherActivity(str(report.other_activity))
     const { data: dealData } = await supabase
       .from('deal_details')
@@ -172,11 +161,10 @@ export default function DailyReport() {
       work_date: workDate,
       deals_closed: validDeals.length,
       revenue,
+      daily_archive_target: revenue,
       other_activity: otherActivity.trim() || null,
     }
     for (const k of NUM_KEYS) payload[k] = nums[k] === '' ? 0 : Math.max(0, Math.floor(Number(nums[k])))
-    for (const k of TARGET_KEYS) payload[k] = nums[k] === '' ? null : Math.max(0, Number(nums[k]))
-    if (payload.daily_archive_target == null) payload.daily_archive_target = revenue
 
     const wasUpdate = !!existing
     let reportId = existing?.id
@@ -324,13 +312,13 @@ export default function DailyReport() {
             ) : (
               <div className="space-y-3">
                 {deals.map((d, i) => (
-                  <div key={i} className="flex flex-wrap gap-2 sm:flex-nowrap">
+                  <div key={i} className="grid grid-cols-[1fr_120px_auto] gap-2 sm:grid-cols-[1.3fr_140px_1fr_auto]">
                     <input
                       placeholder="Client name"
                       value={d.client_name}
                       disabled={!editable}
                       onChange={(e) => setDeal(i, { client_name: e.target.value })}
-                      className={`${inputCls} min-w-0 flex-[2]`}
+                      className={inputCls}
                     />
                     <input
                       type="number"
@@ -339,14 +327,14 @@ export default function DailyReport() {
                       value={d.amount}
                       disabled={!editable}
                       onChange={(e) => setDeal(i, { amount: e.target.value })}
-                      className={`${inputCls} w-32 flex-none tabular-nums`}
+                      className={`${inputCls} tabular-nums`}
                     />
                     <input
                       placeholder="Note (optional)"
                       value={d.note}
                       disabled={!editable}
                       onChange={(e) => setDeal(i, { note: e.target.value })}
-                      className={`${inputCls} min-w-0 basis-full sm:flex-[2] sm:basis-auto`}
+                      className={`${inputCls} col-span-2 sm:col-span-1`}
                     />
                     {editable && (
                       <button
@@ -366,18 +354,6 @@ export default function DailyReport() {
             )}
           </Section>
 
-          <Section title="Targets">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <NumField label="Yearly target (₹)" value={nums.yearly_target} disabled={!editable} cls={inputCls}
-                onChange={(v) => setNums((s) => ({ ...s, yearly_target: v }))} />
-              <NumField label="Daily target (₹)" value={nums.daily_target} disabled={!editable} cls={inputCls}
-                onChange={(v) => setNums((s) => ({ ...s, daily_target: v }))} />
-              <NumField label="Daily achieved (₹)" value={nums.daily_archive_target} disabled={!editable} cls={inputCls}
-                placeholder={String(revenue)} onChange={(v) => setNums((s) => ({ ...s, daily_archive_target: v }))} />
-            </div>
-            <p className="mt-3 text-xs text-gray-500">Targets carry forward from your last report. Daily achieved defaults to today’s deal total.</p>
-          </Section>
-
           <Section title="Other activity">
             <textarea
               rows={3}
@@ -392,21 +368,12 @@ export default function DailyReport() {
 
         {/* Side column */}
         <aside className="space-y-6">
+          <MyTargetCard compact />
+
           <div className="rounded-2xl border border-[#242424] bg-[#151515] p-5 lg:sticky lg:top-6">
             <p className="text-sm text-gray-400">{prettyDate(workDate)}</p>
             <p className="mt-3 text-sm text-gray-400">Revenue from deals</p>
             <p className="mt-1 text-3xl font-bold text-orange-500">{inr(revenue)}</p>
-            {num('daily_target') > 0 && (
-              <div className="mt-3">
-                <div className="flex justify-between text-xs text-gray-400">
-                  <span>Daily target</span>
-                  <span>{Math.round((revenue / num('daily_target')) * 100)}%</span>
-                </div>
-                <div className="mt-1 h-1.5 rounded bg-[#222]">
-                  <div className="h-full rounded bg-orange-500" style={{ width: `${Math.min((revenue / num('daily_target')) * 100, 100)}%` }} />
-                </div>
-              </div>
-            )}
             <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
               <Mini label="Calls" value={num('calls')} />
               <Mini label="Positive" value={num('positive_leads')} />
@@ -476,24 +443,5 @@ function Mini({ label, value }: { label: string; value: number }) {
       <p className="text-xs text-gray-500">{label}</p>
       <p className="mt-0.5 font-semibold tabular-nums">{value}</p>
     </div>
-  )
-}
-
-function NumField({
-  label, value, onChange, disabled, cls, placeholder = '0',
-}: { label: string; value: string; onChange: (v: string) => void; disabled: boolean; cls: string; placeholder?: string }) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs text-gray-400">{label}</span>
-      <input
-        type="number"
-        min={0}
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={`${cls} tabular-nums`}
-      />
-    </label>
   )
 }
