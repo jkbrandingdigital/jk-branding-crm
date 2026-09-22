@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  ChevronDown, Menu, X, Filter, type LucideIcon,
+  ChevronDown, Menu, X, Filter, Shuffle, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
@@ -20,6 +20,7 @@ const GROUPS: NavGroup[] = [
     icon: Briefcase,
     items: [
       { label: 'Leads', path: '/admin/leads', icon: Filter, ready: true },
+      { label: 'Lead Assignment', path: '/admin/lead-assignment', icon: Shuffle, ready: true },
       { label: 'Sales Performance', path: '/admin/performance', icon: TrendingUp, ready: true },
       { label: 'Daily Reports', path: '/admin/reports', icon: FileBarChart, ready: true },
       { label: 'Evolution Forms', path: '/admin/evolution', icon: ClipboardCheck, ready: true },

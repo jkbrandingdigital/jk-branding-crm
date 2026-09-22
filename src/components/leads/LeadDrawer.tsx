@@ -258,6 +258,7 @@ export default function LeadDrawer({
                   <input
                     type="number"
                     min={0}
+                    onWheel={(e) => e.currentTarget.blur()}
                     value={form.estimated_amount ?? 0}
                     disabled={!editable}
                     onChange={(e) => setForm({ ...form, estimated_amount: Number(e.target.value) })}

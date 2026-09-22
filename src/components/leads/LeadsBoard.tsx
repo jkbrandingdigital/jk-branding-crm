@@ -417,7 +417,7 @@ export default function LeadsBoard() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs text-gray-400">Estimated amount (₹)</span>
-                  <input type="number" min={0} value={nl.estimated_amount} onChange={(e) => setNl({ ...nl, estimated_amount: e.target.value })} className={inputCls} />
+                  <input type="number" min={0} onWheel={(e) => e.currentTarget.blur()} value={nl.estimated_amount} onChange={(e) => setNl({ ...nl, estimated_amount: e.target.value })} className={inputCls} />
                 </label>
               </div>
               <label className="block">

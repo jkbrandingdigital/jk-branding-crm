@@ -18,6 +18,7 @@ import ManagerTargets from './pages/manager/Targets'
 import ManagerReports from './pages/manager/Reports'
 import ManagerEmployeeReport from './pages/manager/EmployeeReport'
 import ManagerLeads from './pages/manager/Leads'
+import AdminLeadAssignment from './pages/admin/LeadAssignment'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
@@ -48,7 +49,9 @@ function AppRoutes() {
           <Route path="/admin/employees" element={<AdminEmployees />} />
           <Route path="/admin/questions" element={<AdminEvolutionQuestions />} />
           <Route path="/admin/employee/:id" element={<AdminEmployeeReport />} />
+          <Route path="/admin/lead-assignment" element={<AdminLeadAssignment />} />
           <Route path="/admin/*" element={<AdminDashboard />} />
+          
         </>
       )}
       {role === 'branch_manager' && (
