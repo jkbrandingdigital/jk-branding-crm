@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import PerformanceView from './PerformanceView'
+import DonutChart, { PIE_COLORS } from './DonutChart'
 import { istDate, addDays, weekStart, inr } from '../lib/format'
 import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../lib/targets'
 
@@ -78,8 +80,10 @@ export default function SalesPerformance({ lockedBranchId }: { lockedBranchId?: 
   const [branches, setBranches] = useState<Branch[]>([])
   const [people, setPeople] = useState<Person[]>([])
   const [branchId, setBranchId] = useState(lockedBranchId ?? 'all')
-  const [userId, setUserId] = useState('all')
-  
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const [userId, setUserId] = useState(searchParams.get('user') ?? 'all')
+
   // Branch managers are always locked to their own branch (even if no prop is passed)
   const [autoLock, setAutoLock] = useState<string | null>(null)
   const lock = lockedBranchId ?? autoLock
@@ -228,6 +232,23 @@ export default function SalesPerformance({ lockedBranchId }: { lockedBranchId?: 
   const showTargets = period === 'month'
   const rows = stats.filter((s) => branchId === 'all' || s.branchId === branchId)
 
+  // Revenue share this month: by branch (all branches) or by employee (one branch)
+  const shareByBranch = branchId === 'all'
+  const sumRevenue = (list: ReportRow[]) => list.reduce((s, r) => s + Number(r.revenue ?? 0), 0)
+  const shareData = shareByBranch
+    ? branches.map((b, i) => ({
+        name: b.name,
+        value: sumRevenue(monthReports.filter((r) => r.branch_id === b.id)),
+        color: PIE_COLORS[i % PIE_COLORS.length],
+      }))
+    : people
+        .filter((p) => p.branch_id === branchId)
+        .map((p, i) => ({
+          name: p.full_name || 'Unnamed',
+          value: sumRevenue(monthReports.filter((r) => r.user_id === p.id)),
+          color: PIE_COLORS[i % PIE_COLORS.length],
+        }))
+
   const selectCls =
     'rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500'
 
@@ -315,6 +336,16 @@ export default function SalesPerformance({ lockedBranchId }: { lockedBranchId?: 
         </section>
       )}
 
+      {/* Revenue share (pie) */}
+      {userId === 'all' && (
+        <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">
+          <h2 className="mb-4 text-sm font-medium text-gray-300">
+            {shareByBranch ? 'Revenue share by branch' : 'Revenue share by employee'} · {monthTitle(ym)}
+          </h2>
+          <DonutChart data={shareData} format={inr} centerLabel="Revenue" empty="No revenue yet this month." />
+        </section>
+      )}
+
       {/* Charts */}
       <div className="mt-8">
         <PerformanceView
@@ -332,7 +363,7 @@ export default function SalesPerformance({ lockedBranchId }: { lockedBranchId?: 
           <div>
             <h2 className="text-sm font-medium text-gray-300">Leaderboard</h2>
             <p className="mt-0.5 text-xs text-gray-500">
-              Click a name to see their charts. Forms are counted against {days} working days.
+              Click a name to open their full report. Forms are counted against {days} working days.
               {showTargets && ' Target zones use this month’s targets.'}
             </p>
           </div>
@@ -386,10 +417,8 @@ export default function SalesPerformance({ lockedBranchId }: { lockedBranchId?: 
                   return (
                     <tr
                       key={s.userId}
-                      onClick={() => {
-                        setUserId(s.userId)
-                        window.scrollTo({ top: 0, behavior: 'smooth' })
-                      }}
+                      onClick={() => navigate(`${lock ? '/manager' : '/admin'}/employee/${s.userId}`)}
+                      title="Open full report"
                       className={`cursor-pointer border-b border-[#1c1c1c] last:border-0 hover:bg-[#1a1a1a] ${
                         s.userId === userId ? 'bg-orange-500/5' : ''
                       }`}

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, type LucideIcon } from 'lucide-react'
+import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, Filter, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 import { istDate } from '../lib/format'
 
-export type SalesPage = 'evolution' | 'report' | 'performance'
+export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
 
 type NavItem = { label: string; hint?: string; page?: SalesPage; icon: LucideIcon }
 
@@ -18,6 +18,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: 'Daily Report', hint: 'Evening', page: 'report', icon: Moon },
     ],
   },
+  { title: 'Leads', items: [{ label: 'My Leads', page: 'leads', icon: Filter }] },
   { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp }] },
   { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
 ]

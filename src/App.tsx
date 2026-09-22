@@ -7,12 +7,15 @@ import AdminSalesTargets from './pages/admin/SalesTargets'
 import AdminReports from './pages/admin/Reports'
 import AdminEvolution from './pages/admin/Evolution'
 import AdminEmployees from './pages/admin/Employees'
+import AdminEvolutionQuestions from './pages/admin/EvolutionQuestions'
+import AdminEmployeeReport from './pages/admin/EmployeeReport'
 import SalesDashboard from './pages/sales/Dashboard'
 import HRDashboard from './pages/hr/Dashboard'
 import ManagerDashboard from './pages/manager/Dashboard'
 import ManagerPerformance from './pages/manager/Performance'
 import ManagerTargets from './pages/manager/Targets'
 import ManagerReports from './pages/manager/Reports'
+import ManagerEmployeeReport from './pages/manager/EmployeeReport'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
@@ -40,6 +43,8 @@ function AppRoutes() {
           <Route path="/admin/reports" element={<AdminReports />} />
           <Route path="/admin/evolution" element={<AdminEvolution />} />
           <Route path="/admin/employees" element={<AdminEmployees />} />
+          <Route path="/admin/questions" element={<AdminEvolutionQuestions />} />
+          <Route path="/admin/employee/:id" element={<AdminEmployeeReport />} />
           <Route path="/admin/*" element={<AdminDashboard />} />
         </>
       )}
@@ -48,6 +53,7 @@ function AppRoutes() {
           <Route path="/manager/performance" element={<ManagerPerformance />} />
           <Route path="/manager/targets" element={<ManagerTargets />} />
           <Route path="/manager/reports" element={<ManagerReports />} />
+          <Route path="/manager/employee/:id" element={<ManagerEmployeeReport />} />
           <Route path="/manager/*" element={<ManagerDashboard />} />
         </>
       )}

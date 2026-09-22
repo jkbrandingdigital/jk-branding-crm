@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, type LucideIcon,
+  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
@@ -14,6 +14,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Sales',
     items: [
+      { label: 'Leads', path: '/manager/leads', icon: Filter, ready: true },
       { label: 'Sales Performance', path: '/manager/performance', icon: TrendingUp, ready: true },
       { label: 'Team Targets', path: '/manager/targets', icon: Target, ready: true },
       { label: 'Daily Reports', path: '/manager/reports', icon: FileBarChart, ready: true },

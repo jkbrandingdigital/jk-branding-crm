@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -83,11 +84,13 @@ const tooltipStyle = {
 
 // ---------- Component ----------
 export default function AdminDashboard() {
+  const navigate = useNavigate()
   const [period, setPeriod] = useState<Period>('month')
   const [branchId, setBranchId] = useState<string>('all')
 
   const [branches, setBranches] = useState<Branch[]>([])
   const [profiles, setProfiles] = useState<Profile[]>([])
+  const [salesIds, setSalesIds] = useState<Set<string>>(new Set())
   const [reports, setReports] = useState<Report[]>([])
   const [deals, setDeals] = useState<Deal[]>([])
   const [presentToday, setPresentToday] = useState<string[]>([])
@@ -101,9 +104,10 @@ export default function AdminDashboard() {
   // Master data: branches + profiles (loaded once)
   useEffect(() => {
     ;(async () => {
-      const [b, p] = await Promise.all([
+      const [b, p, r] = await Promise.all([
         supabase.from('branches').select('id, name, city').eq('is_active', true).order('name'),
         supabase.from('profiles').select('id, full_name, branch_id, is_active'),
+        supabase.from('user_roles').select('user_id').eq('role', 'sales'),
       ])
       if (b.error || p.error) {
         setError((b.error ?? p.error)!.message)
@@ -111,6 +115,7 @@ export default function AdminDashboard() {
       }
       setBranches(b.data ?? [])
       setProfiles(p.data ?? [])
+      setSalesIds(new Set((r.data ?? []).map((x) => x.user_id)))
     })()
   }, [])
 
@@ -200,10 +205,17 @@ export default function AdminDashboard() {
     return branches.map((b) => ({ name: b.name, revenue: sums.get(b.id) ?? 0 }))
   }, [reports, branches])
 
+  // Every active sales employee (in the chosen branch), even with no reports yet
   const performers = useMemo(() => {
-    const m = new Map<string, { calls: number; hot: number; deals: number; revenue: number }>()
+    const m = new Map<string, { calls: number; hot: number; deals: number; revenue: number; reports: number }>()
+    for (const p of profiles) {
+      if (p.is_active === false || !salesIds.has(p.id)) continue
+      if (branchId !== 'all' && p.branch_id !== branchId) continue
+      m.set(p.id, { calls: 0, hot: 0, deals: 0, revenue: 0, reports: 0 })
+    }
     for (const r of reports) {
-      const cur = m.get(r.user_id) ?? { calls: 0, hot: 0, deals: 0, revenue: 0 }
+      const cur = m.get(r.user_id) ?? { calls: 0, hot: 0, deals: 0, revenue: 0, reports: 0 }
+      cur.reports += 1
       cur.calls += n(r.calls)
       cur.hot += n(r.hot_leads)
       cur.deals += n(r.deals_closed)
@@ -215,9 +227,8 @@ export default function AdminDashboard() {
         const p = profileMap.get(userId)
         return { userId, name: p?.full_name ?? 'Unknown', branch: branchMap.get(p?.branch_id ?? '')?.name ?? '—', ...s }
       })
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 8)
-  }, [reports, profileMap, branchMap])
+      .sort((a, b) => b.revenue - a.revenue || b.calls - a.calls)
+  }, [reports, profiles, salesIds, branchId, profileMap, branchMap])
 
   const funnel = [
     { label: 'Calls', value: totals.calls },
@@ -227,6 +238,7 @@ export default function AdminDashboard() {
     { label: 'Deals closed', value: totals.deals },
   ]
   const funnelMax = Math.max(totals.calls, 1)
+
 
   // ---------- UI ----------
   return (
@@ -405,31 +417,40 @@ export default function AdminDashboard() {
           </section>
 
           {/* Top performers */}
-          <Panel title="Top sales performers" className="mt-6">
+          <Panel title={`Sales team performance (${performers.length})`} className="mt-6">
             {performers.length === 0 ? (
-              <p className="py-8 text-center text-sm text-gray-500">No daily reports submitted in this period.</p>
+              <p className="py-8 text-center text-sm text-gray-500">No sales employees yet. Add them from Employees.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-sm">
+                <table className="w-full min-w-[640px] text-sm">
                   <thead>
                     <tr className="border-b border-[#242424] text-left text-gray-400">
+                      <th className="py-2 pr-3 font-normal">#</th>
                       <th className="py-2 pr-4 font-normal">Name</th>
                       <th className="py-2 pr-4 font-normal">Branch</th>
                       <th className="py-2 pr-4 text-right font-normal">Calls</th>
                       <th className="py-2 pr-4 text-right font-normal">Hot leads</th>
+                      <th className="py-2 pr-4 text-right font-normal">Reports</th>
                       <th className="py-2 pr-4 text-right font-normal">Deals</th>
                       <th className="py-2 text-right font-normal">Revenue</th>
                     </tr>
                   </thead>
                   <tbody>
                     {performers.map((p, i) => (
-                      <tr key={p.userId} className="border-b border-[#1c1c1c] last:border-0">
+                      <tr
+                        key={p.userId}
+                        onClick={() => navigate(`/admin/employee/${p.userId}`)}
+                        className="cursor-pointer border-b border-[#1c1c1c] last:border-0 hover:bg-[#1a1a1a]"
+                        title="Open full report"
+                      >
+                        <td className="py-2.5 pr-3 text-gray-500">{i + 1}</td>
                         <td className="py-2.5 pr-4">
-                          <span className={i === 0 ? 'font-semibold text-orange-400' : ''}>{p.name}</span>
+                          <span className={i === 0 && p.revenue > 0 ? 'font-semibold text-orange-400' : ''}>{p.name}</span>
                         </td>
                         <td className="py-2.5 pr-4 text-gray-400">{p.branch}</td>
                         <td className="py-2.5 pr-4 text-right tabular-nums">{p.calls.toLocaleString('en-IN')}</td>
                         <td className="py-2.5 pr-4 text-right tabular-nums">{p.hot}</td>
+                        <td className={`py-2.5 pr-4 text-right tabular-nums ${p.reports === 0 ? 'text-red-400' : ''}`}>{p.reports}</td>
                         <td className="py-2.5 pr-4 text-right tabular-nums">{p.deals}</td>
                         <td className="py-2.5 text-right tabular-nums">{formatINR(p.revenue)}</td>
                       </tr>

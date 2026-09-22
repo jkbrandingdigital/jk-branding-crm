@@ -26,17 +26,7 @@ const NUM_FIELDS: [string, string][] = [
   ['old_client_ref', 'Old client ref'],
 ]
 
-const QUESTIONS: [string, string][] = [
-  ['q1_yesterday_result', 'Result yesterday'],
-  ['q2_quality_calls', 'Quality calls yesterday'],
-  ['q3_positive_leads', 'Total positive leads / clients'],
-  ['q4_hot_leads', 'Hot leads / clients now'],
-  ['q5_today_target', 'Work target for today'],
-  ['q6_deal_close_chance', 'Deal most likely to close today'],
-  ['q7_sales_challenge', 'Current sales challenge'],
-  ['q8_management_help', 'Help needed from management'],
-  ['q9_commitment_result', 'Commitment for this evening'],
-]
+type Question = { id: string; question_en: string; is_active: boolean; purpose: string | null; legacy_column: string | null }
 
 const HELP_STATUS: { key: string; label: string; cls: string }[] = [
   { key: 'open', label: 'Open', cls: 'bg-orange-950/60 text-orange-400' },
@@ -46,11 +36,6 @@ const HELP_STATUS: { key: string; label: string; cls: string }[] = [
 
 const num = (v: unknown) => Number(v ?? 0)
 const txt = (v: unknown) => (v == null ? '' : String(v))
-// Q8 counts as a help request unless it's empty or "no / nothing"
-const asksHelp = (r: Row) => {
-  const a = txt(r.q8_management_help).trim()
-  return a !== '' && !/^(no|nothing|none|na|n\/a|nil|-|no help|ok)\.?$/i.test(a)
-}
 
 export default function ReportsReview({ initialTab = 'reports', lockedBranchId }: { initialTab?: Tab; lockedBranchId?: string }) {
   const today = istDate()
@@ -66,6 +51,7 @@ export default function ReportsReview({ initialTab = 'reports', lockedBranchId }
   const [reports, setReports] = useState<Row[]>([])
   const [evolutions, setEvolutions] = useState<Row[]>([])
   const [deals, setDeals] = useState<Deal[]>([])
+  const [questions, setQuestions] = useState<Question[]>([])
   const [open, setOpen] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, { note: string; status: string }>>({})
   const [loading, setLoading] = useState(true)
@@ -91,12 +77,14 @@ export default function ReportsReview({ initialTab = 'reports', lockedBranchId }
   // Branches + sales people
   useEffect(() => {
     ;(async () => {
-      const [b, p, r] = await Promise.all([
+      const [b, p, r, qs] = await Promise.all([
         supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
         supabase.from('profiles').select('id, full_name, branch_id, is_active').order('full_name'),
         supabase.from('user_roles').select('user_id').eq('role', 'sales'),
+        supabase.from('evolution_questions').select('id, question_en, is_active, purpose, legacy_column').order('sort_order'),
       ])
       setBranches(b.data ?? [])
+      setQuestions(qs.data ?? [])
       const ids = new Set((r.data ?? []).map((x) => x.user_id))
       setPeople((p.data ?? []).filter((x) => x.is_active !== false && ids.has(x.id)))
     })()
@@ -131,6 +119,22 @@ export default function ReportsReview({ initialTab = 'reports', lockedBranchId }
   const personMap = useMemo(() => new Map(people.map((p) => [p.id, p])), [people])
   const branchName = useMemo(() => new Map(branches.map((b) => [b.id, b.name])), [branches])
   const nameOf = (id: string) => personMap.get(id)?.full_name || 'Unnamed'
+
+  // Answers live in the answers JSON; older forms used q1..q9 columns
+  const answerOf = (r: Row, q: Question) => {
+    const json = (r.answers ?? {}) as Record<string, unknown>
+    return txt(json[q.id] ?? (q.legacy_column ? r[q.legacy_column] : ''))
+  }
+  const helpQ = questions.find((q) => q.purpose === 'help')
+  const commitQ = questions.find((q) => q.purpose === 'commitment')
+  // Help question counts unless empty or "no / nothing"
+  const asksHelp = (r: Row) => {
+    if (!helpQ) return false
+    const a = answerOf(r, helpQ).trim()
+    return a !== '' && !/^(no|nothing|none|na|n\/a|nil|-|no help|ok)\.?$/i.test(a)
+  }
+  // Show active questions, plus removed ones this form actually answered
+  const questionsFor = (r: Row) => questions.filter((q) => q.is_active || answerOf(r, q).trim() !== '')
   const visiblePeople = people.filter((p) => branchId === 'all' || p.branch_id === branchId)
 
   const byUser = (list: Row[]) => list.filter((r) => userId === 'all' || r.user_id === userId)
@@ -270,7 +274,7 @@ export default function ReportsReview({ initialTab = 'reports', lockedBranchId }
                           {branchName.get(r.branch_id ?? '') ?? '—'}
                           {tab === 'reports'
                             ? ` · ${num(r.calls)} calls · ${num(r.positive_leads)} positive · ${num(r.hot_leads)} hot`
-                            : ` · Commitment: ${txt(r.q9_commitment_result) || '—'}`}
+                            : ` · Commitment: ${(commitQ && answerOf(r, commitQ)) || '—'}`}
                         </p>
                       </div>
 
@@ -336,12 +340,13 @@ export default function ReportsReview({ initialTab = 'reports', lockedBranchId }
                           </>
                         ) : (
                           <dl className="grid gap-x-6 gap-y-3 md:grid-cols-2">
-                            {QUESTIONS.map(([k, label], i) => (
-                              <div key={k} className={k === 'q8_management_help' && help ? 'rounded-lg border border-orange-900/60 bg-orange-950/20 p-3' : ''}>
+                            {questionsFor(r).map((q, i) => (
+                              <div key={q.id} className={q.purpose === 'help' && help ? 'rounded-lg border border-orange-900/60 bg-orange-950/20 p-3' : ''}>
                                 <dt className="text-xs text-gray-500">
-                                  {i + 1}. {label}
+                                  {i + 1}. {q.question_en}
+                                  {!q.is_active && <span className="ml-1 text-gray-600">(removed)</span>}
                                 </dt>
-                                <dd className="mt-0.5 whitespace-pre-wrap text-sm">{txt(r[k]) || '—'}</dd>
+                                <dd className="mt-0.5 whitespace-pre-wrap text-sm">{answerOf(r, q) || '—'}</dd>
                               </div>
                             ))}
                             <div className="rounded-lg bg-[#1a1a1a] p-3">

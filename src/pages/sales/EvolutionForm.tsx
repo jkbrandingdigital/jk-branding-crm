@@ -6,23 +6,14 @@ import { istDate, prettyDate, inr, notifySaved } from '../../lib/format'
 
 const DEFAULT_REVIEWER = 'Saral Sakariya'
 
-const QUESTIONS = [
-  { key: 'q1_yesterday_result', en: 'What result did you get yesterday?', gu: 'ગઈકાલે શું Result આવ્યું?' },
-  { key: 'q2_quality_calls', en: 'How many quality calls did you make yesterday?', gu: 'ગઈકાલે કેટલા Quality Calls થયા?' },
-  { key: 'q3_positive_leads', en: 'How many positive leads / clients do you have in total?', gu: 'તમારી પાસે ટોટલ કેટલા Positive Leads/Clients છે?' },
-  { key: 'q4_hot_leads', en: 'How many hot leads / clients do you have right now?', gu: 'અત્યારે તમારી પાસે Hot Leads/Clients કેટલા છે?' },
-  { key: 'q5_today_target', en: 'What is your work target for today? (new calls, data found, etc.)', gu: 'આજના દિવસ તમારો કામ કરવાનો ટાર્ગેટ શું છે?' },
-  { key: 'q6_deal_close_chance', en: 'Which deal has the highest chance of closing today?', gu: 'આજના દિવસમાં કઈ Deal Close થવાની સૌથી વધુ શક્યતા છે?' },
-  { key: 'q7_sales_challenge', en: 'What is one challenge you are facing in sales right now?', gu: 'હાલ તમને Sales કરવામાં આવતી કોઈ એક challenge શું છે?' },
-  { key: 'q8_management_help', en: 'What help do you need from management?', gu: 'Management / મારી કઈ Help જોઈએ છે?' },
-  { key: 'q9_commitment_result', en: 'What result will you commit to by this evening? (in revenue)', gu: 'આજ સાંજ સુધીમાં ચોક્કસ શું Commitment Result આપશો? (revenue માં)' },
-] as const
-
-type QKey = (typeof QUESTIONS)[number]['key']
-type Answers = Record<QKey, string>
+type Question = {
+  id: string
+  question_en: string
+  question_gu: string | null
+  is_required: boolean
+  legacy_column: string | null
+}
 type LastReport = { work_date: string; calls: number | null; quality_leads: number | null; positive_leads: number | null; hot_leads: number | null; revenue: number | null; deals_closed: number | null }
-
-const emptyAnswers = () => Object.fromEntries(QUESTIONS.map((q) => [q.key, ''])) as Answers
 
 export default function EvolutionForm() {
   const today = istDate()
@@ -32,9 +23,12 @@ export default function EvolutionForm() {
   const [name, setName] = useState('')
   const [branchName, setBranchName] = useState('')
 
+  const [questions, setQuestions] = useState<Question[]>([])
   const [existingId, setExistingId] = useState<string | null>(null)
-  const [answers, setAnswers] = useState<Answers>(emptyAnswers)
+  const [oldAnswers, setOldAnswers] = useState<Record<string, string>>({})
+  const [answers, setAnswers] = useState<Record<string, string>>({})
   const [reviewer, setReviewer] = useState(DEFAULT_REVIEWER)
+  const [reviewNote, setReviewNote] = useState('')
   const [last, setLast] = useState<LastReport | null>(null)
 
   const [loading, setLoading] = useState(true)
@@ -59,7 +53,12 @@ export default function EvolutionForm() {
         setName(user.email ?? '')
       }
 
-      const [evo, rep] = await Promise.all([
+      const [qs, evo, rep] = await Promise.all([
+        supabase
+          .from('evolution_questions')
+          .select('id, question_en, question_gu, is_required, legacy_column')
+          .eq('is_active', true)
+          .order('sort_order'),
         supabase.from('daily_evolution').select('*').eq('user_id', user.id).eq('evolution_date', today).limit(1),
         supabase
           .from('daily_reports')
@@ -70,11 +69,23 @@ export default function EvolutionForm() {
           .limit(1),
       ])
 
+      if (qs.error) setMessage({ type: 'error', text: qs.error.message })
+      const list: Question[] = qs.data ?? []
+      setQuestions(list)
+
       const row = evo.data?.[0]
       if (row) {
         setExistingId(row.id)
         setReviewer(row.reviewer_name ?? DEFAULT_REVIEWER)
-        setAnswers(Object.fromEntries(QUESTIONS.map((q) => [q.key, row[q.key] ?? ''])) as Answers)
+        setReviewNote(row.review_note ?? '')
+        const saved: Record<string, string> = row.answers ?? {}
+        setOldAnswers(saved)
+        // New answers JSON first, old q1..q9 columns as fallback
+        setAnswers(
+          Object.fromEntries(list.map((q) => [q.id, saved[q.id] ?? (q.legacy_column ? row[q.legacy_column] ?? '' : '')])),
+        )
+      } else {
+        setAnswers(Object.fromEntries(list.map((q) => [q.id, ''])))
       }
       setLast(rep.data?.[0] ?? null)
       setLoading(false)
@@ -85,21 +96,25 @@ export default function EvolutionForm() {
     if (!userId) return
     setMessage(null)
 
-    const missing = QUESTIONS.findIndex((q) => !answers[q.key].trim())
+    const missing = questions.findIndex((q) => q.is_required && !(answers[q.id] ?? '').trim())
     if (missing !== -1) {
       setMessage({ type: 'error', text: `Answer question ${missing + 1} before submitting.` })
-      document.getElementById(QUESTIONS[missing].key)?.focus()
+      document.getElementById(`q-${questions[missing].id}`)?.focus()
       return
     }
 
     setSaving(true)
+    const cleaned = Object.fromEntries(questions.map((q) => [q.id, (answers[q.id] ?? '').trim()]))
     const payload: Record<string, unknown> = {
       user_id: userId,
       branch_id: branchId,
       evolution_date: today,
       reviewer_name: reviewer.trim() || null,
+      // Keep answers to removed questions, overwrite the rest
+      answers: { ...oldAnswers, ...cleaned },
     }
-    for (const q of QUESTIONS) payload[q.key] = answers[q.key].trim()
+    // Also fill the old columns so older screens keep working
+    for (const q of questions) if (q.legacy_column) payload[q.legacy_column] = cleaned[q.id] || null
 
     if (existingId) {
       payload.updated_at = new Date().toISOString()
@@ -120,6 +135,7 @@ export default function EvolutionForm() {
       setExistingId(data.id)
     }
 
+    setOldAnswers({ ...oldAnswers, ...cleaned })
     setSaving(false)
     setMessage({ type: 'success', text: existingId ? 'Evolution form updated.' : 'Evolution form submitted. Have a great day!' })
     notifySaved()
@@ -157,6 +173,13 @@ export default function EvolutionForm() {
         </div>
       </div>
 
+      {reviewNote && (
+        <div className="mt-4 rounded-lg border border-orange-900/60 bg-orange-950/20 px-4 py-3 text-sm">
+          <p className="text-orange-400">Note from your reviewer</p>
+          <p className="mt-1 whitespace-pre-wrap text-gray-300">{reviewNote}</p>
+        </div>
+      )}
+
       {last && (
         <div className="mt-4 rounded-2xl border border-[#242424] bg-[#151515] px-5 py-4 text-sm">
           <p className="text-gray-400">From your last daily report ({prettyDate(last.work_date)})</p>
@@ -183,29 +206,38 @@ export default function EvolutionForm() {
       )}
 
       {/* Questions */}
-      <ol className="mt-6 space-y-3">
-        {QUESTIONS.map((q, i) => (
-          <li key={q.key} className="grid gap-3 rounded-2xl border border-[#242424] bg-[#151515] p-5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-            <label htmlFor={q.key} className="flex gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-sm font-semibold text-orange-400">
-                {i + 1}
-              </span>
-              <span>
-                <span className="block text-sm font-medium">{q.en}</span>
-                <span className="mt-0.5 block text-xs text-gray-500">{q.gu}</span>
-              </span>
-            </label>
-            <textarea
-              id={q.key}
-              rows={2}
-              value={answers[q.key]}
-              onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.value }))}
-              placeholder="Your answer"
-              className={`${inputCls} resize-y`}
-            />
-          </li>
-        ))}
-      </ol>
+      {!loading && questions.length === 0 ? (
+        <p className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-8 text-center text-sm text-gray-500">
+          No questions set up yet. Ask the Super Admin to add them.
+        </p>
+      ) : (
+        <ol className="mt-6 space-y-3">
+          {questions.map((q, i) => (
+            <li key={q.id} className="grid gap-3 rounded-2xl border border-[#242424] bg-[#151515] p-5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+              <label htmlFor={`q-${q.id}`} className="flex gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-sm font-semibold text-orange-400">
+                  {i + 1}
+                </span>
+                <span>
+                  <span className="block text-sm font-medium">
+                    {q.question_en}
+                    {!q.is_required && <span className="ml-1.5 text-xs font-normal text-gray-500">(optional)</span>}
+                  </span>
+                  {q.question_gu && <span className="mt-0.5 block text-xs text-gray-500">{q.question_gu}</span>}
+                </span>
+              </label>
+              <textarea
+                id={`q-${q.id}`}
+                rows={2}
+                value={answers[q.id] ?? ''}
+                onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                placeholder="Your answer"
+                className={`${inputCls} resize-y`}
+              />
+            </li>
+          ))}
+        </ol>
+      )}
 
       <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-[#1f1f1f] bg-[#0f0f0f]/95 py-4 backdrop-blur">
         <p className="flex items-center gap-2 text-xs text-gray-500">
@@ -213,7 +245,7 @@ export default function EvolutionForm() {
         </p>
         <button
           onClick={handleSave}
-          disabled={saving || loading}
+          disabled={saving || loading || questions.length === 0}
           className="rounded-lg bg-orange-500 px-6 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
         >
           {saving ? 'Saving…' : existingId ? 'Update form' : 'Submit form'}
