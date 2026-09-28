@@ -49,7 +49,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: 'Branches', path: '/admin/branches', icon: Building2, ready: false },
       { label: 'Announcements', path: '/admin/announcements', icon: Megaphone, ready: false },
-      { label: 'Settings', path: '/admin/settings', icon: Settings, ready: false },
+      { label: 'General Settings', path: '/admin/settings', icon: Settings, ready: true },
     ],
   },
 ]
