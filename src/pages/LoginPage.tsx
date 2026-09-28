@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Building2 } from 'lucide-react'
 import { signIn } from '../lib/auth'
 
 export default function LoginPage() {
@@ -24,12 +23,12 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo */}
+                {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="bg-orange-500 p-4 rounded-2xl mb-4">
-            <Building2 className="w-10 h-10 text-white" />
-          </div>
-          <h1 className="text-white text-3xl font-bold">JK Branding CRM</h1>
+          <img src="/jklogoicon.png" alt="JK Branding" className="h-14 w-auto" />
+          <h1 className="text-white text-3xl font-bold mt-3">JK Branding CRM</h1>
+          <p className="text-orange-400 text-xs font-medium mt-1">Vision 2036 : Agency to Unicorn</p>
+          <p className="text-orange-400 text-xs font-medium mt-1">THINK BIG | BUILD SYSTEMS | CREATE IMPACT | SCALE GLOBLLY</p>
           <p className="text-gray-400 mt-2">Sign in to continue to your dashboard</p>
         </div>
 
