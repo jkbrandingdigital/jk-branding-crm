@@ -12,6 +12,7 @@ type Member = {
   name: string
   target: number
   achieved: number
+  todayRevenue: number
   calls: number
   deals: number
   evolutionToday: boolean
@@ -25,6 +26,8 @@ export default function ManagerDashboard() {
   const [branchName, setBranchName] = useState('')
   const [branchTarget, setBranchTarget] = useState<number | null>(null)
   const [members, setMembers] = useState<Member[]>([])
+  const [todayCalls, setTodayCalls] = useState(0)
+  const [todayDeals, setTodayDeals] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -73,6 +76,9 @@ export default function ManagerDashboard() {
       const salesIds = new Set((roles.data ?? []).map((r) => r.user_id))
       const targets = new Map((et.data ?? []).map((t) => [t.user_id, Number(t.target_amount)]))
       const evoToday = new Set((evo.data ?? []).map((e) => e.user_id))
+      const todayRows = (reports.data ?? []).filter((r) => r.work_date === today)
+      setTodayCalls(todayRows.reduce((s, r) => s + Number(r.calls ?? 0), 0))
+      setTodayDeals(todayRows.reduce((s, r) => s + Number(r.deals_closed ?? 0), 0))
 
       const list: Member[] = (p.data ?? [])
         .filter((x) => x.is_active !== false && salesIds.has(x.id))
@@ -83,6 +89,7 @@ export default function ManagerDashboard() {
             name: x.full_name || 'Unnamed',
             target: targets.get(x.id) ?? 0,
             achieved: rs.reduce((s, r) => s + Number(r.revenue ?? 0), 0),
+            todayRevenue: rs.filter((r) => r.work_date === today).reduce((s, r) => s + Number(r.revenue ?? 0), 0),
             calls: rs.reduce((s, r) => s + Number(r.calls ?? 0), 0),
             deals: rs.reduce((s, r) => s + Number(r.deals_closed ?? 0), 0),
             evolutionToday: evoToday.has(x.id),
@@ -98,6 +105,7 @@ export default function ManagerDashboard() {
 
   const achieved = members.reduce((s, m) => s + m.achieved, 0)
   const allocated = members.reduce((s, m) => s + m.target, 0)
+  const todayRevenue = members.reduce((s, m) => s + m.todayRevenue, 0)
   const pct = pctOf(achieved, branchTarget ?? 0)
   const zone = zoneOf(pct)
 
@@ -105,6 +113,8 @@ export default function ManagerDashboard() {
   for (let d = today; d <= monthLast(ym); d = addDays(d, 1)) if (new Date(d + 'T00:00:00Z').getUTCDay() !== 0) daysLeft++
   const remaining = Math.max((branchTarget ?? 0) - achieved, 0)
   const perDay = daysLeft > 0 ? remaining / daysLeft : 0
+  const dayPct = pctOf(todayRevenue, perDay)
+  const dayZone = zoneOf(dayPct)
 
   const evoCount = members.filter((m) => m.evolutionToday).length
   const reportCount = members.filter((m) => m.reportToday).length
@@ -164,19 +174,41 @@ export default function ManagerDashboard() {
           </section>
 
           {/* Today */}
-          <section className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#242424] bg-[#242424]">
-            <div className="bg-[#151515] px-5 py-4">
-              <p className="text-xs text-gray-400">Evolution forms today</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums">
-                {evoCount} / {members.length}
-              </p>
+          <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <h2 className="text-sm font-medium text-gray-300">Today</h2>
+              {branchTarget != null && perDay > 0 && (
+                <span className={`rounded-full px-2.5 py-0.5 text-xs ${dayZone.chip}`}>
+                  {dayPct.toFixed(0)}% of today’s {inr(perDay)}
+                </span>
+              )}
             </div>
-            <div className="bg-[#151515] px-5 py-4">
-              <p className="text-xs text-gray-400">Daily reports today</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums">
-                {reportCount} / {members.length}
-              </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-gray-400">Revenue today</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-orange-500">{inr(todayRevenue)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Calls today</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums">{todayCalls}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Deals today</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums">{todayDeals}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Reports · Evolution</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums">
+                  {reportCount} · {evoCount}
+                  <span className="text-base font-normal text-gray-500"> / {members.length}</span>
+                </p>
+              </div>
             </div>
+            {branchTarget != null && perDay > 0 && (
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#222]">
+                <div className={`h-full rounded-full ${dayZone.bar}`} style={{ width: `${Math.min(dayPct, 100)}%` }} />
+              </div>
+            )}
           </section>
 
           {/* Team */}
@@ -195,6 +227,7 @@ export default function ManagerDashboard() {
                         <p className="font-medium">{m.name}</p>
                         <p className="text-xs text-gray-500">
                           {m.calls} calls · {m.deals} deals
+                          {m.todayRevenue > 0 && <span className="text-orange-400"> · {inr(m.todayRevenue)} today</span>}
                         </p>
                       </div>
                       <div>

@@ -222,6 +222,19 @@ export default function StaffManager() {
     setNewPassword('')
   }
 
+    async function changeEmail(p: Profile) {
+    const email = form.email.trim().toLowerCase()
+    const current = (auth.get(p.id)?.email ?? '').toLowerCase()
+    if (email === current) return setFormError('This is already the login email.')
+    if (!window.confirm(`Change the login email to ${email}? ${p.id === myId ? 'You will have to log in with the new email.' : `${p.full_name} must use the new email from now on.`}`)) return
+    setBusy(true)
+    const res = await staffApi({ action: 'change_email', user_id: p.id, email })
+    setBusy(false)
+    if (res.error) return setFormError(res.error)
+    setMessage({ type: 'success', text: `Login email changed to ${email}.` })
+    load()
+  }
+
   const inputCls =
     'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none disabled:opacity-60'
   const selectCls =
@@ -378,13 +391,29 @@ export default function StaffManager() {
                 <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} className={inputCls} />
               </Field>
               <Field label="Email (used to log in) *">
-                <input
-                  type="email"
-                  value={form.email}
-                  disabled={editing !== 'new'}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className={inputCls}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    className={inputCls}
+                  />
+                  {editingProfile && form.email.trim().toLowerCase() !== (auth.get(editingProfile.id)?.email ?? '').toLowerCase() && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => changeEmail(editingProfile)}
+                      className="whitespace-nowrap rounded-lg border border-orange-500/60 px-3 text-sm text-orange-400 hover:bg-orange-500/10 disabled:opacity-50"
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+                {editingProfile && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Changing this changes the login email straight away. "Save changes" does not touch it.
+                  </p>
+                )}
               </Field>
               {editing === 'new' && (
                 <Field label="Password *">
