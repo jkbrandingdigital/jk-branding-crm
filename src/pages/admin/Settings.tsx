@@ -1,11 +1,13 @@
 import { useSearchParams } from 'react-router-dom'
-import { Plug } from 'lucide-react'
+import { Plug, Tag } from 'lucide-react'
 import AdminLayout from '../../components/AdminLayout'
 import IntegrationsTab from '../../components/settings/IntegrationsTab'
+import LeadLabels from '../../components/leads/LeadLabels'
 
 // Add more tabs here later (General, Notifications…)
 const TABS = [
   { key: 'integrations', label: 'Integrations', icon: Plug },
+  { key: 'labels', label: 'Lead Labels', icon: Tag },
 ]
 
 export default function AdminSettings() {
@@ -47,6 +49,7 @@ export default function AdminSettings() {
 
         <div className="mt-6">
           {tab === 'integrations' && <IntegrationsTab />}
+          {tab === 'labels' && <LeadLabels />}
         </div>
       </div>
     </AdminLayout>

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw } from 'lucide-react'
+import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, Copy, Trash2, UserCog } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
 import LeadDrawer from './LeadDrawer'
+import { LABEL_CLS, type Label } from './labels'
 import { SOURCES, sourceOf, fromInputDT, fmtDT, isOverdue, waLink, loadLeads, loadStaff, type Lead, type Stage, type Staff } from './leadUtils'
+
+type LeadL = Lead & { label_id?: string | null }
 
 type NewLead = {
   name: string
@@ -27,7 +30,8 @@ export default function LeadsBoard() {
   const [myId, setMyId] = useState<string | null>(null)
   const [stages, setStages] = useState<Stage[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
-  const [leads, setLeads] = useState<Lead[]>([])
+  const [leads, setLeads] = useState<LeadL[]>([])
+  const [labels, setLabels] = useState<Label[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -35,9 +39,11 @@ export default function LeadsBoard() {
   const [q, setQ] = useState('')
   const [sourceF, setSourceF] = useState('all')
   const [ownerF, setOwnerF] = useState('all')
+  const [labelF, setLabelF] = useState('all')
   const [overdueOnly, setOverdueOnly] = useState(false)
 
   const [openId, setOpenId] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'assign' } | null>(null)
   const [adding, setAdding] = useState(false)
   const [nl, setNl] = useState<NewLead>(emptyNew)
   const [dup, setDup] = useState<{ lead_no: number; name: string; assigned_name: string | null }[] | null>(null)
@@ -48,16 +54,20 @@ export default function LeadsBoard() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [{ data: u }, st, sf, ls] = await Promise.all([
+      const [{ data: u }, st, sf, ls, lb, lm] = await Promise.all([
         supabase.auth.getUser(),
         supabase.from('lead_stages').select('*').eq('is_active', true).order('sort_order'),
         loadStaff(),
         loadLeads(),
+        supabase.from('lead_labels').select('*').eq('is_active', true).order('sort_order'),
+        supabase.from('leads').select('id, label_id'),
       ])
+      const labelOf = new Map<string, string | null>(((lm.data ?? []) as { id: string; label_id: string | null }[]).map((r) => [r.id, r.label_id]))
       setMyId(u.user?.id ?? null)
       setStages((st.data ?? []) as Stage[])
       setStaff(sf)
-      setLeads(ls)
+      setLeads((ls as LeadL[]).map((l) => ({ ...l, label_id: labelOf.get(l.id) ?? null })))
+      setLabels((lb.data ?? []) as Label[])
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -69,20 +79,30 @@ export default function LeadsBoard() {
     load()
   }, [load])
 
+  // Close any open card menu when clicking elsewhere
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [menu])
+
   const nameOf = (id: string | null) => (id ? staff.find((s) => s.id === id)?.full_name ?? '—' : 'Unassigned')
   const stageOf = (id: string | null) => stages.find((s) => s.id === id)
+  const labelOf = (id: string | null | undefined) => labels.find((x) => x.id === id)
 
   const filtered = useMemo(() => {
     const text = q.trim().toLowerCase()
     return leads.filter((l) => {
       if (sourceF !== 'all' && l.source !== sourceF) return false
       if (ownerF !== 'all' && (ownerF === 'none' ? l.assigned_to : l.assigned_to !== ownerF)) return false
+      if (labelF !== 'all' && (labelF === 'none' ? l.label_id : l.label_id !== labelF)) return false
       if (overdueOnly && !isOverdue(l, stageOf(l.stage_id))) return false
       if (!text) return true
       return `${l.lead_no} ${l.name} ${l.phone ?? ''} ${l.company ?? ''} ${l.city ?? ''} ${l.campaign_name ?? ''}`.toLowerCase().includes(text)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leads, q, sourceF, ownerF, overdueOnly, stages])
+  }, [leads, q, sourceF, ownerF, labelF, overdueOnly, stages])
 
   const owners = useMemo(() => {
     const ids = new Set(leads.map((l) => l.assigned_to).filter(Boolean) as string[])
@@ -100,6 +120,45 @@ export default function LeadsBoard() {
       setError(e.message)
       load()
     }
+  }
+
+  // ---------- Quick actions ----------
+  async function setLabel(leadId: string, labelId: string | null) {
+    setMenu(null)
+    setLeads((all) => all.map((l) => (l.id === leadId ? { ...l, label_id: labelId } : l)))
+    const { error: e } = await supabase.from('leads').update({ label_id: labelId }).eq('id', leadId)
+    if (e) { setError(e.message); load() }
+  }
+
+  async function transfer(leadId: string, userId: string | null) {
+    setMenu(null)
+    const { error: e } = await supabase.from('leads').update({ assigned_to: userId }).eq('id', leadId)
+    if (e) return setError(e.message)
+    load()
+  }
+
+  async function copyLead(l: LeadL) {
+    const { error: e } = await supabase.from('leads').insert({
+      name: `${l.name} (copy)`,
+      phone: l.phone,
+      email: l.email,
+      company: l.company,
+      city: l.city,
+      requirement: l.requirement,
+      source: l.source,
+      estimated_amount: Number(l.estimated_amount) || 0,
+      assigned_to: l.assigned_to,
+      label_id: l.label_id ?? null,
+    })
+    if (e) return setError(e.message)
+    load()
+  }
+
+  async function removeLead(l: LeadL) {
+    if (!window.confirm(`Delete lead #${l.lead_no} ${l.name}? It will be hidden from everyone.`)) return
+    const { error: e } = await supabase.from('leads').update({ deleted_at: new Date().toISOString() }).eq('id', l.id)
+    if (e) return setError(e.message)
+    load()
   }
 
   // ---------- Add lead ----------
@@ -146,10 +205,20 @@ export default function LeadsBoard() {
     'rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500'
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager'))
 
+  const LabelChip = ({ id }: { id: string | null | undefined }) => {
+    const lb = labelOf(id)
+    if (!lb) return null
+    return (
+      <span className={`rounded-full border px-2 py-0.5 text-[10px] ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`}>{lb.name}</span>
+    )
+  }
+
   // ---------- Card ----------
-  const Card = ({ l }: { l: Lead }) => {
+  const Card = ({ l }: { l: LeadL }) => {
     const st = stageOf(l.stage_id)
     const overdue = isOverdue(l, st)
+    const stop = (e: React.MouseEvent) => e.stopPropagation()
+    const iconBtn = 'rounded p-1.5 text-gray-500 transition-colors hover:bg-[#1f1f1f] hover:text-white'
     return (
       <div
         draggable={can('lead_edit')}
@@ -165,19 +234,10 @@ export default function LeadsBoard() {
         {l.company && <p className="mt-0.5 truncate text-xs text-gray-400">{l.company}</p>}
         <div className="mt-2 flex items-center gap-2">
           <span className="truncate text-xs text-gray-300">{l.phone}</span>
-          {l.phone && (
-            <a href={`tel:${l.phone}`} onClick={(e) => e.stopPropagation()} className="text-gray-500 hover:text-white" title="Call">
-              <Phone size={13} />
-            </a>
-          )}
-          {waLink(l.phone) && (
-            <a href={waLink(l.phone)!} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-green-500 hover:text-green-400" title="WhatsApp">
-              <MessageCircle size={13} />
-            </a>
-          )}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className={`rounded-full px-2 py-0.5 text-[10px] ${sourceOf(l.source).cls}`}>{sourceOf(l.source).label}</span>
+          <LabelChip id={l.label_id} />
           {overdue && <span className="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-semibold text-white">OVERDUE</span>}
         </div>
         <div className="mt-2.5 space-y-0.5 text-[11px] text-gray-500">
@@ -191,6 +251,69 @@ export default function LeadsBoard() {
             ))}
           </span>
           <span className="text-xs tabular-nums text-gray-300">{inr(Number(l.estimated_amount) || 0)}</span>
+        </div>
+
+        {/* Quick actions */}
+        <div className="relative mt-1.5 flex items-center gap-0.5 border-t border-[#222] pt-1.5" onClick={stop}>
+          {l.phone && (
+            <a href={`tel:${l.phone}`} className={iconBtn} title="Call">
+              <Phone size={14} />
+            </a>
+          )}
+          {waLink(l.phone) && (
+            <a href={waLink(l.phone)!} target="_blank" rel="noreferrer" className={`${iconBtn} text-green-500 hover:text-green-400`} title="WhatsApp">
+              <MessageCircle size={14} />
+            </a>
+          )}
+          {can('lead_edit') && labels.length > 0 && (
+            <button onClick={() => setMenu(menu?.id === l.id && menu.kind === 'label' ? null : { id: l.id, kind: 'label' })} className={iconBtn} title="Label">
+              <Tag size={14} />
+            </button>
+          )}
+          {can('lead_assign') && (
+            <button onClick={() => setMenu(menu?.id === l.id && menu.kind === 'assign' ? null : { id: l.id, kind: 'assign' })} className={iconBtn} title="Transfer">
+              <UserCog size={14} />
+            </button>
+          )}
+          {can('lead_create') && (
+            <button onClick={() => copyLead(l)} className={iconBtn} title="Copy lead">
+              <Copy size={14} />
+            </button>
+          )}
+          {can('lead_delete') && (
+            <button onClick={() => removeLead(l)} className={`${iconBtn} hover:text-red-400`} title="Delete">
+              <Trash2 size={14} />
+            </button>
+          )}
+
+          {menu?.id === l.id && (
+            <div className="absolute bottom-9 left-0 z-20 max-h-56 w-52 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
+              {menu.kind === 'label' ? (
+                <>
+                  <button onClick={() => setLabel(l.id, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                    No label
+                  </button>
+                  {labels.map((lb) => (
+                    <button key={lb.id} onClick={() => setLabel(l.id, lb.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
+                      <span className={`h-2 w-2 rounded-full border ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`} />
+                      {lb.name}
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <button onClick={() => transfer(l.id, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                    Unassigned
+                  </button>
+                  {assignable.map((s) => (
+                    <button key={s.id} onClick={() => transfer(l.id, s.id)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
+                      {s.full_name}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     )
@@ -239,6 +362,15 @@ export default function LeadsBoard() {
             <option key={s.key} value={s.key}>{s.label}</option>
           ))}
         </select>
+        {labels.length > 0 && (
+          <select value={labelF} onChange={(e) => setLabelF(e.target.value)} className={selectCls} aria-label="Label">
+            <option value="all">All labels</option>
+            <option value="none">No label</option>
+            {labels.map((lb) => (
+              <option key={lb.id} value={lb.id}>{lb.name}</option>
+            ))}
+          </select>
+        )}
         {owners.length > 1 && (
           <select value={ownerF} onChange={(e) => setOwnerF(e.target.value)} className={selectCls} aria-label="Assigned to">
             <option value="all">Everyone</option>
@@ -293,13 +425,14 @@ export default function LeadsBoard() {
         </div>
       ) : (
         <section className="mt-5 overflow-x-auto rounded-2xl border border-[#242424] bg-[#151515]">
-          <table className="w-full min-w-[980px] text-sm">
+          <table className="w-full min-w-[1060px] text-sm">
             <thead>
               <tr className="border-b border-[#242424] text-left text-gray-400">
                 <th className="px-4 py-3 font-normal">#</th>
                 <th className="py-3 pr-4 font-normal">Name</th>
                 <th className="py-3 pr-4 font-normal">Phone</th>
                 <th className="py-3 pr-4 font-normal">Source</th>
+                <th className="py-3 pr-4 font-normal">Label</th>
                 <th className="py-3 pr-4 font-normal">Stage</th>
                 <th className="py-3 pr-4 font-normal">Assigned to</th>
                 <th className="py-3 pr-4 font-normal">Follow-up</th>
@@ -310,7 +443,7 @@ export default function LeadsBoard() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-10 text-center text-gray-500">No leads match these filters.</td>
+                  <td colSpan={10} className="py-10 text-center text-gray-500">No leads match these filters.</td>
                 </tr>
               ) : (
                 filtered.map((l) => {
@@ -327,6 +460,7 @@ export default function LeadsBoard() {
                       <td className="py-2.5 pr-4">
                         <span className={`rounded-full px-2 py-0.5 text-[11px] ${sourceOf(l.source).cls}`}>{sourceOf(l.source).label}</span>
                       </td>
+                      <td className="py-2.5 pr-4"><LabelChip id={l.label_id} /></td>
                       <td className="py-2.5 pr-4">
                         <span className="rounded-full px-2 py-0.5 text-[11px] text-white" style={{ background: st?.color ?? '#333' }}>{st?.name ?? '—'}</span>
                       </td>
@@ -345,7 +479,7 @@ export default function LeadsBoard() {
 
       {/* Lead detail */}
       {openId && (
-        <LeadDrawer leadId={openId} stages={stages} staff={staff} can={can} myId={myId} onClose={() => setOpenId(null)} onChanged={load} />
+        <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={() => setOpenId(null)} onChanged={load} />
       )}
 
       {/* Add lead */}

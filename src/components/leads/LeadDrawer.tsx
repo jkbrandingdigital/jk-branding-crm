@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { X, Phone, MessageCircle, Star, Trash2, Send, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { inr } from '../../lib/format'
+import { LABEL_CLS, type Label } from './labels'
 import { SOURCES, sourceOf, toInputDT, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
+type LeadL = Lead & { label_id?: string | null; meta_fields?: Record<string, string> | null }
 
 const ACT_LABEL: Record<string, string> = {
   note: 'Note',
@@ -15,18 +17,19 @@ const ACT_LABEL: Record<string, string> = {
 }
 
 export default function LeadDrawer({
-  leadId, stages, staff, can, myId, onClose, onChanged,
+  leadId, stages, staff, labels, can, myId, onClose, onChanged,
 }: {
   leadId: string
   stages: Stage[]
   staff: Staff[]
+  labels: Label[]
   can: (k: string) => boolean
   myId: string | null
   onClose: () => void
   onChanged: () => void
 }) {
-  const [lead, setLead] = useState<Lead | null>(null)
-  const [form, setForm] = useState<Lead | null>(null)
+  const [lead, setLead] = useState<LeadL | null>(null)
+  const [form, setForm] = useState<LeadL | null>(null)
   const [acts, setActs] = useState<Activity[]>([])
   const [actType, setActType] = useState('note')
   const [actText, setActText] = useState('')
@@ -44,8 +47,8 @@ export default function LeadDrawer({
       supabase.from('lead_activities').select('*').eq('lead_id', leadId).order('created_at', { ascending: false }),
     ])
     if (l.error || !l.data) return setMsg({ type: 'error', text: l.error?.message ?? 'Lead not found.' })
-    setLead(l.data as Lead)
-    setForm(l.data as Lead)
+    setLead(l.data as LeadL)
+    setForm(l.data as LeadL)
     setActs((a.data ?? []) as Activity[])
   }, [leadId])
 
@@ -115,6 +118,8 @@ export default function LeadDrawer({
     'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none disabled:opacity-60'
   const stage = stages.find((s) => s.id === lead?.stage_id)
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager'))
+  const leadLabel = labels.find((x) => x.id === lead?.label_id)
+  const formFields = lead?.meta_fields && typeof lead.meta_fields === 'object' ? Object.entries(lead.meta_fields) : []
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -128,6 +133,9 @@ export default function LeadDrawer({
             {lead && (
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                 <span className={`rounded-full px-2 py-0.5 ${sourceOf(lead.source).cls}`}>{sourceOf(lead.source).label}</span>
+                {leadLabel && (
+                  <span className={`rounded-full border px-2 py-0.5 ${LABEL_CLS[leadLabel.color] ?? LABEL_CLS.gray}`}>{leadLabel.name}</span>
+                )}
                 {lead.campaign_name && <span className="text-gray-500">{lead.campaign_name}</span>}
                 {isOverdue(lead, stage) && <span className="rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">OVERDUE</span>}
               </div>
@@ -186,8 +194,8 @@ export default function LeadDrawer({
               </div>
             </div>
 
-            {/* Assign + rating + follow-up */}
-            <div className="grid gap-4 sm:grid-cols-3">
+            {/* Assign + label + rating + follow-up */}
+            <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1.5 block text-xs text-gray-400">Assigned to</span>
                 <select
@@ -204,6 +212,20 @@ export default function LeadDrawer({
                 <span className="mt-1 block text-[11px] text-gray-500">
                   by {nameOf(lead.assigned_by)} · {fmtDT(lead.assigned_at)}
                 </span>
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">Label</span>
+                <select
+                  value={lead.label_id ?? ''}
+                  disabled={!editable || busy}
+                  onChange={(e) => update({ label_id: e.target.value || null }, 'Label updated.')}
+                  className={inputCls}
+                >
+                  <option value="">No label</option>
+                  {labels.map((lb) => (
+                    <option key={lb.id} value={lb.id}>{lb.name}</option>
+                  ))}
+                </select>
               </label>
               <div>
                 <span className="mb-1.5 block text-xs text-gray-400">Rating</span>
@@ -282,6 +304,21 @@ export default function LeadDrawer({
                 {lead.form_name && ` · Form: ${lead.form_name}`} · Estimated {inr(Number(lead.estimated_amount) || 0)}
               </p>
             </div>
+
+            {/* Facebook form answers */}
+            {formFields.length > 0 && (
+              <div className="rounded-xl border border-[#222] p-4">
+                <p className="mb-2 text-sm font-medium text-gray-300">Form answers</p>
+                <dl className="grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2">
+                  {formFields.map(([k, v]) => (
+                    <div key={k} className="flex gap-2">
+                      <dt className="shrink-0 text-gray-500">{k.replace(/_/g, ' ')}:</dt>
+                      <dd className="break-words text-gray-300">{String(v)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            )}
 
             {/* Add activity */}
             <div className="rounded-xl border border-[#222] p-4">
