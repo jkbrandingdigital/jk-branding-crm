@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, Copy, Trash2, UserCog } from 'lucide-react'
+import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, Copy, Trash2, UserCog, Download, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
@@ -35,6 +35,47 @@ type NewLead = {
   next_follow_up: string
   assign: string // 'auto' | 'me' | user id
 }
+type CardPrefs = {
+  company: boolean
+  phone: boolean
+  created_at: boolean
+  created_by: boolean
+  assigned_to: boolean
+  next_follow_up: boolean
+  label: boolean
+  source: boolean
+  rating: boolean
+  amount: boolean
+  actions: boolean
+}
+const DEFAULT_PREFS: CardPrefs = {
+  company: true, phone: true, created_at: true, created_by: true, assigned_to: true,
+  next_follow_up: true, label: true, source: true, rating: true, amount: true, actions: true,
+}
+const PREF_LABEL: [keyof CardPrefs, string][] = [
+  ['company', 'Company name'],
+  ['phone', 'Phone'],
+  ['created_at', 'Created date'],
+  ['created_by', 'Created by'],
+  ['assigned_to', 'Assigned to'],
+  ['next_follow_up', 'Next follow-up'],
+  ['label', 'Label'],
+  ['source', 'Source'],
+  ['rating', 'Rating'],
+  ['amount', 'Estimated amount'],
+  ['actions', 'Quick action buttons'],
+]
+const PREF_KEY = 'jk_leads_card_prefs'
+const STAGE_KEY = 'jk_leads_hidden_stages'
+const readStore = <T,>(key: string, fallback: T): T => {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback
+  } catch {
+    return fallback
+  }
+}
+
 const emptyNew = (): NewLead => ({
   name: '', phone: '', email: '', company: '', city: '', requirement: '', source: 'manual', estimated_amount: '', next_follow_up: '', assign: 'auto',
 })
@@ -64,6 +105,11 @@ export default function LeadsBoard() {
   const [addErr, setAddErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
+  const [prefs, setPrefs] = useState<CardPrefs>(() => readStore(PREF_KEY, DEFAULT_PREFS))
+  const [hiddenStages, setHiddenStages] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(STAGE_KEY) ?? '[]') } catch { return [] }
+  })
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [lookup, setLookup] = useState<LookupRow[]>([])
   const [looking, setLooking] = useState(false)
 
@@ -94,6 +140,16 @@ export default function LeadsBoard() {
   useEffect(() => {
     load()
   }, [load])
+
+  const savePrefs = (next: CardPrefs) => {
+    setPrefs(next)
+    try { localStorage.setItem(PREF_KEY, JSON.stringify(next)) } catch { /* storage may be blocked */ }
+  }
+  const toggleStage = (id: string) => {
+    const next = hiddenStages.includes(id) ? hiddenStages.filter((x) => x !== id) : [...hiddenStages, id]
+    setHiddenStages(next)
+    try { localStorage.setItem(STAGE_KEY, JSON.stringify(next)) } catch { /* storage may be blocked */ }
+  }
 
   // Close any open card menu when clicking elsewhere
   useEffect(() => {
@@ -201,6 +257,41 @@ export default function LeadsBoard() {
     load()
   }
 
+  // ---------- Export ----------
+  function exportCsv() {
+    const stageName = (id: string | null) => stageOf(id)?.name ?? ''
+    const labelName = (id: string | null | undefined) => labelOf(id)?.name ?? ''
+    const dt = (iso: string | null) =>
+      iso ? new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : ''
+
+    const head = [
+      'Lead no', 'Name', 'Phone', 'Alternate phone', 'Email', 'Company', 'City',
+      'Requirement', 'Source', 'Label', 'Stage', 'Assigned to', 'Created by',
+      'Created at', 'Next follow-up', 'Rating', 'Estimated amount',
+    ]
+    const rows = filtered.map((l) => [
+      l.lead_no, l.name, l.phone ?? '', l.alt_phone ?? '', l.email ?? '', l.company ?? '', l.city ?? '',
+      (l.requirement ?? '').replace(/\s+/g, ' '), sourceOf(l.source).label, labelName(l.label_id),
+      stageName(l.stage_id), nameOf(l.assigned_to), nameOf(l.created_by),
+      dt(l.created_at), dt(l.next_follow_up), l.rating, Number(l.estimated_amount) || 0,
+    ])
+
+    const cell = (v: unknown) => {
+      const t = String(v ?? '')
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
+    }
+    const csv = [head, ...rows].map((r) => r.map(cell).join(',')).join('\r\n')
+
+    // The BOM makes Excel read Gujarati and ₹ correctly
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   // ---------- Add lead ----------
   function openAdd() {
     setNl({ ...emptyNew(), assign: can('lead_assign') ? 'auto' : 'me' })
@@ -254,6 +345,14 @@ export default function LeadsBoard() {
   }
 
   // ---------- Card ----------
+  const Row = ({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) => (
+    <div className="flex items-start gap-2 text-[11px]">
+      <span className="mt-0.5 text-gray-600">{icon}</span>
+      <span className="w-8 shrink-0 font-medium text-gray-500">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-gray-300">{children}</span>
+    </div>
+  )
+
   const Card = ({ l }: { l: LeadL }) => {
     const st = stageOf(l.stage_id)
     const overdue = isOverdue(l, st)
@@ -271,90 +370,111 @@ export default function LeadsBoard() {
           <p className="font-medium leading-snug">{l.name}</p>
           <span className="shrink-0 text-[11px] text-gray-600">#{l.lead_no}</span>
         </div>
-        {l.company && <p className="mt-0.5 truncate text-xs text-gray-400">{l.company}</p>}
-        <div className="mt-2 flex items-center gap-2">
-          <span className="truncate text-xs text-gray-300">{l.phone}</span>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className={`rounded-full px-2 py-0.5 text-[10px] ${sourceOf(l.source).cls}`}>{sourceOf(l.source).label}</span>
-          <LabelChip id={l.label_id} />
-          {overdue && <span className="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-semibold text-white">OVERDUE</span>}
-        </div>
-        <div className="mt-2.5 space-y-0.5 text-[11px] text-gray-500">
-          <p>To: <span className="text-gray-300">{nameOf(l.assigned_to)}</span></p>
-          {l.next_follow_up && <p className={overdue ? 'text-red-400' : ''}>Follow-up: {fmtDT(l.next_follow_up)}</p>}
-        </div>
-        <div className="mt-2.5 flex items-center justify-between border-t border-[#222] pt-2">
-          <span className="flex">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <Star key={n} size={12} className={n <= l.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-700'} />
-            ))}
-          </span>
-          <span className="text-xs tabular-nums text-gray-300">{inr(Number(l.estimated_amount) || 0)}</span>
+
+        {prefs.phone && l.phone && (
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-300">
+            <Phone size={12} className="text-green-500" /> {l.phone}
+          </p>
+        )}
+
+        {(prefs.source || prefs.label || overdue) && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {prefs.source && <span className={`rounded-full px-2 py-0.5 text-[10px] ${sourceOf(l.source).cls}`}>{sourceOf(l.source).label}</span>}
+            {prefs.label && <LabelChip id={l.label_id} />}
+            {overdue && <span className="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-semibold text-white">OVERDUE</span>}
+          </div>
+        )}
+
+        <div className="mt-2.5 space-y-1">
+          {prefs.company && l.company && <Row icon={<Building2 size={12} />} label="CN">{l.company}</Row>}
+          {prefs.created_at && <Row icon={<CalendarDays size={12} />} label="CD">{fmtDT(l.created_at)}</Row>}
+          {prefs.created_by && <Row icon={<User size={12} />} label="BY">{nameOf(l.created_by)}</Row>}
+          {prefs.assigned_to && <Row icon={<Send size={12} />} label="TO">{nameOf(l.assigned_to)}</Row>}
+          {prefs.next_follow_up && l.next_follow_up && (
+            <Row icon={<CalendarClock size={12} />} label="NFD">
+              <span className={overdue ? 'text-red-400' : ''}>{fmtDT(l.next_follow_up)}</span>
+            </Row>
+          )}
         </div>
 
-        {/* Quick actions */}
-        <div className="relative mt-1.5 flex items-center gap-0.5 border-t border-[#222] pt-1.5" onClick={stop}>
-          {l.phone && (
-            <a href={`tel:${l.phone}`} className={iconBtn} title="Call">
-              <Phone size={14} />
-            </a>
-          )}
-          {waLink(l.phone) && (
-            <a href={waLink(l.phone)!} target="_blank" rel="noreferrer" className={`${iconBtn} text-green-500 hover:text-green-400`} title="WhatsApp">
-              <MessageCircle size={14} />
-            </a>
-          )}
-          {can('lead_edit') && labels.length > 0 && (
-            <button onClick={() => setMenu(menu?.id === l.id && menu.kind === 'label' ? null : { id: l.id, kind: 'label' })} className={iconBtn} title="Label">
-              <Tag size={14} />
-            </button>
-          )}
-          {can('lead_assign') && (
-            <button onClick={() => setMenu(menu?.id === l.id && menu.kind === 'assign' ? null : { id: l.id, kind: 'assign' })} className={iconBtn} title="Transfer">
-              <UserCog size={14} />
-            </button>
-          )}
-          {can('lead_create') && (
-            <button onClick={() => copyLead(l)} className={iconBtn} title="Copy lead">
-              <Copy size={14} />
-            </button>
-          )}
-          {can('lead_delete') && (
-            <button onClick={() => removeLead(l)} className={`${iconBtn} hover:text-red-400`} title="Delete">
-              <Trash2 size={14} />
-            </button>
-          )}
+        {(prefs.rating || prefs.amount) && (
+          <div className="mt-2.5 flex items-center justify-between border-t border-[#222] pt-2">
+            {prefs.rating ? (
+              <span className="flex">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <Star key={n} size={12} className={n <= l.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-700'} />
+                ))}
+              </span>
+            ) : (
+              <span />
+            )}
+            {prefs.amount && <span className="text-xs tabular-nums text-gray-300">{inr(Number(l.estimated_amount) || 0)}</span>}
+          </div>
+        )}
 
-          {menu?.id === l.id && (
-            <div className="absolute bottom-9 left-0 z-20 max-h-56 w-52 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
-              {menu.kind === 'label' ? (
-                <>
-                  <button onClick={() => setLabel(l.id, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
-                    No label
-                  </button>
-                  {labels.map((lb) => (
-                    <button key={lb.id} onClick={() => setLabel(l.id, lb.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
-                      <span className={`h-2 w-2 rounded-full border ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`} />
-                      {lb.name}
+        {prefs.actions && (
+          <div className="relative mt-1.5 flex items-center gap-0.5 border-t border-[#222] pt-1.5" onClick={stop}>
+            {l.phone && (
+              <a href={`tel:${l.phone}`} className={iconBtn} title="Call">
+                <Phone size={14} />
+              </a>
+            )}
+            {waLink(l.phone) && (
+              <a href={waLink(l.phone)!} target="_blank" rel="noreferrer" className={`${iconBtn} text-green-500 hover:text-green-400`} title="WhatsApp">
+                <MessageCircle size={14} />
+              </a>
+            )}
+            {can('lead_edit') && labels.length > 0 && (
+              <button onClick={() => setMenu(menu?.id === l.id && menu.kind === 'label' ? null : { id: l.id, kind: 'label' })} className={iconBtn} title="Label">
+                <Tag size={14} />
+              </button>
+            )}
+            {can('lead_assign') && (
+              <button onClick={() => setMenu(menu?.id === l.id && menu.kind === 'assign' ? null : { id: l.id, kind: 'assign' })} className={iconBtn} title="Transfer">
+                <UserCog size={14} />
+              </button>
+            )}
+            {can('lead_create') && (
+              <button onClick={() => copyLead(l)} className={iconBtn} title="Copy lead">
+                <Copy size={14} />
+              </button>
+            )}
+            {can('lead_delete') && (
+              <button onClick={() => removeLead(l)} className={`${iconBtn} hover:text-red-400`} title="Delete">
+                <Trash2 size={14} />
+              </button>
+            )}
+
+            {menu?.id === l.id && (
+              <div className="absolute bottom-9 left-0 z-20 max-h-56 w-52 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
+                {menu.kind === 'label' ? (
+                  <>
+                    <button onClick={() => setLabel(l.id, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                      No label
                     </button>
-                  ))}
-                </>
-              ) : (
-                <>
-                  <button onClick={() => transfer(l.id, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
-                    Unassigned
-                  </button>
-                  {assignable.map((s) => (
-                    <button key={s.id} onClick={() => transfer(l.id, s.id)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
-                      {s.full_name}
+                    {labels.map((lb) => (
+                      <button key={lb.id} onClick={() => setLabel(l.id, lb.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
+                        <span className={`h-2 w-2 rounded-full border ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`} />
+                        {lb.name}
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => transfer(l.id, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                      Unassigned
                     </button>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
-        </div>
+                    {assignable.map((sm) => (
+                      <button key={sm.id} onClick={() => transfer(l.id, sm.id)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
+                        {sm.full_name}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     )
   }
@@ -374,6 +494,14 @@ export default function LeadsBoard() {
           <button onClick={load} className="rounded-lg border border-[#2a2a2a] p-2 text-gray-400 hover:text-white" title="Refresh" aria-label="Refresh">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="rounded-lg border border-[#2a2a2a] p-2 text-gray-400 hover:text-white"
+            title="Card settings"
+            aria-label="Card settings"
+          >
+            <SlidersHorizontal size={16} />
+          </button>
           <div className="flex rounded-lg border border-[#2a2a2a] bg-[#161616] p-1">
             <button onClick={() => setView('board')} className={`rounded-md p-1.5 ${view === 'board' ? 'bg-orange-500 text-black' : 'text-gray-400 hover:text-white'}`} aria-label="Board view">
               <LayoutGrid size={16} />
@@ -382,6 +510,15 @@ export default function LeadsBoard() {
               <List size={16} />
             </button>
           </div>
+          {ready && can('lead_export') && filtered.length > 0 && (
+            <button
+              onClick={exportCsv}
+              className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 hover:border-[#3a3a3a] hover:text-white"
+              title={`Export ${filtered.length} leads to Excel`}
+            >
+              <Download size={16} /> Export
+            </button>
+          )}
           {ready && can('lead_create') && (
             <button onClick={openAdd} className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400">
               <Plus size={16} /> Add lead
@@ -463,7 +600,7 @@ export default function LeadsBoard() {
       {/* Board */}
       {view === 'board' ? (
         <div className="mt-5 flex gap-4 overflow-x-auto pb-4 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
-          {stages.map((st) => {
+          {stages.filter((st) => !hiddenStages.includes(st.id)).map((st) => {
             const items = filtered.filter((l) => l.stage_id === st.id)
             const amount = items.reduce((s, l) => s + (Number(l.estimated_amount) || 0), 0)
             return (
@@ -548,6 +685,68 @@ export default function LeadsBoard() {
       {/* Lead detail */}
       {openId && (
         <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={() => setOpenId(null)} onChanged={load} />
+      )}
+
+      {/* Card settings */}
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setSettingsOpen(false)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative w-full max-w-lg rounded-2xl border border-[#242424] bg-[#151515]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
+              <h2 className="font-semibold">Card settings</h2>
+              <button onClick={() => setSettingsOpen(false)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid gap-6 px-5 py-5 sm:grid-cols-2">
+              <div>
+                <p className="mb-3 text-sm font-medium text-gray-300">Lead fields</p>
+                <ul className="space-y-2">
+                  {PREF_LABEL.map(([key, label]) => (
+                    <li key={key}>
+                      <label className="flex cursor-pointer items-center justify-between gap-3 text-sm text-gray-300">
+                        {label}
+                        <input
+                          type="checkbox"
+                          checked={prefs[key]}
+                          onChange={(e) => savePrefs({ ...prefs, [key]: e.target.checked })}
+                          className="h-4 w-4 accent-orange-500"
+                        />
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="mb-3 text-sm font-medium text-gray-300">Stages</p>
+                <ul className="space-y-2">
+                  {stages.map((st) => (
+                    <li key={st.id}>
+                      <label className="flex cursor-pointer items-center justify-between gap-3 text-sm text-gray-300">
+                        {st.name}
+                        <input
+                          type="checkbox"
+                          checked={!hiddenStages.includes(st.id)}
+                          onChange={() => toggleStage(st.id)}
+                          className="h-4 w-4 accent-orange-500"
+                        />
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  onClick={() => { savePrefs(DEFAULT_PREFS); setHiddenStages([]); localStorage.removeItem(STAGE_KEY) }}
+                  className="mt-4 text-xs text-orange-400 hover:underline"
+                >
+                  Reset to default
+                </button>
+              </div>
+            </div>
+            <div className="border-t border-[#242424] px-5 py-3 text-xs text-gray-500">
+              Saved on this device only, for your own screen.
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add lead */}
