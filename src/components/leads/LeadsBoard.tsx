@@ -9,6 +9,20 @@ import { SOURCES, sourceOf, fromInputDT, fmtDT, isOverdue, waLink, loadLeads, lo
 
 type LeadL = Lead & { label_id?: string | null }
 
+type LookupRow = {
+  lead_no: number
+  name: string
+  company: string | null
+  city: string | null
+  source: string
+  stage_name: string | null
+  assigned_name: string | null
+  branch_name: string | null
+  phone_hint: string | null
+  created_at: string
+  is_mine: boolean
+}
+
 type NewLead = {
   name: string
   phone: string
@@ -50,6 +64,8 @@ export default function LeadsBoard() {
   const [addErr, setAddErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
+  const [lookup, setLookup] = useState<LookupRow[]>([])
+  const [looking, setLooking] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -109,6 +125,30 @@ export default function LeadsBoard() {
     return staff.filter((s) => ids.has(s.id))
   }, [leads, staff])
   const overdueCount = leads.filter((l) => isOverdue(l, stageOf(l.stage_id))).length
+
+  // Nothing found here? Ask the database whether this number exists anywhere.
+  useEffect(() => {
+    const text = q.trim()
+    if (text.length < 4 || filtered.length > 0) {
+      setLookup([])
+      return
+    }
+    let alive = true
+    setLooking(true)
+    const timer = setTimeout(async () => {
+      const res = await supabase.rpc('lead_lookup', { p_query: text })
+      if (!alive) return
+      if (res.error) setError(`Lookup failed: ${res.error.message}`)
+      setLookup((res.data ?? []) as LookupRow[])
+      setLooking(false)
+    }, 400)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, filtered.length])
+
 
   // ---------- Stage change by drag ----------
   async function moveTo(leadId: string, stageId: string) {
@@ -390,6 +430,34 @@ export default function LeadsBoard() {
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
           <AlertCircle size={16} /> {error}
         </div>
+      )}
+
+      {/* Found somewhere else in the company */}
+      {(looking || lookup.length > 0) && (
+        <section className="mt-4 rounded-2xl border border-yellow-900/50 bg-yellow-950/10 p-4">
+          <p className="text-sm font-medium text-yellow-200">
+            {looking ? 'Checking the whole company…' : `Already in the CRM (${lookup.length})`}
+          </p>
+          {!looking && (
+            <>
+              <p className="mt-0.5 text-xs text-gray-400">Someone else is handling these, so you cannot open them.</p>
+              <ul className="mt-3 space-y-2">
+                {lookup.map((r) => (
+                  <li key={r.lead_no} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-[#151515] px-3 py-2 text-sm">
+                    <span className="text-gray-600">#{r.lead_no}</span>
+                    <span className="font-medium">{r.name}</span>
+                    {r.company && <span className="text-xs text-gray-400">{r.company}</span>}
+                    {r.phone_hint && <span className="text-xs text-gray-500">{r.phone_hint}</span>}
+                    <span className="ml-auto text-xs text-gray-400">
+                      {r.stage_name ?? '—'} · {r.assigned_name ?? 'Unassigned'}
+                      {r.branch_name ? ` · ${r.branch_name}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
       )}
 
       {/* Board */}

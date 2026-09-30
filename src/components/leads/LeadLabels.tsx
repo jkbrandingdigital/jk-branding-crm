@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Plus, Trash2, Loader2, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Plus, Trash2, Loader2, RefreshCw, AlertCircle, CheckCircle2, Users, ChevronDown } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { LABEL_CLS, type Label } from './labels'
@@ -13,6 +13,8 @@ type Rule = {
   priority: number
   is_active: boolean
 }
+
+type Person = { id: string; full_name: string; role: string; branch: string | null }
 
 const COLORS = ['orange', 'blue', 'green', 'purple', 'pink', 'yellow', 'gray']
 const FIELDS = [
@@ -33,18 +35,40 @@ export default function LeadLabels() {
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
+  const [people, setPeople] = useState<Person[]>([])
+  const [memberOf, setMemberOf] = useState<Record<string, string[]>>({})
+  const [openTeam, setOpenTeam] = useState<string | null>(null)
   const [newLabel, setNewLabel] = useState({ name: '', color: 'orange' })
   const [newRule, setNewRule] = useState({ label_id: '', field: 'form_name', custom: '', operator: 'contains' as Rule['operator'], value: '' })
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [l, r] = await Promise.all([
+    const [l, r, m, pr, ur, br] = await Promise.all([
       supabase.from('lead_labels').select('*').order('sort_order'),
       supabase.from('lead_label_rules').select('*').order('priority'),
+      supabase.from('lead_label_members').select('label_id, user_id'),
+      supabase.from('profiles').select('id, full_name, branch_id, is_active'),
+      supabase.from('user_roles').select('user_id, role'),
+      supabase.from('branches').select('id, name'),
     ])
     if (l.error) setMsg({ type: 'err', text: l.error.message })
     setLabels((l.data ?? []) as Label[])
     setRules((r.data ?? []) as Rule[])
+
+    const byLabel: Record<string, string[]> = {}
+    for (const row of (m.data ?? []) as { label_id: string; user_id: string }[]) {
+      ;(byLabel[row.label_id] ||= []).push(row.user_id)
+    }
+    setMemberOf(byLabel)
+
+    const roleOf = new Map((ur.data ?? []).map((x: any) => [x.user_id, x.role as string]))
+    const branchOf = new Map((br.data ?? []).map((x: any) => [x.id, x.name as string]))
+    setPeople(
+      ((pr.data ?? []) as any[])
+        .filter((x) => x.is_active !== false)
+        .map((x) => ({ id: x.id, full_name: x.full_name || 'Unnamed', role: roleOf.get(x.id) ?? '', branch: branchOf.get(x.branch_id) ?? null }))
+        .sort((a, b) => a.full_name.localeCompare(b.full_name)),
+    )
     setLoading(false)
   }, [])
 
@@ -84,6 +108,16 @@ export default function LeadLabels() {
     setBusy(null)
     if (error) return setMsg({ type: 'err', text: error.message })
     load()
+  }
+
+  async function toggleMember(labelId: string, userId: string) {
+    const current = memberOf[labelId] ?? []
+    const on = current.includes(userId)
+    setMemberOf((all) => ({ ...all, [labelId]: on ? current.filter((x) => x !== userId) : [...current, userId] }))
+    const { error } = on
+      ? await supabase.from('lead_label_members').delete().eq('label_id', labelId).eq('user_id', userId)
+      : await supabase.from('lead_label_members').insert({ label_id: labelId, user_id: userId })
+    if (error) { setMsg({ type: 'err', text: error.message }); load() }
   }
 
   async function addRule() {
@@ -171,6 +205,23 @@ export default function LeadLabels() {
                   <input type="checkbox" checked={l.is_active} onChange={(e) => patchLabel(l.id, { is_active: e.target.checked })} className="h-4 w-4 accent-orange-500" />
                   Active
                 </label>
+                <select
+                  value={(l as any).route_mode ?? 'pool'}
+                  onChange={(e) => patchLabel(l.id, { route_mode: e.target.value } as any)}
+                  className={`${input} w-52`}
+                  title="Who gets these leads"
+                >
+                  <option value="pool">Normal sales round robin</option>
+                  <option value="members">Only the people below</option>
+                </select>
+                <button
+                  onClick={() => setOpenTeam(openTeam === l.id ? null : l.id)}
+                  className="flex items-center gap-1.5 rounded-md border border-[#2a2a2a] px-3 py-2 text-xs text-gray-300 hover:text-white"
+                >
+                  <Users className="h-4 w-4" />
+                  {(memberOf[l.id] ?? []).length} people
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${openTeam === l.id ? 'rotate-180' : ''}`} />
+                </button>
                 <button
                   onClick={() => deleteLabel(l)}
                   disabled={busy === l.id}
@@ -179,6 +230,30 @@ export default function LeadLabels() {
                 >
                   {busy === l.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                 </button>
+
+                {openTeam === l.id && (
+                  <div className="w-full rounded-lg border border-[#2a2a2a] bg-[#121212] p-3">
+                    <p className="mb-2 text-xs text-gray-400">
+                      Leads with this label go to these people in turn. Leave it empty to use the normal sales round robin.
+                    </p>
+                    <ul className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+                      {people.map((pp) => (
+                        <li key={pp.id}>
+                          <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-[#1a1a1a]">
+                            <input
+                              type="checkbox"
+                              checked={(memberOf[l.id] ?? []).includes(pp.id)}
+                              onChange={() => toggleMember(l.id, pp.id)}
+                              className="h-4 w-4 accent-orange-500"
+                            />
+                            <span className="text-white">{pp.full_name}</span>
+                            <span className="text-gray-500">{[pp.role.replace('_', ' '), pp.branch].filter(Boolean).join(' · ')}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             ))
           )}

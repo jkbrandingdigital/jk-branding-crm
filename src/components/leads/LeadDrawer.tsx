@@ -176,23 +176,31 @@ export default function LeadDrawer({
             <div>
               <p className="mb-2 text-xs text-gray-400">Stage</p>
               <div className="flex flex-wrap gap-2">
-                {stages.map((s) => (
-                  <button
-                    key={s.id}
-                    disabled={!editable || busy || s.id === lead.stage_id}
-                    onClick={() => update({ stage_id: s.id }, `Moved to ${s.name}.`)}
-                    className="rounded-full border px-3 py-1 text-xs transition-colors disabled:cursor-default"
-                    style={
-                      s.id === lead.stage_id
-                        ? { background: s.color, borderColor: s.color, color: '#fff' }
-                        : { borderColor: '#2a2a2a', color: '#bbb' }
-                    }
-                  >
-                    {s.name}
-                  </button>
-                ))}
+                {stages.map((s) => {
+                  const needsFollowUp = Boolean((s as { requires_follow_up?: boolean }).requires_follow_up) && !lead.next_follow_up
+                  return (
+                    <button
+                      key={s.id}
+                      disabled={!editable || busy || s.id === lead.stage_id || needsFollowUp}
+                      onClick={() => update({ stage_id: s.id }, `Moved to ${s.name}.`)}
+                      title={needsFollowUp ? 'Set the next follow-up first' : undefined}
+                      className="rounded-full border px-3 py-1 text-xs transition-colors disabled:cursor-default disabled:opacity-40"
+                      style={
+                        s.id === lead.stage_id
+                          ? { background: s.color, borderColor: s.color, color: '#fff' }
+                          : { borderColor: '#2a2a2a', color: '#bbb' }
+                      }
+                    >
+                      {s.name}
+                    </button>
+                  )
+                })}
               </div>
             </div>
+
+            {!lead.next_follow_up && (
+              <p className="-mt-4 text-xs text-gray-500">Set a next follow-up below to move this lead forward.</p>
+            )}
 
             {/* Assign + label + rating + follow-up */}
             <div className="grid gap-4 sm:grid-cols-2">

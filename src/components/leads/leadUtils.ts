@@ -31,11 +31,11 @@ export type Lead = {
 
 export const SOURCES: { key: string; label: string; cls: string }[] = [
   { key: 'facebook', label: 'Facebook', cls: 'bg-blue-950/60 text-blue-300' },
-  { key: 'indiamart', label: 'IndiaMART', cls: 'bg-rose-950/60 text-rose-300' },
-  { key: 'website', label: 'Website', cls: 'bg-emerald-950/60 text-emerald-300' },
-  { key: 'walk_in', label: 'Walk-in', cls: 'bg-amber-950/60 text-amber-300' },
-  { key: 'reference', label: 'Reference', cls: 'bg-purple-950/60 text-purple-300' },
-  { key: 'manual', label: 'Manual', cls: 'bg-[#1f1f1f] text-gray-300' },
+  { key: 'old_client', label: 'Old Client', cls: 'bg-emerald-950/60 text-emerald-300' },
+  { key: 'by_call', label: 'By Call', cls: 'bg-amber-950/60 text-amber-300' },
+  { key: 'by_msg', label: 'By Msg', cls: 'bg-teal-950/60 text-teal-300' },
+  { key: 'pbn', label: 'PBN', cls: 'bg-purple-950/60 text-purple-300' },
+  { key: 'bni', label: 'BNI', cls: 'bg-rose-950/60 text-rose-300' },
   { key: 'other', label: 'Other', cls: 'bg-[#1f1f1f] text-gray-400' },
 ]
 export const sourceOf = (k: string) => SOURCES.find((s) => s.key === k) ?? SOURCES[SOURCES.length - 1]
