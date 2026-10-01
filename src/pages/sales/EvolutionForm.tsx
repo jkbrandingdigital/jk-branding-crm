@@ -118,30 +118,19 @@ export default function EvolutionForm() {
     // Also fill the old columns so older screens keep working
     for (const q of questions) if (q.legacy_column) payload[q.legacy_column] = cleaned[q.id] || null
 
-    const wasUpdate = Boolean(existingId)
-    if (existingId) {
-      payload.updated_at = new Date().toISOString()
-      const { error } = await supabase.from('daily_evolution').update(payload).eq('id', existingId)
-      if (error) {
-        setSaving(false)
-        return setMessage({ type: 'error', text: error.message })
-      }
-    } else {
-      const { data, error } = await supabase.from('daily_evolution').insert(payload).select('id').single()
-      if (error) {
-        setSaving(false)
-        return setMessage({
-          type: 'error',
-          text: error.code === '23505' ? 'You already submitted today’s form. Refresh the page.' : error.message,
-        })
-      }
-      setExistingId(data.id)
+    const { data, error } = await supabase.from('daily_evolution').insert(payload).select('id').single()
+    if (error) {
+      setSaving(false)
+      return setMessage({
+        type: 'error',
+        text: error.code === '23505' ? 'You already submitted today’s form. Refresh the page.' : error.message,
+      })
     }
-
+    setExistingId(data.id)
     setOldAnswers({ ...oldAnswers, ...cleaned })
     setSaving(false)
     setShowForm(false)
-    setMessage({ type: 'success', text: wasUpdate ? 'Evolution form updated.' : 'Evolution form submitted. Have a great day!' })
+    setMessage({ type: 'success', text: 'Evolution form submitted. Have a great day!' })
     notifySaved()
   }
 
@@ -203,7 +192,7 @@ export default function EvolutionForm() {
             <Eye size={15} /> View my answers
           </button>
           <p className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500">
-            <Lock size={12} /> You can edit until midnight today.
+            <Lock size={12} /> Once submitted, the form cannot be changed.
           </p>
         </section>
       ) : (
@@ -215,7 +204,7 @@ export default function EvolutionForm() {
             <Info label="Sales person" value={name || '—'} />
             <div className="bg-[#151515] px-5 py-4">
               <label htmlFor="reviewer" className="text-xs text-gray-400">Reviewer</label>
-              <input id="reviewer" value={reviewer} onChange={(e) => setReviewer(e.target.value)} className={`${inputCls} mt-1`} />
+              <input id="reviewer" value={reviewer} disabled={Boolean(existingId)} onChange={(e) => setReviewer(e.target.value)} className={`${inputCls} mt-1 disabled:opacity-60`} />
             </div>
           </div>
 
@@ -261,14 +250,20 @@ export default function EvolutionForm() {
                       {q.question_gu && <span className="mt-0.5 block text-xs text-gray-500">{q.question_gu}</span>}
                     </span>
                   </label>
-                  <textarea
-                    id={`q-${q.id}`}
-                    rows={2}
-                    value={answers[q.id] ?? ''}
-                    onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
-                    placeholder="Your answer"
-                    className={`${inputCls} resize-y`}
-                  />
+                  {existingId ? (
+                    <p className="whitespace-pre-wrap rounded-lg border border-[#222] bg-[#111] px-3 py-2 text-sm text-gray-300">
+                      {answers[q.id] || '—'}
+                    </p>
+                  ) : (
+                    <textarea
+                      id={`q-${q.id}`}
+                      rows={2}
+                      value={answers[q.id] ?? ''}
+                      onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                      placeholder="Your answer"
+                      className={`${inputCls} resize-y`}
+                    />
+                  )}
                 </li>
               ))}
             </ol>
@@ -276,24 +271,25 @@ export default function EvolutionForm() {
 
           <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-[#1f1f1f] bg-[#0f0f0f]/95 py-4 backdrop-blur">
             <p className="flex items-center gap-2 text-xs text-gray-500">
-              <Lock size={13} /> You can edit this form until midnight today.
+              <Lock size={13} /> {existingId ? 'Submitted. These answers cannot be changed.' : 'Check your answers — you cannot change them after submitting.'}
             </p>
             <div className="flex gap-3">
-              {existingId && (
+              {existingId ? (
                 <button
                   onClick={() => { setShowForm(false); setMessage(null) }}
                   className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-4 py-2.5 text-sm text-gray-300 hover:text-white"
                 >
                   <EyeOff size={15} /> Hide
                 </button>
+              ) : (
+                <button
+                  onClick={handleSave}
+                  disabled={saving || loading || questions.length === 0}
+                  className="rounded-lg bg-orange-500 px-6 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+                >
+                  {saving ? 'Saving…' : 'Submit form'}
+                </button>
               )}
-              <button
-                onClick={handleSave}
-                disabled={saving || loading || questions.length === 0}
-                className="rounded-lg bg-orange-500 px-6 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
-              >
-                {saving ? 'Saving…' : existingId ? 'Update form' : 'Submit form'}
-              </button>
             </div>
           </div>
         </>

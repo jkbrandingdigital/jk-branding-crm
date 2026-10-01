@@ -97,6 +97,8 @@ export default function LeadsBoard() {
   const [ownerF, setOwnerF] = useState('all')
   const [labelF, setLabelF] = useState('all')
   const [overdueOnly, setOverdueOnly] = useState(false)
+  const [fromD, setFromD] = useState('')
+  const [toD, setToD] = useState('')
 
   const [openId, setOpenId] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'assign' | 'stage' } | null>(null)
@@ -174,11 +176,14 @@ export default function LeadsBoard() {
       if (ownerF !== 'all' && (ownerF === 'none' ? l.assigned_to : l.assigned_to !== ownerF)) return false
       if (labelF !== 'all' && (labelF === 'none' ? l.label_id : l.label_id !== labelF)) return false
       if (overdueOnly && !isOverdue(l, stageOf(l.stage_id))) return false
+      const made = l.created_at.slice(0, 10)
+      if (fromD && made < fromD) return false
+      if (toD && made > toD) return false
       if (!text) return true
       return `${l.lead_no} ${l.name} ${l.phone ?? ''} ${l.company ?? ''} ${l.city ?? ''} ${l.campaign_name ?? ''}`.toLowerCase().includes(text)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leads, q, sourceF, ownerF, labelF, overdueOnly, stages])
+  }, [leads, q, sourceF, ownerF, labelF, overdueOnly, fromD, toD, stages])
 
   const owners = useMemo(() => {
     const ids = new Set(leads.map((l) => l.assigned_to).filter(Boolean) as string[])
@@ -609,6 +614,29 @@ export default function LeadsBoard() {
             ))}
           </select>
         )}
+        <div className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-1.5 text-sm text-gray-300">
+          <span className="text-xs text-gray-500">Created</span>
+          <input
+            type="date"
+            value={fromD}
+            onChange={(e) => setFromD(e.target.value)}
+            aria-label="Created from"
+            className="bg-transparent text-sm text-white [color-scheme:dark] focus:outline-none"
+          />
+          <span className="text-gray-600">→</span>
+          <input
+            type="date"
+            value={toD}
+            onChange={(e) => setToD(e.target.value)}
+            aria-label="Created to"
+            className="bg-transparent text-sm text-white [color-scheme:dark] focus:outline-none"
+          />
+          {(fromD || toD) && (
+            <button onClick={() => { setFromD(''); setToD('') }} className="text-xs text-orange-400 hover:underline">
+              Clear
+            </button>
+          )}
+        </div>
         <label className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 text-sm text-gray-300">
           <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} className="h-4 w-4 accent-red-500" />
           Overdue only
