@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, Copy, Trash2, UserCog, Download, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock } from 'lucide-react'
+import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, CalendarPlus, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
 import LeadDrawer from './LeadDrawer'
+import ImportLeads from './ImportLeads'
 import { LABEL_CLS, type Label } from './labels'
-import { SOURCES, sourceOf, fromInputDT, fmtDT, isOverdue, waLink, loadLeads, loadStaff, type Lead, type Stage, type Staff } from './leadUtils'
+import { SOURCES, sourceOf, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadLeads, loadStaff, type Lead, type Stage, type Staff } from './leadUtils'
 
 type LeadL = Lead & { label_id?: string | null }
 
@@ -98,7 +99,7 @@ export default function LeadsBoard() {
   const [overdueOnly, setOverdueOnly] = useState(false)
 
   const [openId, setOpenId] = useState<string | null>(null)
-  const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'assign' } | null>(null)
+  const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'assign' | 'stage' } | null>(null)
   const [adding, setAdding] = useState(false)
   const [nl, setNl] = useState<NewLead>(emptyNew)
   const [dup, setDup] = useState<{ lead_no: number; name: string; assigned_name: string | null }[] | null>(null)
@@ -110,6 +111,9 @@ export default function LeadsBoard() {
     try { return JSON.parse(localStorage.getItem(STAGE_KEY) ?? '[]') } catch { return [] }
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [fu, setFu] = useState<{ lead: LeadL; when: string; text: string } | null>(null)
+  const [fuErr, setFuErr] = useState<string | null>(null)
   const [lookup, setLookup] = useState<LookupRow[]>([])
   const [looking, setLooking] = useState(false)
 
@@ -208,6 +212,7 @@ export default function LeadsBoard() {
 
   // ---------- Stage change by drag ----------
   async function moveTo(leadId: string, stageId: string) {
+    setMenu(null)
     const lead = leads.find((l) => l.id === leadId)
     if (!lead || lead.stage_id === stageId || !can('lead_edit')) return
     setLeads((all) => all.map((l) => (l.id === leadId ? { ...l, stage_id: stageId } : l)))
@@ -233,27 +238,40 @@ export default function LeadsBoard() {
     load()
   }
 
-  async function copyLead(l: LeadL) {
-    const { error: e } = await supabase.from('leads').insert({
-      name: `${l.name} (copy)`,
-      phone: l.phone,
-      email: l.email,
-      company: l.company,
-      city: l.city,
-      requirement: l.requirement,
-      source: l.source,
-      estimated_amount: Number(l.estimated_amount) || 0,
-      assigned_to: l.assigned_to,
-      label_id: l.label_id ?? null,
-    })
-    if (e) return setError(e.message)
-    load()
-  }
-
   async function removeLead(l: LeadL) {
     if (!window.confirm(`Delete lead #${l.lead_no} ${l.name}? It will be hidden from everyone.`)) return
     const { error: e } = await supabase.from('leads').update({ deleted_at: new Date().toISOString() }).eq('id', l.id)
     if (e) return setError(e.message)
+    load()
+  }
+
+  // ---------- Follow-up ----------
+  async function saveFollowUp() {
+    if (!fu) return
+    setFuErr(null)
+    if (!fu.when) return setFuErr('Pick the next follow-up date and time.')
+    if (!fu.text.trim()) return setFuErr('Write what happened or what to do next.')
+
+    setBusy(true)
+    const when = fromInputDT(fu.when)
+    const { error: aErr } = await supabase.from('lead_activities').insert({
+      lead_id: fu.lead.id,
+      user_id: myId,
+      type: 'follow_up',
+      body: fu.text.trim(),
+      meta: { follow_up: when },
+    })
+    if (aErr) {
+      setBusy(false)
+      return setFuErr(aErr.message)
+    }
+    const { error: lErr } = await supabase
+      .from('leads')
+      .update({ next_follow_up: when, last_activity_at: new Date().toISOString() })
+      .eq('id', fu.lead.id)
+    setBusy(false)
+    if (lErr) return setFuErr(lErr.message)
+    setFu(null)
     load()
   }
 
@@ -429,14 +447,23 @@ export default function LeadsBoard() {
                 <Tag size={14} />
               </button>
             )}
+            {can('lead_edit') && (
+              <button
+                onClick={() => { setFuErr(null); setFu({ lead: l, when: toInputDT(l.next_follow_up), text: '' }) }}
+                className={iconBtn}
+                title="Add follow-up"
+              >
+                <CalendarPlus size={14} />
+              </button>
+            )}
+            {can('lead_edit') && (
+              <button onClick={() => setMenu(menu?.id === l.id && menu.kind === 'stage' ? null : { id: l.id, kind: 'stage' })} className={iconBtn} title="Change stage">
+                <TrendingUp size={14} />
+              </button>
+            )}
             {can('lead_assign') && (
               <button onClick={() => setMenu(menu?.id === l.id && menu.kind === 'assign' ? null : { id: l.id, kind: 'assign' })} className={iconBtn} title="Transfer">
                 <UserCog size={14} />
-              </button>
-            )}
-            {can('lead_create') && (
-              <button onClick={() => copyLead(l)} className={iconBtn} title="Copy lead">
-                <Copy size={14} />
               </button>
             )}
             {can('lead_delete') && (
@@ -447,7 +474,23 @@ export default function LeadsBoard() {
 
             {menu?.id === l.id && (
               <div className="absolute bottom-9 left-0 z-20 max-h-56 w-52 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
-                {menu.kind === 'label' ? (
+                {menu.kind === 'stage' ? (
+                  stages.map((st2) => {
+                    const needs = Boolean((st2 as { requires_follow_up?: boolean }).requires_follow_up) && !l.next_follow_up
+                    return (
+                      <button
+                        key={st2.id}
+                        disabled={st2.id === l.stage_id || needs}
+                        onClick={() => moveTo(l.id, st2.id)}
+                        title={needs ? 'Set a follow-up date first' : undefined}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        <span className="h-2 w-2 rounded-full" style={{ background: st2.color }} />
+                        {st2.name}
+                      </button>
+                    )
+                  })
+                ) : menu.kind === 'label' ? (
                   <>
                     <button onClick={() => setLabel(l.id, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
                       No label
@@ -517,6 +560,15 @@ export default function LeadsBoard() {
               title={`Export ${filtered.length} leads to Excel`}
             >
               <Download size={16} /> Export
+            </button>
+          )}
+          {ready && can('lead_create') && (
+            <button
+              onClick={() => setImportOpen(true)}
+              className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 hover:border-[#3a3a3a] hover:text-white"
+              title="Import leads from a CSV file"
+            >
+              <UploadCloud size={16} /> Import
             </button>
           )}
           {ready && can('lead_create') && (
@@ -685,6 +737,76 @@ export default function LeadsBoard() {
       {/* Lead detail */}
       {openId && (
         <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={() => setOpenId(null)} onChanged={load} />
+      )}
+
+      {/* Import */}
+      {importOpen && (
+        <ImportLeads
+          staff={staff}
+          labels={labels}
+          myId={myId}
+          canAssign={can('lead_assign')}
+          onClose={() => setImportOpen(false)}
+          onDone={load}
+        />
+      )}
+
+      {/* Add follow-up */}
+      {fu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => !busy && setFu(null)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative w-full max-w-md rounded-2xl border border-[#242424] bg-[#151515]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between border-b border-[#242424] px-5 py-4">
+              <div>
+                <h2 className="font-semibold">Add follow-up</h2>
+                <p className="mt-0.5 text-xs text-gray-500">#{fu.lead.lead_no} {fu.lead.name}</p>
+              </div>
+              <button onClick={() => setFu(null)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-5">
+              {fuErr && (
+                <div className="flex items-center gap-2 rounded-lg border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-300">
+                  <AlertCircle size={15} /> {fuErr}
+                </div>
+              )}
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">Next follow-up date *</span>
+                <input
+                  type="datetime-local"
+                  value={fu.when}
+                  onChange={(e) => setFu({ ...fu, when: e.target.value })}
+                  className={`${inputCls} [color-scheme:dark]`}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">Comment / message *</span>
+                <textarea
+                  rows={3}
+                  value={fu.text}
+                  onChange={(e) => setFu({ ...fu, text: e.target.value })}
+                  placeholder="e.g. Called, asked for a quotation. Send rates tomorrow."
+                  className={`${inputCls} resize-y`}
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-[#242424] px-5 py-4">
+              <button onClick={() => setFu(null)} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white">
+                Cancel
+              </button>
+              <button
+                onClick={saveFollowUp}
+                disabled={busy}
+                className="rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60"
+              >
+                {busy ? 'Saving…' : 'Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Card settings */}

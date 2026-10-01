@@ -3,7 +3,7 @@ import { X, Phone, MessageCircle, Star, Trash2, Send, AlertCircle, CheckCircle2,
 import { supabase } from '../../lib/supabase'
 import { inr } from '../../lib/format'
 import { LABEL_CLS, type Label } from './labels'
-import { SOURCES, sourceOf, toInputDT, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
+import { SOURCES, sourceOf, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
 type LeadL = Lead & { label_id?: string | null; meta_fields?: Record<string, string> | null }
@@ -84,7 +84,8 @@ export default function LeadDrawer({
   }
 
   async function addActivity() {
-    if (!actText.trim() && !actFollow) return setMsg({ type: 'error', text: 'Write something or pick a follow-up time.' })
+    if (!actText.trim()) return setMsg({ type: 'error', text: 'Write what happened.' })
+    if (!actFollow) return setMsg({ type: 'error', text: 'Pick the next follow-up date and time.' })
     setBusy(true)
     setMsg(null)
     const { error } = await supabase.from('lead_activities').insert({
@@ -236,6 +237,12 @@ export default function LeadDrawer({
                 </select>
               </label>
               <div>
+                <span className="mb-1.5 block text-xs text-gray-400">Next follow-up</span>
+                <p className={`py-2 text-sm ${isOverdue(lead, stage) ? 'text-red-400' : 'text-gray-300'}`}>
+                  {lead.next_follow_up ? fmtDT(lead.next_follow_up) : 'Not set — add one below'}
+                </p>
+              </div>
+              <div>
                 <span className="mb-1.5 block text-xs text-gray-400">Rating</span>
                 <div className="flex gap-1 py-1.5">
                   {[1, 2, 3, 4, 5].map((n) => (
@@ -245,16 +252,6 @@ export default function LeadDrawer({
                   ))}
                 </div>
               </div>
-              <label className="block">
-                <span className="mb-1.5 block text-xs text-gray-400">Next follow-up</span>
-                <input
-                  type="datetime-local"
-                  value={toInputDT(lead.next_follow_up)}
-                  disabled={!editable || busy}
-                  onChange={(e) => update({ next_follow_up: fromInputDT(e.target.value) }, 'Follow-up set.')}
-                  className={`${inputCls} [color-scheme:dark]`}
-                />
-              </label>
             </div>
 
             {/* Details */}
@@ -330,7 +327,8 @@ export default function LeadDrawer({
 
             {/* Add activity */}
             <div className="rounded-xl border border-[#222] p-4">
-              <p className="mb-2 text-sm font-medium text-gray-300">Log activity</p>
+              <p className="text-sm font-medium text-gray-300">Log activity</p>
+              <p className="mb-2 text-xs text-gray-500">Every entry sets the next follow-up, so you only pick the date once.</p>
               <div className="flex flex-wrap gap-2">
                 {(['note', 'call', 'whatsapp', 'meeting'] as const).map((t) => (
                   <button
@@ -351,7 +349,7 @@ export default function LeadDrawer({
               />
               <div className="mt-3 flex flex-wrap items-end gap-3">
                 <label className="block">
-                  <span className="mb-1 block text-xs text-gray-400">Next follow-up (optional)</span>
+                  <span className="mb-1 block text-xs text-gray-400">Next follow-up *</span>
                   <input type="datetime-local" value={actFollow} onChange={(e) => setActFollow(e.target.value)} className={`${inputCls} [color-scheme:dark]`} />
                 </label>
                 <button onClick={addActivity} disabled={busy} className="ml-auto flex items-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60">

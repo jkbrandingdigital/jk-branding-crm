@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, AlertCircle, Lock } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Lock, Eye, EyeOff, Moon } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { getCurrentUser, getUserProfile } from '../../lib/auth'
 import { istDate, prettyDate, inr, notifySaved } from '../../lib/format'
@@ -31,6 +31,7 @@ export default function EvolutionForm() {
   const [reviewNote, setReviewNote] = useState('')
   const [last, setLast] = useState<LastReport | null>(null)
 
+  const [showForm, setShowForm] = useState(false)   // open only when they ask to look again
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -86,6 +87,7 @@ export default function EvolutionForm() {
         )
       } else {
         setAnswers(Object.fromEntries(list.map((q) => [q.id, ''])))
+        setShowForm(true)
       }
       setLast(rep.data?.[0] ?? null)
       setLoading(false)
@@ -116,6 +118,7 @@ export default function EvolutionForm() {
     // Also fill the old columns so older screens keep working
     for (const q of questions) if (q.legacy_column) payload[q.legacy_column] = cleaned[q.id] || null
 
+    const wasUpdate = Boolean(existingId)
     if (existingId) {
       payload.updated_at = new Date().toISOString()
       const { error } = await supabase.from('daily_evolution').update(payload).eq('id', existingId)
@@ -137,12 +140,15 @@ export default function EvolutionForm() {
 
     setOldAnswers({ ...oldAnswers, ...cleaned })
     setSaving(false)
-    setMessage({ type: 'success', text: existingId ? 'Evolution form updated.' : 'Evolution form submitted. Have a great day!' })
+    setShowForm(false)
+    setMessage({ type: 'success', text: wasUpdate ? 'Evolution form updated.' : 'Evolution form submitted. Have a great day!' })
     notifySaved()
   }
 
   const inputCls =
     'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none'
+
+  const done = Boolean(existingId) && !showForm
 
   return (
     <div className={`mx-auto max-w-5xl ${loading ? 'opacity-50' : ''}`}>
@@ -162,38 +168,6 @@ export default function EvolutionForm() {
         )}
       </div>
 
-      {/* Header info, like the paper form */}
-      <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#242424] bg-[#242424] sm:grid-cols-4">
-        <Info label="Date" value={prettyDate(today)} />
-        <Info label="Branch" value={branchName || '—'} />
-        <Info label="Sales person" value={name || '—'} />
-        <div className="bg-[#151515] px-5 py-4">
-          <label htmlFor="reviewer" className="text-xs text-gray-400">Reviewer</label>
-          <input id="reviewer" value={reviewer} onChange={(e) => setReviewer(e.target.value)} className={`${inputCls} mt-1`} />
-        </div>
-      </div>
-
-      {reviewNote && (
-        <div className="mt-4 rounded-lg border border-orange-900/60 bg-orange-950/20 px-4 py-3 text-sm">
-          <p className="text-orange-400">Note from your reviewer</p>
-          <p className="mt-1 whitespace-pre-wrap text-gray-300">{reviewNote}</p>
-        </div>
-      )}
-
-      {last && (
-        <div className="mt-4 rounded-2xl border border-[#242424] bg-[#151515] px-5 py-4 text-sm">
-          <p className="text-gray-400">From your last daily report ({prettyDate(last.work_date)})</p>
-          <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1">
-            <span>Revenue <b className="text-orange-400">{inr(Number(last.revenue ?? 0))}</b></span>
-            <span>Deals <b>{last.deals_closed ?? 0}</b></span>
-            <span>Calls <b>{last.calls ?? 0}</b></span>
-            <span>Quality leads <b>{last.quality_leads ?? 0}</b></span>
-            <span>Positive <b>{last.positive_leads ?? 0}</b></span>
-            <span>Hot <b>{last.hot_leads ?? 0}</b></span>
-          </div>
-        </div>
-      )}
-
       {message && (
         <div
           className={`mt-4 flex items-center gap-2 rounded-lg border px-4 py-3 text-sm ${
@@ -205,52 +179,125 @@ export default function EvolutionForm() {
         </div>
       )}
 
-      {/* Questions */}
-      {!loading && questions.length === 0 ? (
-        <p className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-8 text-center text-sm text-gray-500">
-          No questions set up yet. Ask the Super Admin to add them.
-        </p>
-      ) : (
-        <ol className="mt-6 space-y-3">
-          {questions.map((q, i) => (
-            <li key={q.id} className="grid gap-3 rounded-2xl border border-[#242424] bg-[#151515] p-5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-              <label htmlFor={`q-${q.id}`} className="flex gap-3">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-sm font-semibold text-orange-400">
-                  {i + 1}
-                </span>
-                <span>
-                  <span className="block text-sm font-medium">
-                    {q.question_en}
-                    {!q.is_required && <span className="ml-1.5 text-xs font-normal text-gray-500">(optional)</span>}
-                  </span>
-                  {q.question_gu && <span className="mt-0.5 block text-xs text-gray-500">{q.question_gu}</span>}
-                </span>
-              </label>
-              <textarea
-                id={`q-${q.id}`}
-                rows={2}
-                value={answers[q.id] ?? ''}
-                onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
-                placeholder="Your answer"
-                className={`${inputCls} resize-y`}
-              />
-            </li>
-          ))}
-        </ol>
-      )}
+      {/* Done for today */}
+      {done ? (
+        <section className="mt-6 rounded-2xl border border-green-900/50 bg-green-950/10 p-8 text-center">
+          <CheckCircle2 size={34} className="mx-auto text-green-400" />
+          <h2 className="mt-3 text-lg font-semibold">Today’s form is submitted</h2>
+          <p className="mt-1 text-sm text-gray-400">{prettyDate(today)} · {name}</p>
+          <p className="mt-3 flex items-center justify-center gap-2 text-sm text-gray-400">
+            <Moon size={15} /> See you in the evening for the Daily Report.
+          </p>
 
-      <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-[#1f1f1f] bg-[#0f0f0f]/95 py-4 backdrop-blur">
-        <p className="flex items-center gap-2 text-xs text-gray-500">
-          <Lock size={13} /> You can edit this form until midnight today.
-        </p>
-        <button
-          onClick={handleSave}
-          disabled={saving || loading || questions.length === 0}
-          className="rounded-lg bg-orange-500 px-6 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
-        >
-          {saving ? 'Saving…' : existingId ? 'Update form' : 'Submit form'}
-        </button>
-      </div>
+          {reviewNote && (
+            <div className="mx-auto mt-5 max-w-xl rounded-lg border border-orange-900/60 bg-orange-950/20 px-4 py-3 text-left text-sm">
+              <p className="text-orange-400">Note from your reviewer</p>
+              <p className="mt-1 whitespace-pre-wrap text-gray-300">{reviewNote}</p>
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowForm(true)}
+            className="mt-6 inline-flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-gray-300 hover:border-[#3a3a3a] hover:text-white"
+          >
+            <Eye size={15} /> View my answers
+          </button>
+          <p className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500">
+            <Lock size={12} /> You can edit until midnight today.
+          </p>
+        </section>
+      ) : (
+        <>
+          {/* Header info, like the paper form */}
+          <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#242424] bg-[#242424] sm:grid-cols-4">
+            <Info label="Date" value={prettyDate(today)} />
+            <Info label="Branch" value={branchName || '—'} />
+            <Info label="Sales person" value={name || '—'} />
+            <div className="bg-[#151515] px-5 py-4">
+              <label htmlFor="reviewer" className="text-xs text-gray-400">Reviewer</label>
+              <input id="reviewer" value={reviewer} onChange={(e) => setReviewer(e.target.value)} className={`${inputCls} mt-1`} />
+            </div>
+          </div>
+
+          {reviewNote && (
+            <div className="mt-4 rounded-lg border border-orange-900/60 bg-orange-950/20 px-4 py-3 text-sm">
+              <p className="text-orange-400">Note from your reviewer</p>
+              <p className="mt-1 whitespace-pre-wrap text-gray-300">{reviewNote}</p>
+            </div>
+          )}
+
+          {last && (
+            <div className="mt-4 rounded-2xl border border-[#242424] bg-[#151515] px-5 py-4 text-sm">
+              <p className="text-gray-400">From your last daily report ({prettyDate(last.work_date)})</p>
+              <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1">
+                <span>Revenue <b className="text-orange-400">{inr(Number(last.revenue ?? 0))}</b></span>
+                <span>Deals <b>{last.deals_closed ?? 0}</b></span>
+                <span>Calls <b>{last.calls ?? 0}</b></span>
+                <span>Quality leads <b>{last.quality_leads ?? 0}</b></span>
+                <span>Positive <b>{last.positive_leads ?? 0}</b></span>
+                <span>Hot <b>{last.hot_leads ?? 0}</b></span>
+              </div>
+            </div>
+          )}
+
+          {/* Questions */}
+          {!loading && questions.length === 0 ? (
+            <p className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-8 text-center text-sm text-gray-500">
+              No questions set up yet. Ask the Super Admin to add them.
+            </p>
+          ) : (
+            <ol className="mt-6 space-y-3">
+              {questions.map((q, i) => (
+                <li key={q.id} className="grid gap-3 rounded-2xl border border-[#242424] bg-[#151515] p-5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                  <label htmlFor={`q-${q.id}`} className="flex gap-3">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-sm font-semibold text-orange-400">
+                      {i + 1}
+                    </span>
+                    <span>
+                      <span className="block text-sm font-medium">
+                        {q.question_en}
+                        {!q.is_required && <span className="ml-1.5 text-xs font-normal text-gray-500">(optional)</span>}
+                      </span>
+                      {q.question_gu && <span className="mt-0.5 block text-xs text-gray-500">{q.question_gu}</span>}
+                    </span>
+                  </label>
+                  <textarea
+                    id={`q-${q.id}`}
+                    rows={2}
+                    value={answers[q.id] ?? ''}
+                    onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                    placeholder="Your answer"
+                    className={`${inputCls} resize-y`}
+                  />
+                </li>
+              ))}
+            </ol>
+          )}
+
+          <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-[#1f1f1f] bg-[#0f0f0f]/95 py-4 backdrop-blur">
+            <p className="flex items-center gap-2 text-xs text-gray-500">
+              <Lock size={13} /> You can edit this form until midnight today.
+            </p>
+            <div className="flex gap-3">
+              {existingId && (
+                <button
+                  onClick={() => { setShowForm(false); setMessage(null) }}
+                  className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-4 py-2.5 text-sm text-gray-300 hover:text-white"
+                >
+                  <EyeOff size={15} /> Hide
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                disabled={saving || loading || questions.length === 0}
+                className="rounded-lg bg-orange-500 px-6 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+              >
+                {saving ? 'Saving…' : existingId ? 'Update form' : 'Submit form'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

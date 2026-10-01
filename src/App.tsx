@@ -20,6 +20,8 @@ import ManagerEmployeeReport from './pages/manager/EmployeeReport'
 import ManagerLeads from './pages/manager/Leads'
 import AdminLeadAssignment from './pages/admin/LeadAssignment'
 import AdminSettings from './pages/admin/Settings'
+import HrLeads from './pages/hr/Leads'
+import HrEmployees from './pages/hr/Employees'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
@@ -69,8 +71,12 @@ function AppRoutes() {
       {role === 'sales' && (
         <Route path="/sales/*" element={<SalesDashboard />} />
       )}
-      {role === 'hr' && (
-        <Route path="/hr/*" element={<HRDashboard />} />
+            {role === 'hr' && (
+        <>
+          <Route path="/hr/leads" element={<HrLeads />} />
+          <Route path="/hr/employees" element={<HrEmployees />} />
+          <Route path="/hr/*" element={<HRDashboard />} />
+        </>
       )}
       <Route path="*" element={<Navigate to={home} />} />
     </Routes>
