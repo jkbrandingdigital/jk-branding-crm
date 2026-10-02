@@ -1,17 +1,46 @@
-import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, KeyRound, Loader2, LogOut, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ChevronDown, KeyRound, Loader2, LogOut, User, X } from 'lucide-react'
 import { signOut } from '../lib/auth'
 import { supabase } from '../lib/supabase'
+import ProfileModal from './ProfileModal'
+
+const ROLE_LABEL: Record<string, string> = {
+  super_admin: 'Super Admin',
+  hr: 'HR',
+  branch_manager: 'Branch Manager',
+  sales: 'Sales',
+}
 
 export default function Header() {
   const [menu, setMenu] = useState(false)
   const [pwOpen, setPwOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [role, setRole] = useState('')
+  const [branch, setBranch] = useState('')
+  const [photo, setPhoto] = useState<string | null>(null)
   const boxRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? ''))
+  const loadMe = useCallback(async () => {
+    const { data } = await supabase.auth.getUser()
+    const id = data.user?.id
+    setEmail(data.user?.email ?? '')
+    if (!id) return
+    const [pr, ur] = await Promise.all([
+      supabase.from('profiles').select('full_name, profile_photo_url, branch_id').eq('id', id).maybeSingle(),
+      supabase.from('user_roles').select('role').eq('user_id', id).maybeSingle(),
+    ])
+    setName(pr.data?.full_name ?? '')
+    setPhoto(pr.data?.profile_photo_url ?? null)
+    setRole(ur.data?.role ?? '')
+    if (pr.data?.branch_id) {
+      const { data: b } = await supabase.from('branches').select('name').eq('id', pr.data.branch_id).maybeSingle()
+      setBranch(b?.name ?? '')
+    }
   }, [])
+
+  useEffect(() => { loadMe() }, [loadMe])
 
   // Close the menu when clicking anywhere else
   useEffect(() => {
@@ -42,17 +71,33 @@ export default function Header() {
         <button
           onClick={() => setMenu((m) => !m)}
           aria-expanded={menu}
-          className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 transition-colors hover:border-[#3a3a3a] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500"
+          className="flex items-center gap-3 rounded-lg border border-[#2a2a2a] py-1.5 pl-1.5 pr-3 text-left transition-colors hover:border-[#3a3a3a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500"
         >
-          <span className="max-w-[180px] truncate">{email || 'Account'}</span>
-          <ChevronDown className={`h-4 w-4 transition-transform ${menu ? 'rotate-180' : ''}`} />
+          {photo ? (
+            <img src={photo} alt="" className="h-9 w-9 rounded-full object-cover" />
+          ) : (
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-500/15 text-sm font-semibold text-orange-400">
+              {(name || email || '?').charAt(0).toUpperCase()}
+            </span>
+          )}
+          <span className="hidden sm:block">
+            <span className="block max-w-[180px] truncate text-sm text-white">{name || email}</span>
+            <span className="block text-xs text-gray-500">{[ROLE_LABEL[role] ?? role, branch].filter(Boolean).join(' · ')}</span>
+          </span>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${menu ? 'rotate-180' : ''}`} />
         </button>
 
         {menu && (
           <div className="absolute right-0 z-30 mt-2 w-56 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#161616] shadow-lg">
             <button
-              onClick={() => { setMenu(false); setPwOpen(true) }}
+              onClick={() => { setMenu(false); setProfileOpen(true) }}
               className="flex w-full items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
+            >
+              <User className="h-4 w-4" /> My profile
+            </button>
+            <button
+              onClick={() => { setMenu(false); setPwOpen(true) }}
+              className="flex w-full items-center gap-3 border-t border-[#2a2a2a] px-4 py-3 text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
             >
               <KeyRound className="h-4 w-4" /> Change password
             </button>
@@ -66,6 +111,7 @@ export default function Header() {
         )}
       </div>
 
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} onSaved={loadMe} />}
       {pwOpen && <ChangePassword email={email} onClose={() => setPwOpen(false)} />}
     </header>
   )

@@ -70,7 +70,8 @@ export default function DailyReport() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const editable = !existing || istDate(new Date(existing.created_at)) === today
+  // A report is written once. After that it can only be read.
+  const editable = !existing
 
   useEffect(() => {
     ;(async () => {
@@ -146,13 +147,14 @@ export default function DailyReport() {
 
   // ---------- Save ----------
   async function handleSave() {
-    if (!userId) return
+    if (!userId || existing) return
     setMessage(null)
 
     if (validDeals.some((d) => !d.client_name.trim() || !(Number(d.amount) > 0))) {
       return setMessage({ type: 'error', text: 'Every deal needs a client name and an amount above ₹0.' })
     }
     if (!nums.calls) return setMessage({ type: 'error', text: 'Enter total calls before submitting.' })
+    if (!window.confirm('Submit this report? You cannot change it afterwards.')) return
 
     setSaving(true)
     const payload: Record<string, unknown> = {
@@ -166,22 +168,12 @@ export default function DailyReport() {
     }
     for (const k of NUM_KEYS) payload[k] = nums[k] === '' ? 0 : Math.max(0, Math.floor(Number(nums[k])))
 
-    const wasUpdate = !!existing
-    let reportId = existing?.id
-    if (existing) {
-      payload.updated_at = new Date().toISOString()
-      const { error } = await supabase.from('daily_reports').update(payload).eq('id', existing.id)
-      if (error) return fail(error.message)
-      const { error: delErr } = await supabase.from('deal_details').delete().eq('report_id', existing.id)
-      if (delErr) return fail(delErr.message)
-    } else {
-      const { data, error } = await supabase.from('daily_reports').insert(payload).select('id').single()
-      if (error) return fail(error.code === '23505' ? 'A report for this date already exists. Refresh the page.' : error.message)
-      reportId = data.id
-    }
+    const { data, error } = await supabase.from('daily_reports').insert(payload).select('id').single()
+    if (error) return fail(error.code === '23505' ? 'A report for this date already exists. Refresh the page.' : error.message)
+    const reportId = data.id
 
     if (validDeals.length > 0) {
-      const { error } = await supabase.from('deal_details').insert(
+      const { error: dErr } = await supabase.from('deal_details').insert(
         validDeals.map((d) => ({
           report_id: reportId,
           user_id: userId,
@@ -192,12 +184,12 @@ export default function DailyReport() {
           note: d.note.trim() || null,
         })),
       )
-      if (error) return fail(`Report saved, but deals failed: ${error.message}`)
+      if (dErr) return fail(`Report saved, but deals failed: ${dErr.message}`)
     }
 
     setSaving(false)
     await Promise.all([loadReport(userId, workDate), loadRecent(userId)])
-    setMessage({ type: 'success', text: wasUpdate ? 'Report updated.' : 'Report submitted. Great work today!' })
+    setMessage({ type: 'success', text: 'Report submitted. Great work today!' })
     notifySaved()
   }
 
@@ -223,10 +215,10 @@ export default function DailyReport() {
           {!loading && (
             <span
               className={`whitespace-nowrap rounded-full px-3 py-1 text-xs ${
-                !existing ? 'bg-[#1f1f1f] text-gray-400' : editable ? 'bg-green-950/60 text-green-400' : 'bg-[#1f1f1f] text-gray-400'
+                existing ? 'bg-green-950/60 text-green-400' : 'bg-[#1f1f1f] text-gray-400'
               }`}
             >
-              {!existing ? 'Not submitted' : editable ? 'Submitted' : 'Locked'}
+              {existing ? 'Submitted' : 'Not submitted'}
             </span>
           )}
           <input
@@ -251,9 +243,12 @@ export default function DailyReport() {
         </div>
       )}
 
-      {existing && !editable && (
-        <div className="mt-5 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-4 py-3 text-sm text-gray-400">
-          <Lock size={16} /> This report is locked. Reports can only be edited on the day they are submitted.
+      {existing && (
+        <div className="mt-5 flex items-start gap-2 rounded-lg border border-green-900/50 bg-green-950/20 px-4 py-3 text-sm text-green-300">
+          <Lock size={16} className="mt-0.5 shrink-0" />
+          <span>
+            Submitted for {prettyDate(workDate)}. A report cannot be changed once submitted — tell your manager if something is wrong.
+          </span>
         </div>
       )}
 
@@ -276,6 +271,7 @@ export default function DailyReport() {
                       type="number"
                       inputMode="numeric"
                       min={0}
+                      onWheel={(e) => e.currentTarget.blur()}
                       value={nums[key]}
                       disabled={!editable}
                       onChange={(e) => setNums((s) => ({ ...s, [key]: e.target.value }))}
@@ -288,7 +284,7 @@ export default function DailyReport() {
             </Section>
           ))}
 
-          {warnings.length > 0 && (
+          {warnings.length > 0 && editable && (
             <div className="rounded-lg border border-yellow-900/60 bg-yellow-950/20 px-4 py-3 text-sm text-yellow-300">
               {warnings.map((w) => <p key={w}>{w}</p>)}
             </div>
@@ -323,6 +319,7 @@ export default function DailyReport() {
                     <input
                       type="number"
                       min={0}
+                      onWheel={(e) => e.currentTarget.blur()}
                       placeholder="Amount ₹"
                       value={d.amount}
                       disabled={!editable}
@@ -379,14 +376,21 @@ export default function DailyReport() {
               <Mini label="Positive" value={num('positive_leads')} />
               <Mini label="Deals" value={validDeals.length} />
             </div>
-            {editable && (
-              <button
-                onClick={handleSave}
-                disabled={saving || loading}
-                className="mt-5 w-full rounded-lg bg-orange-500 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
-              >
-                {saving ? 'Saving…' : existing ? 'Update report' : 'Submit report'}
-              </button>
+            {editable ? (
+              <>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || loading}
+                  className="mt-5 w-full rounded-lg bg-orange-500 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+                >
+                  {saving ? 'Saving…' : 'Submit report'}
+                </button>
+                <p className="mt-2 text-center text-xs text-gray-500">Check the numbers — you cannot change them after submitting.</p>
+              </>
+            ) : (
+              <p className="mt-5 flex items-center justify-center gap-2 rounded-lg bg-[#1a1a1a] py-2.5 text-sm text-gray-400">
+                <Lock size={14} /> Submitted
+              </p>
             )}
           </div>
 

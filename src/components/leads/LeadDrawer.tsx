@@ -3,7 +3,7 @@ import { X, Phone, MessageCircle, Star, Trash2, Send, AlertCircle, CheckCircle2,
 import { supabase } from '../../lib/supabase'
 import { inr } from '../../lib/format'
 import { LABEL_CLS, type Label } from './labels'
-import { SOURCES, sourceOf, toInputDT, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
+import { SOURCES, sourceOf, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
 type LeadL = Lead & { label_id?: string | null; meta_fields?: Record<string, string> | null }
