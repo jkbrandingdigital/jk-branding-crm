@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   BarChart, Bar, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { ArrowDownRight, ArrowUpRight } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, Home, Building2 } from 'lucide-react'
 import DonutChart, { PIE_COLORS } from './DonutChart'
 import { supabase } from '../lib/supabase'
 import { istDate, addDays, weekStart, addMonths, shortDate, monthLabel, inr, inrCompact } from '../lib/format'
@@ -20,8 +20,11 @@ type Row = {
   facebook_inquiry: number | null
   incoming_calls: number | null
   old_client_ref: number | null
+  followup_calls: number | null
+  leads_found: number | null
 }
 type Bucket = { key: string; label: string; revenue: number; calls: number; positive: number; hot: number; deals: number }
+type Norm = { work_mode: string; label: string; calls: number; quality_calls: number; follow_ups: number; leads_found: number }
 
 const VIEWS: { key: View; label: string; current: string; previous: string }[] = [
   { key: 'daily', label: 'Daily', current: 'Today', previous: 'yesterday' },
@@ -58,7 +61,7 @@ async function fetchReports(from: string, userId?: string | null, branchId?: str
   for (let start = 0; ; start += page) {
     let q = supabase
       .from('daily_reports')
-      .select('work_date, calls, quality_leads, positive_leads, hot_leads, deals_closed, revenue, indiamart_inquiry, facebook_inquiry, incoming_calls, old_client_ref')
+      .select('work_date, calls, quality_leads, positive_leads, hot_leads, deals_closed, revenue, indiamart_inquiry, facebook_inquiry, incoming_calls, old_client_ref, followup_calls, leads_found')
       .gte('work_date', from)
       .order('work_date')
       .range(start, start + page - 1)
@@ -79,6 +82,7 @@ export default function PerformanceView({
 }: { userId?: string | null; branchId?: string | null; title?: string; subtitle?: string }) {
   const [view, setView] = useState<View>('daily')
   const [rows, setRows] = useState<Row[]>([])
+  const [norm, setNorm] = useState<Norm | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -98,6 +102,26 @@ export default function PerformanceView({
       cancelled = true
     }
   }, [cfg, userId, branchId])
+
+  // Daily work norms, only when looking at one person
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      let id = userId ?? null
+      if (!id && !branchId) {
+        const { data } = await supabase.auth.getUser()
+        id = data.user?.id ?? null
+      }
+      if (!id) return setNorm(null)
+      const { data: p } = await supabase.from('profiles').select('work_mode').eq('id', id).maybeSingle()
+      const mode = (p as { work_mode?: string } | null)?.work_mode ?? 'office'
+      const { data: n } = await supabase.from('work_norms').select('*').eq('work_mode', mode).maybeSingle()
+      if (!cancelled) setNorm((n as Norm) ?? null)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [userId, branchId])
 
   const buckets: Bucket[] = useMemo(() => {
     const map = new Map<string, Bucket>(
@@ -129,6 +153,17 @@ export default function PerformanceView({
   ]
 
   const periodTotal = buckets.reduce((s, b) => s + b.revenue, 0)
+
+  // Today's work against the daily norms
+  const todayRow = rows.find((r) => r.work_date === today)
+  const normBars = norm
+    ? [
+        { label: 'Calls', done: Number(todayRow?.calls ?? 0), target: norm.calls },
+        { label: 'Quality calls', done: Number(todayRow?.quality_leads ?? 0), target: norm.quality_calls },
+        { label: 'Follow-ups', done: Number(todayRow?.followup_calls ?? 0), target: norm.follow_ups },
+        { label: 'Leads found', done: Number(todayRow?.leads_found ?? 0), target: norm.leads_found },
+      ].filter((b) => b.target > 0)
+    : []
 
   // Inquiry sources across the whole view
   const firstKey = cfg.keys[0]
@@ -168,6 +203,47 @@ export default function PerformanceView({
       )}
 
       <div className={loading ? 'opacity-50' : ''}>
+        {/* Today's work against the daily norms */}
+        {normBars.length > 0 && (
+          <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-medium text-gray-300">Today's work</h2>
+              <span className="flex items-center gap-1.5 rounded-full bg-[#1f1f1f] px-2.5 py-1 text-xs text-gray-400">
+                {norm?.work_mode === 'wfh' ? <Home size={13} /> : <Building2 size={13} />}
+                {norm?.label}
+              </span>
+            </div>
+
+            {!todayRow && (
+              <p className="mb-4 text-xs text-gray-500">Nothing counted yet — these fill in from today's daily report.</p>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {normBars.map((b) => {
+                const pct = b.target > 0 ? Math.min((b.done / b.target) * 100, 100) : 0
+                const full = b.done >= b.target
+                const bar = full ? 'bg-green-500' : pct >= 60 ? 'bg-orange-500' : 'bg-red-500'
+                return (
+                  <div key={b.label}>
+                    <div className="flex items-baseline justify-between text-sm">
+                      <span className="text-gray-300">{b.label}</span>
+                      <span className="tabular-nums text-gray-400">
+                        <span className={full ? 'text-green-400' : 'text-white'}>{b.done}</span> / {b.target}
+                      </span>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#222]">
+                      <div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {full ? 'Done for today' : `${b.target - b.done} to go`}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
         {/* KPIs for the current period */}
         <p className="mt-6 text-sm text-gray-400">
           {viewMeta.current}, compared with {viewMeta.previous}
@@ -228,34 +304,34 @@ export default function PerformanceView({
 
         {/* Activity chart + inquiry sources */}
         <div className="mt-6 grid gap-6 lg:grid-cols-5">
-        <section className="rounded-2xl border border-[#242424] bg-[#151515] p-5 lg:col-span-3">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-medium text-gray-300">Calls and leads</h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <Legend color="#f97316" label="Calls" />
-              <Legend color="#60a5fa" label="Positive leads" />
-              <Legend color="#f43f5e" label="Hot leads" />
+          <section className="rounded-2xl border border-[#242424] bg-[#151515] p-5 lg:col-span-3">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-medium text-gray-300">Calls and leads</h2>
+              <div className="flex gap-4 text-xs text-gray-400">
+                <Legend color="#f97316" label="Calls" />
+                <Legend color="#60a5fa" label="Positive leads" />
+                <Legend color="#f43f5e" label="Hot leads" />
+              </div>
             </div>
-          </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={buckets} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="#222" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={8} />
-                <YAxis tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} width={40} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10)]} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="calls" name="Calls" stroke="#f97316" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="positive" name="Positive leads" stroke="#60a5fa" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="hot" name="Hot leads" stroke="#f43f5e" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </section>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={buckets} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="#222" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={8} />
+                  <YAxis tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} width={40} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10)]} />
+                  <Tooltip contentStyle={tooltipStyle} />
+                  <Line type="monotone" dataKey="calls" name="Calls" stroke="#f97316" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="positive" name="Positive leads" stroke="#60a5fa" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="hot" name="Hot leads" stroke="#f43f5e" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
 
-        <section className="rounded-2xl border border-[#242424] bg-[#151515] p-5 lg:col-span-2">
-          <h2 className="mb-4 text-sm font-medium text-gray-300">Inquiry sources</h2>
-          <DonutChart data={sources} centerLabel="Inquiries" empty="No inquiries in this period." />
-        </section>
+          <section className="rounded-2xl border border-[#242424] bg-[#151515] p-5 lg:col-span-2">
+            <h2 className="mb-4 text-sm font-medium text-gray-300">Inquiry sources</h2>
+            <DonutChart data={sources} centerLabel="Inquiries" empty="No inquiries in this period." />
+          </section>
         </div>
       </div>
     </div>

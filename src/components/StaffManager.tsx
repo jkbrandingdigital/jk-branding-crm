@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX } from 'lucide-react'
+import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 type Profile = {
@@ -11,6 +11,7 @@ type Profile = {
   department_id: string | null
   designation: string | null
   date_of_joining: string | null
+  work_mode: string | null
   is_active: boolean
 }
 type AuthInfo = { id: string; email?: string; last_sign_in_at?: string }
@@ -25,6 +26,7 @@ type Form = {
   department_id: string
   designation: string
   date_of_joining: string
+  work_mode: string
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -39,6 +41,10 @@ const ROLE_CHIP: Record<string, string> = {
   branch_manager: 'bg-orange-950/60 text-orange-300',
   sales: 'bg-[#1f1f1f] text-gray-300',
 }
+const WORK_MODE: Record<string, string> = {
+  office: 'Work from office',
+  wfh: 'Work from home',
+}
 const needsBranch = (role: string) => role === 'sales' || role === 'branch_manager'
 
 const emptyForm = (): Form => ({
@@ -51,6 +57,7 @@ const emptyForm = (): Form => ({
   department_id: '',
   designation: '',
   date_of_joining: '',
+  work_mode: 'office',
 })
 
 function makePassword() {
@@ -100,7 +107,7 @@ export default function StaffManager() {
       supabase.auth.getUser(),
       supabase
         .from('profiles')
-        .select('id, emp_code, full_name, phone, branch_id, department_id, designation, date_of_joining, is_active')
+        .select('id, emp_code, full_name, phone, branch_id, department_id, designation, date_of_joining, work_mode, is_active')
         .order('emp_code'),
       supabase.from('user_roles').select('user_id, role'),
       supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
@@ -163,6 +170,7 @@ export default function StaffManager() {
       department_id: p.department_id ?? '',
       designation: p.designation ?? '',
       date_of_joining: p.date_of_joining ?? '',
+      work_mode: p.work_mode ?? 'office',
     })
     setFormError(null)
     setNewPassword('')
@@ -189,6 +197,7 @@ export default function StaffManager() {
         department_id: form.department_id,
         designation: form.designation,
         date_of_joining: form.date_of_joining,
+        work_mode: form.work_mode,
       }
       if (form.role !== roles.get(editing.id) && editing.id !== myId) payload.role = form.role
       const res = await staffApi(payload)
@@ -222,7 +231,7 @@ export default function StaffManager() {
     setNewPassword('')
   }
 
-    async function changeEmail(p: Profile) {
+  async function changeEmail(p: Profile) {
     const email = form.email.trim().toLowerCase()
     const current = (auth.get(p.id)?.email ?? '').toLowerCase()
     if (email === current) return setFormError('This is already the login email.')
@@ -308,7 +317,7 @@ export default function StaffManager() {
 
       {/* Table */}
       <section className={`mt-4 overflow-x-auto rounded-2xl border border-[#242424] bg-[#151515] ${loading ? 'opacity-50' : ''}`}>
-        <table className="w-full min-w-[820px] text-sm">
+        <table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr className="border-b border-[#242424] text-left text-gray-400">
               <th className="px-5 py-3 font-normal">Code</th>
@@ -316,6 +325,7 @@ export default function StaffManager() {
               <th className="py-3 pr-4 font-normal">Email</th>
               <th className="py-3 pr-4 font-normal">Role</th>
               <th className="py-3 pr-4 font-normal">Branch</th>
+              <th className="py-3 pr-4 font-normal">Works</th>
               <th className="py-3 pr-4 font-normal">Last login</th>
               <th className="py-3 pr-5 text-right font-normal">Status</th>
             </tr>
@@ -323,12 +333,13 @@ export default function StaffManager() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-10 text-center text-gray-500">No employees match these filters.</td>
+                <td colSpan={8} className="py-10 text-center text-gray-500">No employees match these filters.</td>
               </tr>
             ) : (
               rows.map((p) => {
                 const role = roles.get(p.id) ?? ''
                 const manageable = canManage(p)
+                const wfh = p.work_mode === 'wfh'
                 return (
                   <tr
                     key={p.id}
@@ -348,6 +359,12 @@ export default function StaffManager() {
                       <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs ${ROLE_CHIP[role] ?? ROLE_CHIP.sales}`}>{ROLE_LABEL[role] ?? role}</span>
                     </td>
                     <td className="py-3 pr-4 text-gray-400">{branchName.get(p.branch_id ?? '') ?? '—'}</td>
+                    <td className="py-3 pr-4">
+                      <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                        {wfh ? <Home size={13} /> : <Building2 size={13} />}
+                        {wfh ? 'Home' : 'Office'}
+                      </span>
+                    </td>
                     <td className="py-3 pr-4 text-gray-400">{lastSeen(auth.get(p.id)?.last_sign_in_at)}</td>
                     <td className="py-3 pr-5 text-right">
                       <span className="inline-flex items-center gap-2">
@@ -392,12 +409,7 @@ export default function StaffManager() {
               </Field>
               <Field label="Email (used to log in) *">
                 <div className="flex gap-2">
-                  <input
-                    type="email"
-                    value={form.email}
-                    onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    className={inputCls}
-                  />
+                  <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} />
                   {editingProfile && form.email.trim().toLowerCase() !== (auth.get(editingProfile.id)?.email ?? '').toLowerCase() && (
                     <button
                       type="button"
@@ -434,12 +446,7 @@ export default function StaffManager() {
               )}
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Role *">
-                  <select
-                    value={form.role}
-                    disabled={editingSelf}
-                    onChange={(e) => setForm({ ...form, role: e.target.value })}
-                    className={`${inputCls}`}
-                  >
+                  <select value={form.role} disabled={editingSelf} onChange={(e) => setForm({ ...form, role: e.target.value })} className={inputCls}>
                     {(editingSelf ? [form.role] : allowedRoles).map((r) => (
                       <option key={r} value={r}>{ROLE_LABEL[r] ?? r}</option>
                     ))}
@@ -475,6 +482,17 @@ export default function StaffManager() {
                   <input type="date" value={form.date_of_joining} onChange={(e) => setForm({ ...form, date_of_joining: e.target.value })} className={`${inputCls} [color-scheme:dark]`} />
                 </Field>
               </div>
+
+              <Field label="Works from">
+                <select value={form.work_mode} onChange={(e) => setForm({ ...form, work_mode: e.target.value })} className={inputCls}>
+                  {Object.entries(WORK_MODE).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  This picks their daily work norms — calls, quality calls, follow-ups, and leads to find.
+                </p>
+              </Field>
 
               {editingProfile && (
                 <>

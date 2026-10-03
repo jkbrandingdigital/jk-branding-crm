@@ -37,6 +37,7 @@ const GROUPS = [
       ['facebook_inquiry', 'Facebook inquiry'],
       ['old_client_ref', 'Old client reference received'],
       ['indiamart_inquiry', 'IndiaMART inquiry'],
+      ['leads_found', 'Leads found / researched'],
     ],
   },
 ] as const
