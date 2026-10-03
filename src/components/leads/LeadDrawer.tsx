@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import { X, Phone, MessageCircle, Star, Trash2, Send, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
+import {
+  X, Phone, MessageCircle, Star, Trash2, Send, AlertCircle, CheckCircle2, Clock,
+  RefreshCw, Tag, UserCog, TrendingUp, Pencil, CalendarPlus,
+} from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { inr } from '../../lib/format'
 import { LABEL_CLS, type Label } from './labels'
-import { SOURCES, sourceOf, toInputDT, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
+import { SOURCES, sourceOf, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
-type LeadL = Lead & { label_id?: string | null; meta_fields?: Record<string, string> | null; cancel_reason?: string | null; cancel_note?: string | null }
+type LeadL = Lead & {
+  label_id?: string | null
+  meta_fields?: Record<string, string> | null
+  cancel_reason?: string | null
+  cancel_note?: string | null
+}
 
 const ACT_LABEL: Record<string, string> = {
   note: 'Note',
@@ -15,6 +23,8 @@ const ACT_LABEL: Record<string, string> = {
   meeting: 'Meeting',
   follow_up: 'Follow-up',
 }
+
+type TabKey = 'details' | 'followup' | 'history'
 
 export default function LeadDrawer({
   leadId, stages, staff, labels, can, myId, onClose, onChanged,
@@ -31,15 +41,23 @@ export default function LeadDrawer({
   const [lead, setLead] = useState<LeadL | null>(null)
   const [form, setForm] = useState<LeadL | null>(null)
   const [acts, setActs] = useState<Activity[]>([])
+  const [tab, setTab] = useState<TabKey>('details')
+  const [editMode, setEditMode] = useState(false)
+  const [menu, setMenu] = useState<'stage' | 'assign' | 'label' | null>(null)
+
   const [actType, setActType] = useState('note')
   const [actText, setActText] = useState('')
   const [actFollow, setActFollow] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [fuOpen, setFuOpen] = useState(false)
+  const [presets, setPresets] = useState<{ id: string; title: string; body: string }[]>([])
+
   const [reasons, setReasons] = useState<{ id: string; name: string }[]>([])
   const [cancelStage, setCancelStage] = useState<string | null>(null)
   const [cancelPick, setCancelPick] = useState('')
   const [cancelNote, setCancelNote] = useState('')
+
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const nameOf = (id: string | null) => (id ? staff.find((s) => s.id === id)?.full_name ?? (id === myId ? 'You' : '—') : 'System')
   const stageName = (id: unknown) => stages.find((s) => s.id === id)?.name ?? '—'
@@ -56,9 +74,16 @@ export default function LeadDrawer({
     setActs((a.data ?? []) as Activity[])
   }, [leadId])
 
+  useEffect(() => { load() }, [load])
+
   useEffect(() => {
-    load()
-  }, [load])
+    supabase
+      .from('lead_followup_messages')
+      .select('id, title, body')
+      .eq('is_active', true)
+      .order('sort_order')
+      .then(({ data }) => setPresets((data ?? []) as { id: string; title: string; body: string }[]))
+  }, [])
 
   useEffect(() => {
     supabase
@@ -69,9 +94,21 @@ export default function LeadDrawer({
       .then(({ data }) => setReasons((data ?? []) as { id: string; name: string }[]))
   }, [])
 
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [menu])
+
+  useEffect(() => {
+    if (!msg) return
+    const t = setTimeout(() => setMsg(null), 3000)
+    return () => clearTimeout(t)
+  }, [msg])
+
   async function update(patch: Record<string, unknown>, ok = 'Saved.') {
     setBusy(true)
-    setMsg(null)
     const { error } = await supabase.from('leads').update(patch).eq('id', leadId)
     setBusy(false)
     if (error) return setMsg({ type: 'error', text: error.message })
@@ -94,34 +131,40 @@ export default function LeadDrawer({
       source: form.source,
       estimated_amount: Number(form.estimated_amount) || 0,
     })
+    setEditMode(false)
   }
 
   async function addActivity() {
     if (!actText.trim()) return setMsg({ type: 'error', text: 'Write what happened.' })
     if (!actFollow) return setMsg({ type: 'error', text: 'Pick the next follow-up date and time.' })
+
     setBusy(true)
-    setMsg(null)
     const { error } = await supabase.from('lead_activities').insert({
       lead_id: leadId,
       user_id: myId,
-      type: actFollow && !actText.trim() ? 'follow_up' : actType,
-      body: actText.trim() || null,
-      meta: actFollow ? { follow_up: fromInputDT(actFollow) } : null,
+      type: actType,
+      body: actText.trim(),
+      meta: { follow_up: fromInputDT(actFollow) },
     })
     if (error) {
       setBusy(false)
       return setMsg({ type: 'error', text: error.message })
     }
-    const patch: Record<string, unknown> = { last_activity_at: new Date().toISOString() }
-    if (actFollow) patch.next_follow_up = fromInputDT(actFollow)
+    const patch: Record<string, unknown> = {
+      last_activity_at: new Date().toISOString(),
+      next_follow_up: fromInputDT(actFollow),
+    }
     // First follow-up on a brand new lead moves it to Processing
     const firstStage = [...stages].sort((a, b) => a.sort_order - b.sort_order)[0]
     const processing = stages.find((x) => x.name.toLowerCase() === 'processing')
-    if (actFollow && processing && lead?.stage_id === firstStage?.id) patch.stage_id = processing.id
+    if (processing && lead?.stage_id === firstStage?.id) patch.stage_id = processing.id
     if (editable) await supabase.from('leads').update(patch).eq('id', leadId)
+
     setBusy(false)
     setActText('')
     setActFollow('')
+    setFuOpen(false)
+    setMsg({ type: 'success', text: 'Follow-up added.' })
     await load()
     onChanged()
   }
@@ -132,19 +175,42 @@ export default function LeadDrawer({
     onClose()
   }
 
+  function pickStage(s: Stage) {
+    setMenu(null)
+    if (s.id === lead?.stage_id) return
+    if (s.is_lost) {
+      setCancelPick('')
+      setCancelNote('')
+      setCancelStage(s.id)
+      return
+    }
+    update({ stage_id: s.id }, `Moved to ${s.name}.`)
+  }
+
   const inputCls =
     'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none disabled:opacity-60'
   const stage = stages.find((s) => s.id === lead?.stage_id)
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager' || s.role === 'hr'))
   const leadLabel = labels.find((x) => x.id === lead?.label_id)
   const formFields = lead?.meta_fields && typeof lead.meta_fields === 'object' ? Object.entries(lead.meta_fields) : []
+  const followUps = acts.filter((a) => a.meta?.follow_up || a.type === 'follow_up')
+  const iconBtn = 'rounded-lg p-2 text-gray-400 transition-colors hover:bg-[#1f1f1f] hover:text-white'
+
+  const TABS: { key: TabKey; label: string; count?: number }[] = [
+    { key: 'details', label: 'Details' },
+    { key: 'followup', label: 'Follow-ups', count: followUps.length },
+    { key: 'history', label: 'History', count: acts.length },
+  ]
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <aside className="relative flex h-full w-full max-w-2xl flex-col border-l border-[#242424] bg-[#121212]">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-[#222] px-6 py-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6" onClick={() => !busy && onClose()}>
+      <div className="absolute inset-0 bg-black/70" />
+      <div
+        className="relative flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#242424] bg-[#121212]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Title bar */}
+        <div className="flex items-start justify-between gap-3 border-b border-[#222] bg-[#171717] px-5 py-3.5">
           <div className="min-w-0">
             <p className="text-xs text-gray-500">Lead #{lead?.lead_no}</p>
             <h2 className="truncate text-lg font-semibold">{lead?.name ?? 'Loading…'}</h2>
@@ -154,245 +220,313 @@ export default function LeadDrawer({
                 {leadLabel && (
                   <span className={`rounded-full border px-2 py-0.5 ${LABEL_CLS[leadLabel.color] ?? LABEL_CLS.gray}`}>{leadLabel.name}</span>
                 )}
-                {lead.campaign_name && <span className="text-gray-500">{lead.campaign_name}</span>}
+                {stage && <span className="rounded-full px-2 py-0.5 text-white" style={{ background: stage.color }}>{stage.name}</span>}
                 {isOverdue(lead, stage) && <span className="rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">OVERDUE</span>}
               </div>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            {lead?.phone && (
-              <a href={`tel:${lead.phone}`} className="rounded-lg p-2 text-gray-400 hover:bg-[#1f1f1f] hover:text-white" title="Call">
-                <Phone size={17} />
-              </a>
-            )}
-            {waLink(lead?.phone ?? null) && (
-              <a href={waLink(lead!.phone)!} target="_blank" rel="noreferrer" className="rounded-lg p-2 text-green-400 hover:bg-[#1f1f1f]" title="WhatsApp">
-                <MessageCircle size={17} />
-              </a>
-            )}
-            {can('lead_delete') && (
-              <button onClick={remove} className="rounded-lg p-2 text-gray-500 hover:bg-red-950/40 hover:text-red-400" title="Delete">
-                <Trash2 size={17} />
-              </button>
-            )}
-            <button onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
-              <X size={18} />
+          <button onClick={onClose} className={iconBtn} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Action row */}
+        <div className="relative flex flex-wrap items-center gap-1 border-b border-[#222] px-4 py-2">
+          {lead?.phone && (
+            <a href={`tel:${lead.phone}`} className={iconBtn} title="Call">
+              <Phone size={17} />
+            </a>
+          )}
+          {waLink(lead?.phone ?? null) && (
+            <a href={waLink(lead!.phone)!} target="_blank" rel="noreferrer" className={`${iconBtn} text-green-500 hover:text-green-400`} title="WhatsApp">
+              <MessageCircle size={17} />
+            </a>
+          )}
+          {editable && (
+            <button onClick={() => { setTab('details'); setEditMode(true) }} className={iconBtn} title="Edit details">
+              <Pencil size={17} />
             </button>
-          </div>
+          )}
+          {editable && (
+            <button onClick={() => { setActText(''); setActFollow(''); setFuOpen(true) }} className={iconBtn} title="Add follow-up">
+              <CalendarPlus size={17} />
+            </button>
+          )}
+          {editable && (
+            <button onClick={(e) => { e.stopPropagation(); setMenu(menu === 'stage' ? null : 'stage') }} className={iconBtn} title="Change stage">
+              <TrendingUp size={17} />
+            </button>
+          )}
+          {can('lead_assign') && (
+            <button onClick={(e) => { e.stopPropagation(); setMenu(menu === 'assign' ? null : 'assign') }} className={iconBtn} title="Transfer">
+              <UserCog size={17} />
+            </button>
+          )}
+          {editable && labels.length > 0 && (
+            <button onClick={(e) => { e.stopPropagation(); setMenu(menu === 'label' ? null : 'label') }} className={iconBtn} title="Label">
+              <Tag size={17} />
+            </button>
+          )}
+          <button onClick={() => load()} className={iconBtn} title="Refresh">
+            <RefreshCw size={17} />
+          </button>
+          {can('lead_delete') && (
+            <button onClick={remove} className={`${iconBtn} hover:text-red-400`} title="Delete">
+              <Trash2 size={17} />
+            </button>
+          )}
+
+          {menu && (
+            <div className="absolute left-4 top-12 z-20 max-h-64 w-56 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
+              {menu === 'stage' &&
+                stages.map((s) => {
+                  const needs = Boolean((s as { requires_follow_up?: boolean }).requires_follow_up) && !lead?.next_follow_up
+                  return (
+                    <button
+                      key={s.id}
+                      disabled={s.id === lead?.stage_id || needs}
+                      onClick={() => pickStage(s)}
+                      title={needs ? 'Set a follow-up first' : undefined}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white disabled:opacity-40"
+                    >
+                      <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
+                      {s.name}
+                    </button>
+                  )
+                })}
+              {menu === 'assign' && (
+                <>
+                  <button onClick={() => { setMenu(null); update({ assigned_to: null }, 'Lead unassigned.') }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                    Unassigned
+                  </button>
+                  {assignable.map((s) => (
+                    <button key={s.id} onClick={() => { setMenu(null); update({ assigned_to: s.id }, 'Lead transferred.') }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
+                      {s.full_name}
+                    </button>
+                  ))}
+                </>
+              )}
+              {menu === 'label' && (
+                <>
+                  <button onClick={() => { setMenu(null); update({ label_id: null }, 'Label removed.') }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                    No label
+                  </button>
+                  {labels.map((lb) => (
+                    <button key={lb.id} onClick={() => { setMenu(null); update({ label_id: lb.id }, 'Label updated.') }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
+                      <span className={`h-2 w-2 rounded-full border ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`} />
+                      {lb.name}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 border-b border-[#222] px-4">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm transition-colors ${
+                tab === t.key ? 'border-orange-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              {t.label}
+              {t.count !== undefined && <span className="rounded-full bg-[#242424] px-1.5 py-0.5 text-[11px] text-gray-300">{t.count}</span>}
+            </button>
+          ))}
         </div>
 
         {msg && (
-          <div className={`mx-6 mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${msg.type === 'success' ? 'border-green-900 bg-green-950/40 text-green-300' : 'border-red-900 bg-red-950/40 text-red-300'}`}>
+          <div className={`mx-5 mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${msg.type === 'success' ? 'border-green-900 bg-green-950/40 text-green-300' : 'border-red-900 bg-red-950/40 text-red-300'}`}>
             {msg.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
             {msg.text}
           </div>
         )}
 
+        {/* Body */}
         {lead && form && (
-          <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
-            {/* Stage */}
-            <div>
-              <p className="mb-2 text-xs text-gray-400">Stage</p>
-              <div className="flex flex-wrap gap-2">
-                {stages.map((s) => {
-                  const needsFollowUp = Boolean((s as { requires_follow_up?: boolean }).requires_follow_up) && !lead.next_follow_up
-                  return (
-                    <button
-                      key={s.id}
-                      disabled={!editable || busy || s.id === lead.stage_id || needsFollowUp}
-                      onClick={() => {
-                        if (s.is_lost) {
-                          setCancelPick('')
-                          setCancelNote('')
-                          setCancelStage(s.id)
-                        } else {
-                          update({ stage_id: s.id }, `Moved to ${s.name}.`)
-                        }
-                      }}
-                      title={needsFollowUp ? 'Set the next follow-up first' : undefined}
-                      className="rounded-full border px-3 py-1 text-xs transition-colors disabled:cursor-default disabled:opacity-40"
-                      style={
-                        s.id === lead.stage_id
-                          ? { background: s.color, borderColor: s.color, color: '#fff' }
-                          : { borderColor: '#2a2a2a', color: '#bbb' }
-                      }
-                    >
-                      {s.name}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+          <div className="flex-1 overflow-y-auto px-5 py-5">
+            {tab === 'details' && (
+              <div className="space-y-5">
+                {lead.cancel_reason && (
+                  <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-4 text-sm">
+                    <p className="text-red-300">Cancelled · {lead.cancel_reason}</p>
+                    {lead.cancel_note && <p className="mt-1 text-gray-300">{lead.cancel_note}</p>}
+                  </div>
+                )}
 
-            {!lead.next_follow_up && (
-              <p className="-mt-4 text-xs text-gray-500">Set a next follow-up below to move this lead forward.</p>
-            )}
-
-            {/* Assign + label + rating + follow-up */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1.5 block text-xs text-gray-400">Assigned to</span>
-                <select
-                  value={lead.assigned_to ?? ''}
-                  disabled={!can('lead_assign') || busy}
-                  onChange={(e) => update({ assigned_to: e.target.value || null }, 'Lead transferred.')}
-                  className={inputCls}
-                >
-                  <option value="">Unassigned</option>
-                  {(can('lead_assign') ? assignable : staff.filter((s) => s.id === lead.assigned_to)).map((s) => (
-                    <option key={s.id} value={s.id}>{s.full_name}</option>
-                  ))}
-                </select>
-                <span className="mt-1 block text-[11px] text-gray-500">
-                  by {nameOf(lead.assigned_by)} · {fmtDT(lead.assigned_at)}
-                </span>
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-xs text-gray-400">Label</span>
-                <select
-                  value={lead.label_id ?? ''}
-                  disabled={!editable || busy}
-                  onChange={(e) => update({ label_id: e.target.value || null }, 'Label updated.')}
-                  className={inputCls}
-                >
-                  <option value="">No label</option>
-                  {labels.map((lb) => (
-                    <option key={lb.id} value={lb.id}>{lb.name}</option>
-                  ))}
-                </select>
-              </label>
-              <div>
-                <span className="mb-1.5 block text-xs text-gray-400">Next follow-up</span>
-                <p className={`py-2 text-sm ${isOverdue(lead, stage) ? 'text-red-400' : 'text-gray-300'}`}>
-                  {lead.next_follow_up ? fmtDT(lead.next_follow_up) : 'Not set — add one below'}
-                </p>
-              </div>
-              <div>
-                <span className="mb-1.5 block text-xs text-gray-400">Rating</span>
-                <div className="flex gap-1 py-1.5">
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <button key={n} disabled={!editable || busy} onClick={() => update({ rating: n === lead.rating ? 0 : n })} aria-label={`${n} stars`}>
-                      <Star size={20} className={n <= lead.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-600'} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {lead.cancel_reason && (
-              <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-4 text-sm">
-                <p className="text-red-300">Cancelled · {lead.cancel_reason}</p>
-                {lead.cancel_note && <p className="mt-1 text-gray-300">{lead.cancel_note}</p>}
-              </div>
-            )}
-
-            {/* Details */}
-            <div className="rounded-xl border border-[#222] p-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                {(
-                  [
-                    ['name', 'Name *'],
-                    ['phone', 'Phone'],
-                    ['alt_phone', 'Alternate phone'],
-                    ['email', 'Email'],
-                    ['company', 'Company'],
-                    ['city', 'City'],
-                  ] as const
-                ).map(([k, l]) => (
-                  <label key={k} className="block">
-                    <span className="mb-1 block text-xs text-gray-400">{l}</span>
-                    <input value={(form[k] as string | null) ?? ''} disabled={!editable} onChange={(e) => setForm({ ...form, [k]: e.target.value })} className={inputCls} />
-                  </label>
-                ))}
-                <label className="block">
-                  <span className="mb-1 block text-xs text-gray-400">Source</span>
-                  <select value={form.source} disabled={!editable} onChange={(e) => setForm({ ...form, source: e.target.value })} className={inputCls}>
-                    {SOURCES.map((s) => (
-                      <option key={s.key} value={s.key}>{s.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-gray-400">Estimated amount (₹)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    onWheel={(e) => e.currentTarget.blur()}
-                    value={form.estimated_amount ?? 0}
-                    disabled={!editable}
-                    onChange={(e) => setForm({ ...form, estimated_amount: Number(e.target.value) })}
-                    className={`${inputCls} tabular-nums`}
-                  />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="mb-1 block text-xs text-gray-400">Requirement</span>
-                  <textarea rows={2} value={form.requirement ?? ''} disabled={!editable} onChange={(e) => setForm({ ...form, requirement: e.target.value })} className={`${inputCls} resize-y`} />
-                </label>
-              </div>
-              {editable && (
-                <div className="mt-3 flex justify-end">
-                  <button onClick={saveDetails} disabled={busy} className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60">
-                    Save details
-                  </button>
-                </div>
-              )}
-              <p className="mt-2 text-[11px] text-gray-500">
-                Created {fmtDT(lead.created_at)} by {nameOf(lead.created_by)}
-                {lead.form_name && ` · Form: ${lead.form_name}`} · Estimated {inr(Number(lead.estimated_amount) || 0)}
-              </p>
-            </div>
-
-            {/* Facebook form answers */}
-            {formFields.length > 0 && (
-              <div className="rounded-xl border border-[#222] p-4">
-                <p className="mb-2 text-sm font-medium text-gray-300">Form answers</p>
-                <dl className="grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2">
-                  {formFields.map(([k, v]) => (
-                    <div key={k} className="flex gap-2">
-                      <dt className="shrink-0 text-gray-500">{k.replace(/_/g, ' ')}:</dt>
-                      <dd className="break-words text-gray-300">{String(v)}</dd>
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <section className="overflow-hidden rounded-xl border border-[#242424]">
+                    <h3 className="bg-[#1b1b1b] px-4 py-2.5 text-sm font-medium text-gray-300">Lead information</h3>
+                    <div className="space-y-3 p-4">
+                      {editMode ? (
+                        <>
+                          {(
+                            [
+                              ['name', 'Name *'],
+                              ['phone', 'Phone'],
+                              ['alt_phone', 'Alternate phone'],
+                              ['email', 'Email'],
+                              ['company', 'Company'],
+                              ['city', 'City'],
+                            ] as const
+                          ).map(([k, l]) => (
+                            <label key={k} className="block">
+                              <span className="mb-1 block text-xs text-gray-400">{l}</span>
+                              <input value={(form[k] as string | null) ?? ''} onChange={(e) => setForm({ ...form, [k]: e.target.value })} className={inputCls} />
+                            </label>
+                          ))}
+                          <label className="block">
+                            <span className="mb-1 block text-xs text-gray-400">Requirement</span>
+                            <textarea rows={3} value={form.requirement ?? ''} onChange={(e) => setForm({ ...form, requirement: e.target.value })} className={`${inputCls} resize-y`} />
+                          </label>
+                          <div className="flex justify-end gap-2 pt-1">
+                            <button onClick={() => { setForm(lead); setEditMode(false) }} className="rounded-lg px-3 py-2 text-sm text-gray-400 hover:text-white">
+                              Cancel
+                            </button>
+                            <button onClick={saveDetails} disabled={busy} className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60">
+                              Save details
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <Row label="Name" value={lead.name} />
+                          <Row label="Company" value={lead.company} />
+                          <Row label="Phone" value={lead.phone} />
+                          <Row label="Alternate phone" value={lead.alt_phone} />
+                          <Row label="Email" value={lead.email} />
+                          <Row label="City" value={lead.city} />
+                          <Row label="Requirement" value={lead.requirement} wrap />
+                          {lead.campaign_name && <Row label="Campaign" value={lead.campaign_name} />}
+                          {lead.form_name && <Row label="Form" value={lead.form_name} />}
+                        </>
+                      )}
                     </div>
-                  ))}
-                </dl>
+                  </section>
+
+                  <section className="overflow-hidden rounded-xl border border-[#242424]">
+                    <h3 className="bg-[#1b1b1b] px-4 py-2.5 text-sm font-medium text-gray-300">General information</h3>
+                    <div className="space-y-3 p-4">
+                      <Row label="Created" value={`${fmtDT(lead.created_at)} · ${nameOf(lead.created_by)}`} />
+                      <Row
+                        label="Next follow-up"
+                        value={lead.next_follow_up ? fmtDT(lead.next_follow_up) : 'Not set'}
+                        tone={isOverdue(lead, stage) ? 'text-red-400' : undefined}
+                      />
+                      <Row label="Stage" value={stage?.name ?? '—'} />
+                      <Row label="Source" value={sourceOf(lead.source).label} />
+                      <Row label="Label" value={leadLabel?.name ?? 'No label'} />
+                      <Row label="Estimated amount" value={inr(Number(lead.estimated_amount) || 0)} />
+
+                      <div>
+                        <p className="mb-1 text-xs text-gray-500">Rating</p>
+                        <div className="flex gap-1">
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <button key={n} disabled={!editable || busy} onClick={() => update({ rating: n === lead.rating ? 0 : n })} aria-label={`${n} stars`}>
+                              <Star size={18} className={n <= lead.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-600'} />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <label className="block">
+                        <span className="mb-1 block text-xs text-gray-500">Assigned to</span>
+                        <select
+                          value={lead.assigned_to ?? ''}
+                          disabled={!can('lead_assign') || busy}
+                          onChange={(e) => update({ assigned_to: e.target.value || null }, 'Lead transferred.')}
+                          className={inputCls}
+                        >
+                          <option value="">Unassigned</option>
+                          {(can('lead_assign') ? assignable : staff.filter((s) => s.id === lead.assigned_to)).map((s) => (
+                            <option key={s.id} value={s.id}>{s.full_name}</option>
+                          ))}
+                        </select>
+                        <span className="mt-1 block text-[11px] text-gray-500">
+                          by {nameOf(lead.assigned_by)} · {fmtDT(lead.assigned_at)}
+                        </span>
+                      </label>
+
+                      {editMode && (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block">
+                            <span className="mb-1 block text-xs text-gray-500">Source</span>
+                            <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className={inputCls}>
+                              {SOURCES.map((s) => (
+                                <option key={s.key} value={s.key}>{s.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-xs text-gray-500">Estimated amount (₹)</span>
+                            <input
+                              type="number"
+                              min={0}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              value={form.estimated_amount ?? 0}
+                              onChange={(e) => setForm({ ...form, estimated_amount: Number(e.target.value) })}
+                              className={`${inputCls} tabular-nums`}
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+
+                {formFields.length > 0 && (
+                  <section className="overflow-hidden rounded-xl border border-[#242424]">
+                    <h3 className="bg-[#1b1b1b] px-4 py-2.5 text-sm font-medium text-gray-300">Form answers</h3>
+                    <dl className="grid gap-x-6 gap-y-2 p-4 text-xs sm:grid-cols-2">
+                      {formFields.map(([k, v]) => (
+                        <div key={k} className="flex gap-2">
+                          <dt className="shrink-0 text-gray-500">{k.replace(/_/g, ' ')}:</dt>
+                          <dd className="break-words text-gray-300">{String(v)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                )}
               </div>
             )}
 
-            {/* Add activity */}
-            <div className="rounded-xl border border-[#222] p-4">
-              <p className="text-sm font-medium text-gray-300">Log activity</p>
-              <p className="mb-2 text-xs text-gray-500">Every entry sets the next follow-up, so you only pick the date once.</p>
-              <div className="flex flex-wrap gap-2">
-                {(['note', 'call', 'whatsapp', 'meeting'] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setActType(t)}
-                    className={`rounded-full px-3 py-1 text-xs ${actType === t ? 'bg-orange-500 font-medium text-black' : 'bg-[#1a1a1a] text-gray-400 hover:text-white'}`}
-                  >
-                    {ACT_LABEL[t]}
-                  </button>
-                ))}
-              </div>
-              <textarea
-                rows={2}
-                value={actText}
-                onChange={(e) => setActText(e.target.value)}
-                placeholder="What happened? e.g. Called, asked for quotation"
-                className={`${inputCls} mt-3 resize-y`}
-              />
-              <div className="mt-3 flex flex-wrap items-end gap-3">
-                <label className="block">
-                  <span className="mb-1 block text-xs text-gray-400">Next follow-up *</span>
-                  <input type="datetime-local" value={actFollow} onChange={(e) => setActFollow(e.target.value)} className={`${inputCls} [color-scheme:dark]`} />
-                </label>
-                <button onClick={addActivity} disabled={busy} className="ml-auto flex items-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60">
-                  <Send size={14} /> Add
+            {tab === 'followup' && (
+              <div className="space-y-5">
+                <button
+                  onClick={() => { setActText(''); setActFollow(''); setFuOpen(true) }}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#2f2f2f] py-3 text-sm text-gray-400 hover:border-orange-500/50 hover:text-white"
+                >
+                  <CalendarPlus size={16} /> Add follow-up
                 </button>
-              </div>
-            </div>
 
-            {/* Timeline */}
-            <div>
-              <p className="mb-3 text-sm font-medium text-gray-300">Timeline</p>
+                {followUps.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-gray-500">No follow-ups yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {followUps.map((a) => (
+                      <li key={a.id} className="rounded-lg border border-[#242424] bg-[#151515] px-4 py-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[11px] text-gray-400">{ACT_LABEL[a.type] ?? a.type}</span>
+                          <span className="text-gray-300">{a.body}</span>
+                          {a.meta?.follow_up ? (
+                            <span className="ml-auto inline-flex items-center gap-1 text-xs text-orange-400">
+                              <Clock size={12} /> {fmtDT(a.meta.follow_up as string)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-[11px] text-gray-500">{nameOf(a.user_id)} · {fmtDT(a.created_at)}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {tab === 'history' && (
               <ol className="space-y-3 border-l border-[#262626] pl-4">
                 {acts.map((a) => (
                   <li key={a.id} className="relative text-sm">
@@ -414,17 +548,102 @@ export default function LeadDrawer({
                         </>
                       )}
                     </p>
-                    <p className="text-[11px] text-gray-500">
-                      {nameOf(a.user_id)} · {fmtDT(a.created_at)}
-                    </p>
+                    <p className="text-[11px] text-gray-500">{nameOf(a.user_id)} · {fmtDT(a.created_at)}</p>
                   </li>
                 ))}
               </ol>
-            </div>
+            )}
           </div>
         )}
-      </aside>
+      </div>
 
+      {/* Add follow-up */}
+      {fuOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => !busy && setFuOpen(false)}>
+          <div className="absolute inset-0 bg-black/70" />
+          <div className="relative w-full max-w-md rounded-2xl border border-[#242424] bg-[#151515]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between border-b border-[#242424] px-5 py-4">
+              <div>
+                <h2 className="font-semibold">Add follow-up</h2>
+                <p className="mt-0.5 text-xs text-gray-500">#{lead?.lead_no} {lead?.name}</p>
+              </div>
+              <button onClick={() => setFuOpen(false)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-5">
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">Next follow-up date <span className="text-orange-400">*</span></span>
+                <input
+                  type="datetime-local"
+                  value={actFollow}
+                  onChange={(e) => setActFollow(e.target.value)}
+                  className={`${inputCls} [color-scheme:dark]`}
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">Follow-up message</span>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const pick = presets.find((x) => x.id === e.target.value)
+                    if (pick) setActText(pick.body)
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">Select a ready message…</option>
+                  {presets.map((m) => (
+                    <option key={m.id} value={m.id}>{m.title}</option>
+                  ))}
+                </select>
+              </label>
+
+              <div>
+                <span className="mb-1.5 block text-xs text-gray-400">Activity type</span>
+                <div className="flex flex-wrap gap-2">
+                  {(['note', 'call', 'whatsapp', 'meeting'] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setActType(t)}
+                      className={`rounded-full px-3 py-1 text-xs ${actType === t ? 'bg-orange-500 font-medium text-black' : 'bg-[#1a1a1a] text-gray-400 hover:text-white'}`}
+                    >
+                      {ACT_LABEL[t]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">Comment / message <span className="text-orange-400">*</span></span>
+                <textarea
+                  rows={4}
+                  value={actText}
+                  onChange={(e) => setActText(e.target.value)}
+                  placeholder="Enter message"
+                  className={`${inputCls} resize-y`}
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-[#242424] px-5 py-4">
+              <button onClick={() => setFuOpen(false)} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white">
+                Cancel
+              </button>
+              <button
+                onClick={addActivity}
+                disabled={busy}
+                className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60"
+              >
+                <Send size={14} /> {busy ? 'Saving…' : 'Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel reason */}
       {cancelStage && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => !busy && setCancelStage(null)}>
           <div className="absolute inset-0 bg-black/70" />
@@ -502,6 +721,15 @@ export default function LeadDrawer({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function Row({ label, value, wrap, tone }: { label: string; value: string | null | undefined; wrap?: boolean; tone?: string }) {
+  return (
+    <div className="border-b border-[#1e1e1e] pb-2 last:border-0 last:pb-0">
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className={`mt-0.5 text-sm ${tone ?? 'text-gray-200'} ${wrap ? 'whitespace-pre-wrap' : 'truncate'}`}>{value || '—'}</p>
     </div>
   )
 }
