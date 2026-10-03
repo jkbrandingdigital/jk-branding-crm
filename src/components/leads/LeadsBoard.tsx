@@ -115,6 +115,10 @@ export default function LeadsBoard() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [fu, setFu] = useState<{ lead: LeadL; when: string; text: string } | null>(null)
+  const [cancelFor, setCancelFor] = useState<{ leadId: string; stageId: string; name: string } | null>(null)
+  const [reasons, setReasons] = useState<{ id: string; name: string }[]>([])
+  const [cancelPick, setCancelPick] = useState('')
+  const [cancelNote, setCancelNote] = useState('')
   const [fuErr, setFuErr] = useState<string | null>(null)
   const [lookup, setLookup] = useState<LookupRow[]>([])
   const [looking, setLooking] = useState(false)
@@ -122,13 +126,14 @@ export default function LeadsBoard() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [{ data: u }, st, sf, ls, lb, lm] = await Promise.all([
+      const [{ data: u }, st, sf, ls, lb, lm, cr] = await Promise.all([
         supabase.auth.getUser(),
         supabase.from('lead_stages').select('*').eq('is_active', true).order('sort_order'),
         loadStaff(),
         loadLeads(),
         supabase.from('lead_labels').select('*').eq('is_active', true).order('sort_order'),
         supabase.from('leads').select('id, label_id'),
+        supabase.from('lead_cancel_reasons').select('id, name').eq('is_active', true).order('sort_order'),
       ])
       const labelOf = new Map<string, string | null>(((lm.data ?? []) as { id: string; label_id: string | null }[]).map((r) => [r.id, r.label_id]))
       setMyId(u.user?.id ?? null)
@@ -136,6 +141,7 @@ export default function LeadsBoard() {
       setStaff(sf)
       setLeads((ls as LeadL[]).map((l) => ({ ...l, label_id: labelOf.get(l.id) ?? null })))
       setLabels((lb.data ?? []) as Label[])
+      setReasons((cr.data ?? []) as { id: string; name: string }[])
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -220,6 +226,14 @@ export default function LeadsBoard() {
     setMenu(null)
     const lead = leads.find((l) => l.id === leadId)
     if (!lead || lead.stage_id === stageId || !can('lead_edit')) return
+
+    const target = stages.find((x) => x.id === stageId)
+    if (target?.is_lost) {
+      setCancelPick('')
+      setCancelNote('')
+      setCancelFor({ leadId, stageId, name: target.name })
+      return
+    }
     setLeads((all) => all.map((l) => (l.id === leadId ? { ...l, stage_id: stageId } : l)))
     const { error: e } = await supabase.from('leads').update({ stage_id: stageId }).eq('id', leadId)
     if (e) {
@@ -270,13 +284,36 @@ export default function LeadsBoard() {
       setBusy(false)
       return setFuErr(aErr.message)
     }
-    const { error: lErr } = await supabase
-      .from('leads')
-      .update({ next_follow_up: when, last_activity_at: new Date().toISOString() })
-      .eq('id', fu.lead.id)
+    // First follow-up on a brand new lead moves it to Processing
+    const firstStage = [...stages].sort((a, b) => a.sort_order - b.sort_order)[0]
+    const processing = stages.find((x) => x.name.toLowerCase() === 'processing')
+    const patch: Record<string, unknown> = { next_follow_up: when, last_activity_at: new Date().toISOString() }
+    if (processing && fu.lead.stage_id === firstStage?.id) patch.stage_id = processing.id
+
+    const { error: lErr } = await supabase.from('leads').update(patch).eq('id', fu.lead.id)
     setBusy(false)
     if (lErr) return setFuErr(lErr.message)
     setFu(null)
+    load()
+  }
+
+  // ---------- Cancel with a reason ----------
+  async function confirmCancel() {
+    if (!cancelFor) return
+    if (!cancelPick) return setError('Pick a reason first.')
+    setBusy(true)
+    const { error: e } = await supabase
+      .from('leads')
+      .update({
+        stage_id: cancelFor.stageId,
+        cancel_reason: cancelPick,
+        cancel_note: cancelNote.trim() || null,
+        cancelled_at: new Date().toISOString(),
+      })
+      .eq('id', cancelFor.leadId)
+    setBusy(false)
+    if (e) return setError(e.message)
+    setCancelFor(null)
     load()
   }
 
@@ -765,6 +802,73 @@ export default function LeadsBoard() {
       {/* Lead detail */}
       {openId && (
         <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={() => setOpenId(null)} onChanged={load} />
+      )}
+
+      {/* Cancel reason */}
+      {cancelFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => !busy && setCancelFor(null)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative w-full max-w-lg rounded-2xl border border-[#242424] bg-[#151515]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
+              <div>
+                <h2 className="font-semibold">Cancel lead</h2>
+                <p className="mt-0.5 text-xs text-gray-500">Tell us why, so the reports stay useful.</p>
+              </div>
+              <button onClick={() => setCancelFor(null)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-5">
+              <p className="text-xs text-gray-400">Select reason <span className="text-orange-400">*</span></p>
+              <ul className="grid auto-rows-fr gap-2 sm:grid-cols-2">
+                {reasons.map((r) => (
+                  <li key={r.id} className="h-full">
+                    <label
+                      className={`flex h-full cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm leading-snug transition-colors ${
+                        cancelPick === r.name
+                          ? 'border-orange-500 bg-orange-500/10 text-white'
+                          : 'border-[#2a2a2a] text-gray-300 hover:border-[#3a3a3a] hover:text-white'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="cancel-reason"
+                        checked={cancelPick === r.name}
+                        onChange={() => setCancelPick(r.name)}
+                        className="h-4 w-4 shrink-0 accent-orange-500"
+                      />
+                      <span className="min-w-0">{r.name}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">Note (optional)</span>
+                <textarea
+                  rows={2}
+                  value={cancelNote}
+                  onChange={(e) => setCancelNote(e.target.value)}
+                  placeholder="Anything worth remembering about this lead"
+                  className={`${inputCls} resize-y`}
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-[#242424] px-5 py-4">
+              <button onClick={() => setCancelFor(null)} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white">
+                Keep lead
+              </button>
+              <button
+                onClick={confirmCancel}
+                disabled={!cancelPick || busy}
+                className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
+              >
+                {busy ? 'Saving…' : 'Cancel lead'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Import */}

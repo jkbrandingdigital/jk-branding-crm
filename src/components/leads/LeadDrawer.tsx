@@ -3,10 +3,10 @@ import { X, Phone, MessageCircle, Star, Trash2, Send, AlertCircle, CheckCircle2,
 import { supabase } from '../../lib/supabase'
 import { inr } from '../../lib/format'
 import { LABEL_CLS, type Label } from './labels'
-import { SOURCES, sourceOf, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
+import { SOURCES, sourceOf, toInputDT, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
-type LeadL = Lead & { label_id?: string | null; meta_fields?: Record<string, string> | null }
+type LeadL = Lead & { label_id?: string | null; meta_fields?: Record<string, string> | null; cancel_reason?: string | null; cancel_note?: string | null }
 
 const ACT_LABEL: Record<string, string> = {
   note: 'Note',
@@ -36,6 +36,10 @@ export default function LeadDrawer({
   const [actFollow, setActFollow] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [reasons, setReasons] = useState<{ id: string; name: string }[]>([])
+  const [cancelStage, setCancelStage] = useState<string | null>(null)
+  const [cancelPick, setCancelPick] = useState('')
+  const [cancelNote, setCancelNote] = useState('')
 
   const nameOf = (id: string | null) => (id ? staff.find((s) => s.id === id)?.full_name ?? (id === myId ? 'You' : '—') : 'System')
   const stageName = (id: unknown) => stages.find((s) => s.id === id)?.name ?? '—'
@@ -55,6 +59,15 @@ export default function LeadDrawer({
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    supabase
+      .from('lead_cancel_reasons')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('sort_order')
+      .then(({ data }) => setReasons((data ?? []) as { id: string; name: string }[]))
+  }, [])
 
   async function update(patch: Record<string, unknown>, ok = 'Saved.') {
     setBusy(true)
@@ -101,6 +114,10 @@ export default function LeadDrawer({
     }
     const patch: Record<string, unknown> = { last_activity_at: new Date().toISOString() }
     if (actFollow) patch.next_follow_up = fromInputDT(actFollow)
+    // First follow-up on a brand new lead moves it to Processing
+    const firstStage = [...stages].sort((a, b) => a.sort_order - b.sort_order)[0]
+    const processing = stages.find((x) => x.name.toLowerCase() === 'processing')
+    if (actFollow && processing && lead?.stage_id === firstStage?.id) patch.stage_id = processing.id
     if (editable) await supabase.from('leads').update(patch).eq('id', leadId)
     setBusy(false)
     setActText('')
@@ -183,7 +200,15 @@ export default function LeadDrawer({
                     <button
                       key={s.id}
                       disabled={!editable || busy || s.id === lead.stage_id || needsFollowUp}
-                      onClick={() => update({ stage_id: s.id }, `Moved to ${s.name}.`)}
+                      onClick={() => {
+                        if (s.is_lost) {
+                          setCancelPick('')
+                          setCancelNote('')
+                          setCancelStage(s.id)
+                        } else {
+                          update({ stage_id: s.id }, `Moved to ${s.name}.`)
+                        }
+                      }}
                       title={needsFollowUp ? 'Set the next follow-up first' : undefined}
                       className="rounded-full border px-3 py-1 text-xs transition-colors disabled:cursor-default disabled:opacity-40"
                       style={
@@ -253,6 +278,13 @@ export default function LeadDrawer({
                 </div>
               </div>
             </div>
+
+            {lead.cancel_reason && (
+              <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-4 text-sm">
+                <p className="text-red-300">Cancelled · {lead.cancel_reason}</p>
+                {lead.cancel_note && <p className="mt-1 text-gray-300">{lead.cancel_note}</p>}
+              </div>
+            )}
 
             {/* Details */}
             <div className="rounded-xl border border-[#222] p-4">
@@ -392,6 +424,84 @@ export default function LeadDrawer({
           </div>
         )}
       </aside>
+
+      {cancelStage && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => !busy && setCancelStage(null)}>
+          <div className="absolute inset-0 bg-black/70" />
+          <div className="relative w-full max-w-lg rounded-2xl border border-[#242424] bg-[#151515]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
+              <div>
+                <h2 className="font-semibold">Cancel lead</h2>
+                <p className="mt-0.5 text-xs text-gray-500">Tell us why, so the reports stay useful.</p>
+              </div>
+              <button onClick={() => setCancelStage(null)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-5">
+              <p className="text-xs text-gray-400">Select reason <span className="text-orange-400">*</span></p>
+              <ul className="grid auto-rows-fr gap-2 sm:grid-cols-2">
+                {reasons.map((r) => (
+                  <li key={r.id} className="h-full">
+                    <label
+                      className={`flex h-full cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm leading-snug transition-colors ${
+                        cancelPick === r.name
+                          ? 'border-orange-500 bg-orange-500/10 text-white'
+                          : 'border-[#2a2a2a] text-gray-300 hover:border-[#3a3a3a] hover:text-white'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="cancel-reason-drawer"
+                        checked={cancelPick === r.name}
+                        onChange={() => setCancelPick(r.name)}
+                        className="h-4 w-4 shrink-0 accent-orange-500"
+                      />
+                      <span className="min-w-0">{r.name}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">Note (optional)</span>
+                <textarea
+                  rows={2}
+                  value={cancelNote}
+                  onChange={(e) => setCancelNote(e.target.value)}
+                  placeholder="Anything worth remembering about this lead"
+                  className={`${inputCls} resize-y`}
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-[#242424] px-5 py-4">
+              <button onClick={() => setCancelStage(null)} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white">
+                Keep lead
+              </button>
+              <button
+                onClick={async () => {
+                  if (!cancelPick) return setMsg({ type: 'error', text: 'Pick a reason first.' })
+                  await update(
+                    {
+                      stage_id: cancelStage,
+                      cancel_reason: cancelPick,
+                      cancel_note: cancelNote.trim() || null,
+                      cancelled_at: new Date().toISOString(),
+                    },
+                    'Lead cancelled.',
+                  )
+                  setCancelStage(null)
+                }}
+                disabled={!cancelPick || busy}
+                className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
+              >
+                {busy ? 'Saving…' : 'Cancel lead'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
