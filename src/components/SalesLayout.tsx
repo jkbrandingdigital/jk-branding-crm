@@ -1,30 +1,37 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, Filter, type LucideIcon } from 'lucide-react'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, Filter, AlarmClock, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
+import { usePermissions } from '../lib/permissions'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 import { istDate } from '../lib/format'
 
 export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
+// Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
+type SalesNav = SalesPage | 'reminders'
+const OWN_ROUTE: Partial<Record<SalesNav, string>> = { reminders: '/sales/reminders' }
 
-type NavItem = { label: string; hint?: string; page?: SalesPage; icon: LucideIcon }
+type NavItem = { label: string; hint?: string; page?: SalesNav; icon: LucideIcon; perm?: string }
 
 const NAV: { title: string; items: NavItem[] }[] = [
   {
     title: 'Today',
     items: [
-      { label: 'Evolution Form', hint: 'Morning', page: 'evolution', icon: Sunrise },
-      { label: 'Daily Report', hint: 'Evening', page: 'report', icon: Moon },
+      { label: 'Evolution Form', hint: 'Morning', page: 'evolution', icon: Sunrise, perm: 'mod_evolution' },
+      { label: 'Daily Report', hint: 'Evening', page: 'report', icon: Moon, perm: 'mod_reports' },
     ],
   },
-  { title: 'Leads', items: [{ label: 'My Leads', page: 'leads', icon: Filter }] },
-  { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp }] },
+  { title: 'Leads', items: [{ label: 'My Leads', page: 'leads', icon: Filter, perm: 'mod_leads' }] },
+  { title: 'Productivity', items: [{ label: 'My Reminders', page: 'reminders', icon: AlarmClock, perm: 'mod_reminders' }] },
+  { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp, perm: 'mod_performance' }] },
   { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
 ]
 
-export default function SalesLayout({ active, children }: { active: SalesPage; children: ReactNode }) {
+export default function SalesLayout({ active, children }: { active: SalesNav; children: ReactNode }) {
   const [searchParams] = useSearchParams()
+  const { pathname } = useLocation()
+  const { can, ready } = usePermissions()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [branch, setBranch] = useState('')
@@ -64,12 +71,18 @@ export default function SalesLayout({ active, children }: { active: SalesPage; c
     return () => window.removeEventListener('jk:saved', loadStatus)
   }, [loadStatus])
 
-  useEffect(() => setOpen(false), [searchParams])
+  useEffect(() => setOpen(false), [searchParams, pathname])
+
+  // Only the modules this person is allowed to open
+  const sections = NAV.map((s) => ({
+    ...s,
+    items: s.items.filter((i) => !i.perm || !ready || can(i.perm)),
+  })).filter((s) => s.items.length > 0)
 
   const sidebar = (
     <nav className="flex h-full flex-col">
       <div className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
-        {NAV.map((section) => (
+        {sections.map((section) => (
           <div key={section.title}>
             <p className="mb-2 px-3 text-xs text-gray-500">{section.title}</p>
             <ul className="space-y-0.5">
@@ -92,7 +105,7 @@ export default function SalesLayout({ active, children }: { active: SalesPage; c
                 return (
                   <li key={item.label}>
                     <Link
-                      to={`/sales?page=${item.page}`}
+                      to={OWN_ROUTE[item.page] ?? `/sales?page=${item.page}`}
                       className={`${base} focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                         isActive
                           ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]'

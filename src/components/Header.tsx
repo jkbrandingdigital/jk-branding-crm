@@ -3,12 +3,27 @@ import { ChevronDown, KeyRound, Loader2, LogOut, User, X } from 'lucide-react'
 import { signOut } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import ProfileModal from './ProfileModal'
+import NotificationBell from './NotificationBell'
 
 const ROLE_LABEL: Record<string, string> = {
   super_admin: 'Super Admin',
   hr: 'HR',
   branch_manager: 'Branch Manager',
   sales: 'Sales',
+}
+
+const REMINDERS_PATH: Record<string, string> = {
+  super_admin: '/admin/reminders',
+  hr: '/hr/reminders',
+  branch_manager: '/manager/reminders',
+  sales: '/sales/reminders',
+}
+
+const LEADS_PATH: Record<string, string> = {
+  super_admin: '/admin/leads',
+  hr: '/hr/leads',
+  branch_manager: '/manager/leads',
+  sales: '/sales?page=leads',
 }
 
 export default function Header() {
@@ -67,6 +82,8 @@ export default function Header() {
         </div>
       </div>
 
+      <div className="flex items-center gap-3">
+      <NotificationBell remindersPath={REMINDERS_PATH[role] ?? '/'} leadsPath={LEADS_PATH[role] ?? '/'} />
       <div className="relative" ref={boxRef}>
         <button
           onClick={() => setMenu((m) => !m)}
@@ -109,6 +126,7 @@ export default function Header() {
             </button>
           </div>
         )}
+      </div>
       </div>
 
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} onSaved={loadMe} />}

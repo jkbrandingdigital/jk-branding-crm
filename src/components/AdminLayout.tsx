@@ -4,12 +4,13 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  ChevronDown, Menu, X, Filter, Shuffle, type LucideIcon,
+  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
+import { usePermissions } from '../lib/permissions'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
-type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean }
+type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
 type NavGroup = { key: string; label: string; icon: LucideIcon; items: NavItem[] }
 
 // Departments grow here: add items to a group, add the route in App.tsx, set ready: true
@@ -19,13 +20,13 @@ const GROUPS: NavGroup[] = [
     label: 'Sales Department',
     icon: Briefcase,
     items: [
-      { label: 'Leads', path: '/admin/leads', icon: Filter, ready: true },
+      { label: 'Leads', path: '/admin/leads', icon: Filter, ready: true, perm: 'mod_leads' },
       { label: 'Lead Assignment', path: '/admin/lead-assignment', icon: Shuffle, ready: true },
-      { label: 'Sales Performance', path: '/admin/performance', icon: TrendingUp, ready: true },
-      { label: 'Daily Reports', path: '/admin/reports', icon: FileBarChart, ready: true },
-      { label: 'Evolution Forms', path: '/admin/evolution', icon: ClipboardCheck, ready: true },
+      { label: 'Sales Performance', path: '/admin/performance', icon: TrendingUp, ready: true, perm: 'mod_performance' },
+      { label: 'Daily Reports', path: '/admin/reports', icon: FileBarChart, ready: true, perm: 'mod_reports' },
+      { label: 'Evolution Forms', path: '/admin/evolution', icon: ClipboardCheck, ready: true, perm: 'mod_evolution' },
       { label: 'Evolution Questions', path: '/admin/questions', icon: ListChecks, ready: true },
-      { label: 'Sales Targets', path: '/admin/targets', icon: Target, ready: true },
+      { label: 'Sales Targets', path: '/admin/targets', icon: Target, ready: true, perm: 'mod_targets' },
     ],
   },
   {
@@ -33,10 +34,16 @@ const GROUPS: NavGroup[] = [
     label: 'HR Department',
     icon: UserCog,
     items: [
-      { label: 'Employees', path: '/admin/employees', icon: Users, ready: true },
+      { label: 'Employees', path: '/admin/employees', icon: Users, ready: true, perm: 'mod_employees' },
       { label: 'Attendance', path: '/admin/attendance', icon: CalendarCheck, ready: false },
       { label: 'Leave Requests', path: '/admin/leaves', icon: CalendarOff, ready: false },
     ],
+  },
+  {
+    key: 'productivity',
+    label: 'Productivity',
+    icon: CalendarClock,
+    items: [{ label: 'Reminders', path: '/admin/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' }],
   },
   { key: 'digital', label: 'Digital Department', icon: MonitorSmartphone, items: [] },
   { key: 'dispatch', label: 'Dispatch Zone', icon: Truck, items: [] },
@@ -56,6 +63,7 @@ const GROUPS: NavGroup[] = [
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
+  const { can, ready: permsReady } = usePermissions()
   const [drawer, setDrawer] = useState(false)
   const [userName, setUserName] = useState('')
 
@@ -96,7 +104,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </Link>
 
         {/* Department groups */}
-        {GROUPS.map((g) => {
+        {GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.perm || !permsReady || can(i.perm)) })).map((g) => {
           const GIcon = g.icon
           const soon = g.items.length === 0
           const isOpen = open === g.key

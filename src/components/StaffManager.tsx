@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2 } from 'lucide-react'
+import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 type Profile = {
@@ -16,6 +16,8 @@ type Profile = {
 }
 type AuthInfo = { id: string; email?: string; last_sign_in_at?: string }
 type Option = { id: string; name: string }
+type Perms = Record<string, boolean>
+type Module = { key: string; label: string }
 type Form = {
   full_name: string
   email: string
@@ -41,6 +43,25 @@ const ROLE_CHIP: Record<string, string> = {
   branch_manager: 'bg-orange-950/60 text-orange-300',
   sales: 'bg-[#1f1f1f] text-gray-300',
 }
+// Which modules are offered for each role
+const ROLE_MODULES: Record<string, string[]> = {
+  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_quotations', 'mod_invoices'],
+  hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks'],
+  branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks'],
+  sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks'],
+}
+
+// What a person may do inside the lead module
+const ACTION_LABEL: Record<string, string> = {
+  lead_view_all: 'See every lead',
+  lead_create: 'Add leads',
+  lead_edit: 'Edit leads',
+  lead_assign: 'Assign / transfer leads',
+  lead_delete: 'Delete leads',
+  lead_export: 'Export leads',
+  lead_settings: 'Lead settings (assignment, labels)',
+}
+
 const WORK_MODE: Record<string, string> = {
   office: 'Work from office',
   wfh: 'Work from home',
@@ -87,6 +108,11 @@ export default function StaffManager() {
   const [departments, setDepartments] = useState<Option[]>([])
   const [allowedRoles, setAllowedRoles] = useState<string[]>([])
   const [myId, setMyId] = useState<string | null>(null)
+  const [callerRole, setCallerRole] = useState('')
+  const [modules, setModules] = useState<Module[]>([])
+  const [roleDefaults, setRoleDefaults] = useState<Record<string, Perms>>({})
+  const [userPerms, setUserPerms] = useState<Record<string, Perms>>({})
+  const [permDraft, setPermDraft] = useState<Perms>({})
 
   const [q, setQ] = useState('')
   const [branchF, setBranchF] = useState('all')
@@ -103,7 +129,7 @@ export default function StaffManager() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [{ data: u }, p, r, b, d, list] = await Promise.all([
+    const [{ data: u }, p, r, b, d, list, mods, rd, sp] = await Promise.all([
       supabase.auth.getUser(),
       supabase
         .from('profiles')
@@ -112,7 +138,10 @@ export default function StaffManager() {
       supabase.from('user_roles').select('user_id, role'),
       supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
       supabase.from('departments').select('id, name').order('name'),
-      staffApi<{ users: AuthInfo[]; allowedRoles: string[] }>({ action: 'list' }),
+      staffApi<{ users: AuthInfo[]; allowedRoles: string[]; callerRole: string }>({ action: 'list' }),
+      supabase.from('app_modules').select('key, label').eq('is_active', true).order('sort_order'),
+      supabase.from('role_permission_defaults').select('role, perms'),
+      supabase.from('staff_permissions').select('user_id, perms'),
     ])
     setMyId(u.user?.id ?? null)
     if (p.error) setMessage({ type: 'error', text: p.error.message })
@@ -123,6 +152,10 @@ export default function StaffManager() {
     setDepartments(d.data ?? [])
     setAuth(new Map((list.data?.users ?? []).map((x) => [x.id, x])))
     setAllowedRoles(list.data?.allowedRoles ?? [])
+    setCallerRole(list.data?.callerRole ?? '')
+    setModules((mods.data ?? []) as Module[])
+    setRoleDefaults(Object.fromEntries(((rd.data ?? []) as { role: string; perms: Perms }[]).map((x) => [x.role, x.perms ?? {}])))
+    setUserPerms(Object.fromEntries(((sp.data ?? []) as { user_id: string; perms: Perms }[]).map((x) => [x.user_id, x.perms ?? {}])))
     setLoading(false)
   }, [])
 
@@ -156,6 +189,7 @@ export default function StaffManager() {
     setForm({ ...emptyForm(), password: makePassword(), role: allowedRoles.includes('sales') ? 'sales' : allowedRoles[0] ?? 'sales' })
     setFormError(null)
     setNewPassword('')
+    setPermDraft({})
   }
 
   function openEdit(p: Profile) {
@@ -174,6 +208,7 @@ export default function StaffManager() {
     })
     setFormError(null)
     setNewPassword('')
+    setPermDraft({ ...(userPerms[p.id] ?? {}) })
   }
 
   async function submit() {
@@ -201,8 +236,21 @@ export default function StaffManager() {
       }
       if (form.role !== roles.get(editing.id) && editing.id !== myId) payload.role = form.role
       const res = await staffApi(payload)
+      if (res.error) {
+        setBusy(false)
+        return setFormError(res.error)
+      }
+      if (callerRole === 'super_admin' && editing.id !== myId) {
+        const before = JSON.stringify(userPerms[editing.id] ?? {})
+        if (JSON.stringify(permDraft) !== before) {
+          const pr = await staffApi({ action: 'set_perms', user_id: editing.id, perms: permDraft })
+          if (pr.error) {
+            setBusy(false)
+            return setFormError(pr.error)
+          }
+        }
+      }
       setBusy(false)
-      if (res.error) return setFormError(res.error)
       setMessage({ type: 'success', text: `${form.full_name} updated.` })
     }
     setEditing(null)
@@ -251,6 +299,44 @@ export default function StaffManager() {
 
   const editingProfile = editing && editing !== 'new' ? editing : null
   const editingSelf = editingProfile?.id === myId
+
+  const roleDefault = (key: string) => Boolean(roleDefaults[form.role]?.[key])
+  const effective = (key: string) => (key in permDraft ? permDraft[key] : roleDefault(key))
+  const isOverride = (key: string) => key in permDraft && permDraft[key] !== roleDefault(key)
+  function togglePerm(key: string) {
+    const next = !effective(key)
+    setPermDraft((d) => {
+      const copy = { ...d }
+      if (next === roleDefault(key)) delete copy[key]
+      else copy[key] = next
+      return copy
+    })
+  }
+  const PermToggle = ({ k, label }: { k: string; label: string }) => {
+    const on = effective(k)
+    return (
+      <div className="min-w-[110px]">
+        <p className="mb-1.5 text-xs text-gray-300">
+          {label}
+          {isOverride(k) && <span className="ml-1 text-[10px] text-orange-400">·</span>}
+        </p>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={label}
+          onClick={() => togglePerm(k)}
+          className={`flex h-6 w-11 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+            on ? 'bg-orange-500' : 'bg-[#2a2a2a]'
+          }`}
+        >
+          <span className={`h-5 w-5 rounded-full bg-white transition-transform ${on ? 'translate-x-5' : ''}`} />
+        </button>
+      </div>
+    )
+  }
+
+  const shownModules = modules.filter((m) => (ROLE_MODULES[form.role] ?? []).includes(m.key))
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -357,6 +443,7 @@ export default function StaffManager() {
                     <td className="py-3 pr-4 text-gray-300">{auth.get(p.id)?.email ?? '—'}</td>
                     <td className="py-3 pr-4">
                       <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs ${ROLE_CHIP[role] ?? ROLE_CHIP.sales}`}>{ROLE_LABEL[role] ?? role}</span>
+                      {Object.keys(userPerms[p.id] ?? {}).length > 0 && <span className="ml-2 text-[10px] text-orange-400">custom</span>}
                     </td>
                     <td className="py-3 pr-4 text-gray-400">{branchName.get(p.branch_id ?? '') ?? '—'}</td>
                     <td className="py-3 pr-4">
@@ -384,10 +471,13 @@ export default function StaffManager() {
 
       {/* Add / edit panel */}
       {editing && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/60" onClick={() => !busy && setEditing(null)} />
-          <aside className="relative flex h-full w-full max-w-md flex-col border-l border-[#242424] bg-[#121212]">
-            <div className="flex items-center justify-between border-b border-[#222] px-6 py-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6" onClick={() => !busy && setEditing(null)}>
+          <div className="absolute inset-0 bg-black/70" />
+          <aside
+            className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[#242424] bg-[#121212]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#222] bg-[#171717] px-6 py-4">
               <div>
                 <h2 className="font-semibold">{editing === 'new' ? 'Add staff' : editing.full_name}</h2>
                 {editingProfile && <p className="text-xs text-gray-500">{editingProfile.emp_code}</p>}
@@ -493,6 +583,63 @@ export default function StaffManager() {
                   This picks their daily work norms — calls, quality calls, follow-ups, and leads to find.
                 </p>
               </Field>
+
+              {editingProfile && callerRole === 'super_admin' && !editingSelf && (
+                <div className="border-t border-[#222] pt-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <p className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                      <ShieldCheck size={15} /> What they can open
+                    </p>
+                    <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(permDraft.is_subadmin)}
+                        onChange={(e) =>
+                          setPermDraft((d) => {
+                            const copy = { ...d }
+                            if (e.target.checked) copy.is_subadmin = true
+                            else delete copy.is_subadmin
+                            return copy
+                          })
+                        }
+                        className="h-4 w-4 accent-orange-500"
+                      />
+                      Sub admin (everything)
+                    </label>
+                  </div>
+
+                  {permDraft.is_subadmin ? (
+                    <p className="rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs text-orange-300">
+                      A sub admin can open everything, so these switches are not used.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        {shownModules.map((m) => <PermToggle key={m.key} k={m.key} label={m.label} />)}
+                      </div>
+
+                      {effective('mod_leads') && (
+                        <>
+                          <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside leads</p>
+                          <div className="flex flex-wrap gap-x-5 gap-y-4">
+                            {Object.entries(ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  <div className="mt-4 flex items-center gap-3 text-xs">
+                    <span className="text-gray-500">Orange dot means it differs from the {ROLE_LABEL[form.role] ?? form.role} default.</span>
+                    {Object.keys(permDraft).length > 0 && (
+                      <button type="button" onClick={() => setPermDraft({})} className="ml-auto text-orange-400 hover:underline">
+                        Reset to role default
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">Saved with "Save changes".</p>
+                </div>
+              )}
 
               {editingProfile && (
                 <>

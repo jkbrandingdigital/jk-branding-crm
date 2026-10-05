@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, type LucideIcon } from 'lucide-react'
 import Header from './Header'
+import { usePermissions } from '../lib/permissions'
 
-type Item = { label: string; path: string; icon: LucideIcon; ready: boolean }
+type Item = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
 type Group = { title: string; items: Item[] }
 
 const GROUPS: Group[] = [
@@ -13,12 +14,16 @@ const GROUPS: Group[] = [
   },
   {
     title: 'Hiring',
-    items: [{ label: 'Leads', path: '/hr/leads', icon: Filter, ready: true }],
+    items: [{ label: 'Leads', path: '/hr/leads', icon: Filter, ready: true, perm: 'mod_leads' }],
+  },
+  {
+    title: 'Productivity',
+    items: [{ label: 'Reminders', path: '/hr/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' }],
   },
   {
     title: 'People',
     items: [
-      { label: 'Employees', path: '/hr/employees', icon: Users, ready: true },
+      { label: 'Employees', path: '/hr/employees', icon: Users, ready: true, perm: 'mod_employees' },
       { label: 'Attendance', path: '/hr/attendance', icon: CalendarCheck, ready: false },
       { label: 'Leave Requests', path: '/hr/leaves', icon: CalendarOff, ready: false },
     ],
@@ -27,6 +32,7 @@ const GROUPS: Group[] = [
 
 export default function HrLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
+  const { can, ready: permsReady } = usePermissions()
   const [drawer, setDrawer] = useState(false)
 
   const linkCls = (active: boolean) =>
@@ -37,7 +43,9 @@ export default function HrLayout({ children }: { children: ReactNode }) {
   const sidebar = (
     <nav className="flex h-full flex-col px-3 py-5">
       <div className="flex-1 space-y-5 overflow-y-auto [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
-        {GROUPS.map((g) => (
+        {GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.perm || !permsReady || can(i.perm)) }))
+          .filter((g) => g.items.length > 0)
+          .map((g) => (
           <div key={g.title}>
             <p className="px-3 pb-1.5 text-xs uppercase tracking-wide text-gray-600">{g.title}</p>
             <ul className="space-y-0.5">

@@ -1,24 +1,29 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, type LucideIcon,
+  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
+import { usePermissions } from '../lib/permissions'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
-type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean }
+type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
 
 const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   { title: 'Overview', items: [{ label: 'Dashboard', path: '/manager', icon: LayoutDashboard, ready: true }] },
   {
     title: 'Sales',
     items: [
-      { label: 'Leads', path: '/manager/leads', icon: Filter, ready: true },
-      { label: 'Sales Performance', path: '/manager/performance', icon: TrendingUp, ready: true },
-      { label: 'Team Targets', path: '/manager/targets', icon: Target, ready: true },
-      { label: 'Daily Reports', path: '/manager/reports', icon: FileBarChart, ready: true },
+      { label: 'Leads', path: '/manager/leads', icon: Filter, ready: true, perm: 'mod_leads' },
+      { label: 'Sales Performance', path: '/manager/performance', icon: TrendingUp, ready: true, perm: 'mod_performance' },
+      { label: 'Team Targets', path: '/manager/targets', icon: Target, ready: true, perm: 'mod_targets' },
+      { label: 'Daily Reports', path: '/manager/reports', icon: FileBarChart, ready: true, perm: 'mod_reports' },
     ],
+  },
+  {
+    title: 'Productivity',
+    items: [{ label: 'Reminders', path: '/manager/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' }],
   },
   {
     title: 'Team',
@@ -31,6 +36,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
 
 export default function ManagerLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
+  const { can, ready: permsReady } = usePermissions()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [branch, setBranch] = useState('')
@@ -56,10 +62,16 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
 
   const isActive = (path: string) => (path === '/manager' ? pathname === '/manager' : pathname.startsWith(path))
 
+  // Only the modules this person is allowed to open
+  const sections = NAV_SECTIONS.map((s) => ({
+    ...s,
+    items: s.items.filter((i) => !i.perm || !permsReady || can(i.perm)),
+  })).filter((s) => s.items.length > 0)
+
   const sidebar = (
     <nav className="flex h-full flex-col">
       <div className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
-        {NAV_SECTIONS.map((section) => (
+        {sections.map((section) => (
           <div key={section.title}>
             <p className="mb-2 px-3 text-xs text-gray-500">{section.title}</p>
             <ul className="space-y-0.5">

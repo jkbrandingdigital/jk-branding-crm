@@ -22,6 +22,10 @@ import AdminLeadAssignment from './pages/admin/LeadAssignment'
 import AdminSettings from './pages/admin/Settings'
 import HrLeads from './pages/hr/Leads'
 import HrEmployees from './pages/hr/Employees'
+import AdminReminders from './pages/admin/Reminders'
+import ManagerReminders from './pages/manager/Reminders'
+import HrReminders from './pages/hr/Reminders'
+import SalesReminders from './pages/sales/Reminders'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
@@ -54,6 +58,7 @@ function AppRoutes() {
           <Route path="/admin/employee/:id" element={<AdminEmployeeReport />} />
           <Route path="/admin/lead-assignment" element={<AdminLeadAssignment />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
+          <Route path="/admin/reminders" element={<AdminReminders />} />
           <Route path="/admin/*" element={<AdminDashboard />} />
           
         </>
@@ -65,16 +70,21 @@ function AppRoutes() {
           <Route path="/manager/targets" element={<ManagerTargets />} />
           <Route path="/manager/reports" element={<ManagerReports />} />
           <Route path="/manager/employee/:id" element={<ManagerEmployeeReport />} />
+          <Route path="/manager/reminders" element={<ManagerReminders />} />
           <Route path="/manager/*" element={<ManagerDashboard />} />
         </>
       )}
       {role === 'sales' && (
-        <Route path="/sales/*" element={<SalesDashboard />} />
+        <>
+          <Route path="/sales/reminders" element={<SalesReminders />} />
+          <Route path="/sales/*" element={<SalesDashboard />} />
+        </>
       )}
-            {role === 'hr' && (
+      {role === 'hr' && (
         <>
           <Route path="/hr/leads" element={<HrLeads />} />
           <Route path="/hr/employees" element={<HrEmployees />} />
+          <Route path="/hr/reminders" element={<HrReminders />} />
           <Route path="/hr/*" element={<HRDashboard />} />
         </>
       )}
