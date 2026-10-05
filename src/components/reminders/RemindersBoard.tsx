@@ -20,9 +20,8 @@ const select =
 const iconBtn = 'rounded-md p-1.5 text-gray-400 transition-colors hover:bg-[#222] hover:text-white disabled:opacity-30 disabled:hover:bg-transparent'
 
 export default function RemindersBoard() {
-  const { user, role } = useAuth()
+  const { user } = useAuth()
   const me = user?.id ?? ''
-  const isAdmin = role === 'super_admin'
 
   const [rows, setRows] = useState<Reminder[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
@@ -65,7 +64,8 @@ export default function RemindersBoard() {
     return (id: string | null) => (id && m.get(id)) || '—'
   }, [staff])
 
-  const canManage = useCallback((r: Reminder) => isAdmin || r.created_by === me, [isAdmin, me])
+  // Only the person who made the reminder can change it
+  const canManage = useCallback((r: Reminder) => r.created_by === me, [me])
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase()
@@ -195,7 +195,7 @@ export default function RemindersBoard() {
       {filterOpen && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#242424] bg-[#151515] px-5 py-3">
           <select value={scope} onChange={(e) => setScope(e.target.value as Scope)} className={select} aria-label="Whose reminders">
-            <option value="all">All I can see</option>
+            <option value="all">Mine and shared with me</option>
             <option value="mine">Assigned to me</option>
             <option value="created">Created by me</option>
           </select>

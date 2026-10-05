@@ -10,6 +10,7 @@ const ROLE_LABEL: Record<string, string> = {
   hr: 'HR',
   branch_manager: 'Branch Manager',
   sales: 'Sales',
+  design_team: 'Design Team',
 }
 
 const REMINDERS_PATH: Record<string, string> = {
@@ -17,6 +18,7 @@ const REMINDERS_PATH: Record<string, string> = {
   hr: '/hr/reminders',
   branch_manager: '/manager/reminders',
   sales: '/sales/reminders',
+  design_team: '/design/reminders',
 }
 
 const LEADS_PATH: Record<string, string> = {
@@ -24,6 +26,15 @@ const LEADS_PATH: Record<string, string> = {
   hr: '/hr/leads',
   branch_manager: '/manager/leads',
   sales: '/sales?page=leads',
+  design_team: '/design',
+}
+
+const TASKS_PATH: Record<string, string> = {
+  super_admin: '/admin/tasks',
+  hr: '/hr/tasks',
+  branch_manager: '/manager/tasks',
+  sales: '/sales/tasks',
+  design_team: '/design/tasks',
 }
 
 export default function Header() {
@@ -83,7 +94,7 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-3">
-      <NotificationBell remindersPath={REMINDERS_PATH[role] ?? '/'} leadsPath={LEADS_PATH[role] ?? '/'} />
+      <NotificationBell remindersPath={REMINDERS_PATH[role] ?? '/'} leadsPath={LEADS_PATH[role] ?? '/'} tasksPath={TASKS_PATH[role] ?? '/'} />
       <div className="relative" ref={boxRef}>
         <button
           onClick={() => setMenu((m) => !m)}

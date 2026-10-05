@@ -6,7 +6,8 @@ import {
 import { supabase } from '../../lib/supabase'
 import { inr } from '../../lib/format'
 import { LABEL_CLS, type Label } from './labels'
-import { SOURCES, sourceOf, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
+import { sourceOf, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
+import LeadEditModal from './LeadEditModal'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
 type LeadL = Lead & {
@@ -39,7 +40,6 @@ export default function LeadDrawer({
   onChanged: () => void
 }) {
   const [lead, setLead] = useState<LeadL | null>(null)
-  const [form, setForm] = useState<LeadL | null>(null)
   const [acts, setActs] = useState<Activity[]>([])
   const [tab, setTab] = useState<TabKey>('details')
   const [editMode, setEditMode] = useState(false)
@@ -70,7 +70,6 @@ export default function LeadDrawer({
     ])
     if (l.error || !l.data) return setMsg({ type: 'error', text: l.error?.message ?? 'Lead not found.' })
     setLead(l.data as LeadL)
-    setForm(l.data as LeadL)
     setActs((a.data ?? []) as Activity[])
   }, [leadId])
 
@@ -115,23 +114,6 @@ export default function LeadDrawer({
     setMsg({ type: 'success', text: ok })
     await load()
     onChanged()
-  }
-
-  async function saveDetails() {
-    if (!form) return
-    if (!form.name.trim()) return setMsg({ type: 'error', text: 'Name is required.' })
-    await update({
-      name: form.name.trim(),
-      phone: form.phone,
-      alt_phone: form.alt_phone,
-      email: form.email,
-      company: form.company,
-      city: form.city,
-      requirement: form.requirement,
-      source: form.source,
-      estimated_amount: Number(form.estimated_amount) || 0,
-    })
-    setEditMode(false)
   }
 
   async function addActivity() {
@@ -243,7 +225,7 @@ export default function LeadDrawer({
             </a>
           )}
           {editable && (
-            <button onClick={() => { setTab('details'); setEditMode(true) }} className={iconBtn} title="Edit details">
+            <button onClick={() => setEditMode(true)} className={iconBtn} title="Edit lead">
               <Pencil size={17} />
             </button>
           )}
@@ -347,7 +329,7 @@ export default function LeadDrawer({
         )}
 
         {/* Body */}
-        {lead && form && (
+        {lead && (
           <div className="flex-1 overflow-y-auto px-5 py-5">
             {tab === 'details' && (
               <div className="space-y-5">
@@ -362,38 +344,7 @@ export default function LeadDrawer({
                   <section className="overflow-hidden rounded-xl border border-[#242424]">
                     <h3 className="bg-[#1b1b1b] px-4 py-2.5 text-sm font-medium text-gray-300">Lead information</h3>
                     <div className="space-y-3 p-4">
-                      {editMode ? (
-                        <>
-                          {(
-                            [
-                              ['name', 'Name *'],
-                              ['phone', 'Phone'],
-                              ['alt_phone', 'Alternate phone'],
-                              ['email', 'Email'],
-                              ['company', 'Company'],
-                              ['city', 'City'],
-                            ] as const
-                          ).map(([k, l]) => (
-                            <label key={k} className="block">
-                              <span className="mb-1 block text-xs text-gray-400">{l}</span>
-                              <input value={(form[k] as string | null) ?? ''} onChange={(e) => setForm({ ...form, [k]: e.target.value })} className={inputCls} />
-                            </label>
-                          ))}
-                          <label className="block">
-                            <span className="mb-1 block text-xs text-gray-400">Requirement</span>
-                            <textarea rows={3} value={form.requirement ?? ''} onChange={(e) => setForm({ ...form, requirement: e.target.value })} className={`${inputCls} resize-y`} />
-                          </label>
-                          <div className="flex justify-end gap-2 pt-1">
-                            <button onClick={() => { setForm(lead); setEditMode(false) }} className="rounded-lg px-3 py-2 text-sm text-gray-400 hover:text-white">
-                              Cancel
-                            </button>
-                            <button onClick={saveDetails} disabled={busy} className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60">
-                              Save details
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
+                      <>
                           <Row label="Name" value={lead.name} />
                           <Row label="Company" value={lead.company} />
                           <Row label="Phone" value={lead.phone} />
@@ -403,8 +354,7 @@ export default function LeadDrawer({
                           <Row label="Requirement" value={lead.requirement} wrap />
                           {lead.campaign_name && <Row label="Campaign" value={lead.campaign_name} />}
                           {lead.form_name && <Row label="Form" value={lead.form_name} />}
-                        </>
-                      )}
+                      </>
                     </div>
                   </section>
 
@@ -451,29 +401,6 @@ export default function LeadDrawer({
                         </span>
                       </label>
 
-                      {editMode && (
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="block">
-                            <span className="mb-1 block text-xs text-gray-500">Source</span>
-                            <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className={inputCls}>
-                              {SOURCES.map((s) => (
-                                <option key={s.key} value={s.key}>{s.label}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="block">
-                            <span className="mb-1 block text-xs text-gray-500">Estimated amount (₹)</span>
-                            <input
-                              type="number"
-                              min={0}
-                              onWheel={(e) => e.currentTarget.blur()}
-                              value={form.estimated_amount ?? 0}
-                              onChange={(e) => setForm({ ...form, estimated_amount: Number(e.target.value) })}
-                              className={`${inputCls} tabular-nums`}
-                            />
-                          </label>
-                        </div>
-                      )}
                     </div>
                   </section>
                 </div>
@@ -720,6 +647,17 @@ export default function LeadDrawer({
             </div>
           </div>
         </div>
+      )}
+      {editMode && lead && (
+        <LeadEditModal
+          lead={lead}
+          stages={stages}
+          staff={staff}
+          labels={labels}
+          can={can}
+          onClose={() => setEditMode(false)}
+          onSaved={() => { setEditMode(false); setMsg({ type: 'success', text: 'Saved.' }); load(); onChanged() }}
+        />
       )}
     </div>
   )

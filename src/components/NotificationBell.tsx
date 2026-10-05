@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellRing, CheckCheck, UserPlus, X } from 'lucide-react'
+import { Bell, BellRing, CheckCheck, ListTodo, UserPlus, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fmtDT } from './leads/leadUtils'
 
@@ -12,11 +12,21 @@ type Notif = {
   read_at: string | null
   kind: string
   lead_id: string | null
+  task_id: string | null
 }
 
 const isLead = (n: Notif) => n.kind === 'lead'
+const isTask = (n: Notif) => n.kind === 'task'
 
-export default function NotificationBell({ remindersPath, leadsPath }: { remindersPath: string; leadsPath: string }) {
+export default function NotificationBell({
+  remindersPath,
+  leadsPath,
+  tasksPath,
+}: {
+  remindersPath: string
+  leadsPath: string
+  tasksPath: string
+}) {
   const navigate = useNavigate()
   const [uid, setUid] = useState<string | null>(null)
   const [count, setCount] = useState(0)
@@ -43,7 +53,7 @@ export default function NotificationBell({ remindersPath, leadsPath }: { reminde
     if (!uid) return
     const { data } = await supabase
       .from('notifications')
-      .select('id, title, body, created_at, read_at, kind, lead_id')
+      .select('id, title, body, created_at, read_at, kind, lead_id, task_id')
       .eq('user_id', uid)
       .order('created_at', { ascending: false })
       .limit(20)
@@ -120,7 +130,16 @@ export default function NotificationBell({ remindersPath, leadsPath }: { reminde
     markRead(n)
     setOpen(false)
     setToasts((t) => t.filter((x) => x.id !== n.id))
-    navigate(isLead(n) ? leadsPath : remindersPath)
+    if (isTask(n)) return navigate(tasksPath)
+    if (isLead(n)) {
+      // Open that one lead, keeping any query the path already has
+      const [base, query] = leadsPath.split('?')
+      const p = new URLSearchParams(query)
+      if (n.lead_id) p.set('lead', n.lead_id)
+      const qs = p.toString()
+      return navigate(qs ? `${base}?${qs}` : base)
+    }
+    navigate(remindersPath)
   }
 
   return (
@@ -155,7 +174,9 @@ export default function NotificationBell({ remindersPath, leadsPath }: { reminde
               {items.map((n) => (
                 <li key={n.id} className="border-b border-[#222] last:border-0">
                   <button onClick={() => openItem(n)} className="flex w-full gap-3 px-4 py-3 text-left hover:bg-[#1f1f1f]">
-                    {isLead(n) ? (
+                    {isTask(n) ? (
+                      <ListTodo className={`mt-0.5 h-4 w-4 shrink-0 ${n.read_at ? 'text-gray-600' : 'text-indigo-400'}`} />
+                    ) : isLead(n) ? (
                       <UserPlus className={`mt-0.5 h-4 w-4 shrink-0 ${n.read_at ? 'text-gray-600' : 'text-green-400'}`} />
                     ) : (
                       <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read_at ? 'bg-transparent' : 'bg-orange-500'}`} />
@@ -185,10 +206,14 @@ export default function NotificationBell({ remindersPath, leadsPath }: { reminde
           {toasts.map((n) => (
             <div
               key={n.id}
-              className={`rounded-lg border bg-[#171717] p-4 shadow-xl ${isLead(n) ? 'border-green-500/40' : 'border-orange-500/40'}`}
+              className={`rounded-lg border bg-[#171717] p-4 shadow-xl ${
+                isTask(n) ? 'border-indigo-500/40' : isLead(n) ? 'border-green-500/40' : 'border-orange-500/40'
+              }`}
             >
               <div className="flex items-start gap-3">
-                {isLead(n) ? (
+                {isTask(n) ? (
+                  <ListTodo className="mt-0.5 h-5 w-5 shrink-0 text-indigo-400" />
+                ) : isLead(n) ? (
                   <UserPlus className="mt-0.5 h-5 w-5 shrink-0 text-green-400" />
                 ) : (
                   <BellRing className="mt-0.5 h-5 w-5 shrink-0 text-orange-400" />
@@ -200,10 +225,14 @@ export default function NotificationBell({ remindersPath, leadsPath }: { reminde
                     <button
                       onClick={() => openItem(n)}
                       className={`rounded-md px-3 py-1 text-xs font-semibold text-white ${
-                        isLead(n) ? 'bg-green-600 hover:bg-green-700' : 'bg-orange-500 hover:bg-orange-600'
+                        isTask(n)
+                          ? 'bg-indigo-600 hover:bg-indigo-700'
+                          : isLead(n)
+                            ? 'bg-green-600 hover:bg-green-700'
+                            : 'bg-orange-500 hover:bg-orange-600'
                       }`}
                     >
-                      {isLead(n) ? 'Open leads' : 'Open'}
+                      {isTask(n) ? 'Open tasks' : isLead(n) ? 'Open leads' : 'Open'}
                     </button>
                     <button
                       onClick={() => { markRead(n); setToasts((t) => t.filter((x) => x.id !== n.id)) }}

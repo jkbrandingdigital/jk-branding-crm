@@ -1,48 +1,30 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import {
-  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, type LucideIcon,
-} from 'lucide-react'
+import { LayoutDashboard, ListTodo, AlarmClock, CalendarOff, Menu, X, type LucideIcon } from 'lucide-react'
 import Header from './Header'
-import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
-type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
+type NavItem = { label: string; path?: string; icon: LucideIcon; perm?: string }
 
-const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
-  { title: 'Overview', items: [{ label: 'Dashboard', path: '/manager', icon: LayoutDashboard, ready: true }] },
+const NAV: { title: string; items: NavItem[] }[] = [
+  { title: 'Overview', items: [{ label: 'Dashboard', path: '/design', icon: LayoutDashboard }] },
   {
-    title: 'Sales',
+    title: 'Work',
     items: [
-      { label: 'Leads', path: '/manager/leads', icon: Filter, ready: true, perm: 'mod_leads' },
-      { label: 'Sales Performance', path: '/manager/performance', icon: TrendingUp, ready: true, perm: 'mod_performance' },
-      { label: 'Team Targets', path: '/manager/targets', icon: Target, ready: true, perm: 'mod_targets' },
-      { label: 'Daily Reports', path: '/manager/reports', icon: FileBarChart, ready: true, perm: 'mod_reports' },
+      { label: 'Tasks', path: '/design/tasks', icon: ListTodo, perm: 'mod_tasks' },
+      { label: 'Reminders', path: '/design/reminders', icon: AlarmClock, perm: 'mod_reminders' },
     ],
   },
-  {
-    title: 'Productivity',
-    items: [
-      { label: 'Tasks', path: '/manager/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
-      { label: 'Reminders', path: '/manager/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
-    ],
-  },
-  {
-    title: 'Team',
-    items: [
-      { label: 'Attendance', path: '/manager/attendance', icon: CalendarCheck, ready: false },
-      { label: 'Leave Requests', path: '/manager/leaves', icon: CalendarOff, ready: false },
-    ],
-  },
+  { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
 ]
 
-export default function ManagerLayout({ children }: { children: ReactNode }) {
+export default function DesignLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
-  const { can, ready: permsReady } = usePermissions()
+  const { can, ready } = usePermissions()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
-  const [branch, setBranch] = useState('')
+  const [designation, setDesignation] = useState('')
 
   useEffect(() => {
     ;(async () => {
@@ -51,10 +33,7 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
       try {
         const p = await getUserProfile(user.id)
         setName(p?.full_name || user.email || '')
-        if (p?.branch_id) {
-          const { data } = await supabase.from('branches').select('name').eq('id', p.branch_id).single()
-          setBranch(data?.name ?? '')
-        }
+        setDesignation(p?.designation ?? '')
       } catch {
         setName(user.email ?? '')
       }
@@ -63,13 +42,12 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => setOpen(false), [pathname])
 
-  const isActive = (path: string) => (path === '/manager' ? pathname === '/manager' : pathname.startsWith(path))
-
-  // Only the modules this person is allowed to open
-  const sections = NAV_SECTIONS.map((s) => ({
+  const sections = NAV.map((s) => ({
     ...s,
-    items: s.items.filter((i) => !i.perm || !permsReady || can(i.perm)),
+    items: s.items.filter((i) => !i.perm || !ready || can(i.perm)),
   })).filter((s) => s.items.length > 0)
+
+  const isActive = (path: string) => (path === '/design' ? pathname === '/design' : pathname.startsWith(path))
 
   const sidebar = (
     <nav className="flex h-full flex-col">
@@ -81,9 +59,9 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
               {section.items.map((item) => {
                 const Icon = item.icon
                 const base = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors'
-                if (!item.ready) {
+                if (!item.path) {
                   return (
-                    <li key={item.path}>
+                    <li key={item.label}>
                       <span className={`${base} cursor-not-allowed text-gray-600`}>
                         <Icon size={17} />
                         <span className="flex-1">{item.label}</span>
@@ -114,8 +92,8 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
       </div>
 
       <div className="border-t border-[#222] px-5 py-4">
-        <p className="truncate text-sm font-medium">{name || 'Branch Manager'}</p>
-        <p className="text-xs text-orange-400">Branch Manager{branch && ` · ${branch}`}</p>
+        <p className="truncate text-sm font-medium">{name || 'Design Team'}</p>
+        <p className="text-xs text-orange-400">Design Team{designation && ` · ${designation}`}</p>
       </div>
     </nav>
   )

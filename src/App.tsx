@@ -26,6 +26,13 @@ import AdminReminders from './pages/admin/Reminders'
 import ManagerReminders from './pages/manager/Reminders'
 import HrReminders from './pages/hr/Reminders'
 import SalesReminders from './pages/sales/Reminders'
+import DesignDashboard from './pages/design/Dashboard'
+import DesignReminders from './pages/design/Reminders'
+import AdminTasks from './pages/admin/Tasks'
+import ManagerTasks from './pages/manager/Tasks'
+import HrTasks from './pages/hr/Tasks'
+import SalesTasks from './pages/sales/Tasks'
+import DesignTasks from './pages/design/Tasks'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
@@ -42,6 +49,7 @@ function AppRoutes() {
     role === 'super_admin' ? '/admin' :
     role === 'hr' ? '/hr' :
     role === 'branch_manager' ? '/manager' :
+    role === 'design_team' ? '/design' :
     '/sales'
 
   return (
@@ -59,6 +67,7 @@ function AppRoutes() {
           <Route path="/admin/lead-assignment" element={<AdminLeadAssignment />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/reminders" element={<AdminReminders />} />
+          <Route path="/admin/tasks" element={<AdminTasks />} />
           <Route path="/admin/*" element={<AdminDashboard />} />
           
         </>
@@ -71,12 +80,14 @@ function AppRoutes() {
           <Route path="/manager/reports" element={<ManagerReports />} />
           <Route path="/manager/employee/:id" element={<ManagerEmployeeReport />} />
           <Route path="/manager/reminders" element={<ManagerReminders />} />
+          <Route path="/manager/tasks" element={<ManagerTasks />} />
           <Route path="/manager/*" element={<ManagerDashboard />} />
         </>
       )}
       {role === 'sales' && (
         <>
           <Route path="/sales/reminders" element={<SalesReminders />} />
+          <Route path="/sales/tasks" element={<SalesTasks />} />
           <Route path="/sales/*" element={<SalesDashboard />} />
         </>
       )}
@@ -85,7 +96,15 @@ function AppRoutes() {
           <Route path="/hr/leads" element={<HrLeads />} />
           <Route path="/hr/employees" element={<HrEmployees />} />
           <Route path="/hr/reminders" element={<HrReminders />} />
+          <Route path="/hr/tasks" element={<HrTasks />} />
           <Route path="/hr/*" element={<HRDashboard />} />
+        </>
+      )}
+      {role === 'design_team' && (
+        <>
+          <Route path="/design/reminders" element={<DesignReminders />} />
+          <Route path="/design/tasks" element={<DesignTasks />} />
+          <Route path="/design/*" element={<DesignDashboard />} />
         </>
       )}
       <Route path="*" element={<Navigate to={home} />} />

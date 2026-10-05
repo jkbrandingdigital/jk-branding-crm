@@ -36,12 +36,14 @@ const ROLE_LABEL: Record<string, string> = {
   hr: 'HR',
   branch_manager: 'Branch Manager',
   sales: 'Sales',
+  design_team: 'Design Team',
 }
 const ROLE_CHIP: Record<string, string> = {
   super_admin: 'bg-purple-950/60 text-purple-300',
   hr: 'bg-blue-950/60 text-blue-300',
   branch_manager: 'bg-orange-950/60 text-orange-300',
   sales: 'bg-[#1f1f1f] text-gray-300',
+  design_team: 'bg-teal-950/60 text-teal-300',
 }
 // Which modules are offered for each role
 const ROLE_MODULES: Record<string, string[]> = {
@@ -49,6 +51,7 @@ const ROLE_MODULES: Record<string, string[]> = {
   hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks'],
   branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks'],
   sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks'],
+  design_team: ['mod_tasks', 'mod_reminders'],
 }
 
 // What a person may do inside the lead module
@@ -60,6 +63,16 @@ const ACTION_LABEL: Record<string, string> = {
   lead_delete: 'Delete leads',
   lead_export: 'Export leads',
   lead_settings: 'Lead settings (assignment, labels)',
+}
+
+// What a person may do inside the task module
+const TASK_ACTION_LABEL: Record<string, string> = {
+  task_view_all: 'See every task',
+  task_create: 'Add tasks',
+  task_edit: 'Edit tasks',
+  task_assign: 'Assign tasks to others',
+  task_delete: 'Delete tasks',
+  task_settings: 'Task settings (stages, labels)',
 }
 
 const WORK_MODE: Record<string, string> = {
@@ -623,6 +636,15 @@ export default function StaffManager() {
                           <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside leads</p>
                           <div className="flex flex-wrap gap-x-5 gap-y-4">
                             {Object.entries(ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
+                          </div>
+                        </>
+                      )}
+
+                      {effective('mod_tasks') && (
+                        <>
+                          <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside tasks</p>
+                          <div className="flex flex-wrap gap-x-5 gap-y-4">
+                            {Object.entries(TASK_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
                           </div>
                         </>
                       )}

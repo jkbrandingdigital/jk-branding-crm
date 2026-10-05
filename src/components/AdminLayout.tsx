@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, type LucideIcon,
+  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
@@ -43,7 +43,10 @@ const GROUPS: NavGroup[] = [
     key: 'productivity',
     label: 'Productivity',
     icon: CalendarClock,
-    items: [{ label: 'Reminders', path: '/admin/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' }],
+    items: [
+      { label: 'Tasks', path: '/admin/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
+      { label: 'Reminders', path: '/admin/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
+    ],
   },
   { key: 'digital', label: 'Digital Department', icon: MonitorSmartphone, items: [] },
   { key: 'dispatch', label: 'Dispatch Zone', icon: Truck, items: [] },

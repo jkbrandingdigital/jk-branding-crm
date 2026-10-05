@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, Filter, AlarmClock, type LucideIcon } from 'lucide-react'
+import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, Filter, AlarmClock, ListTodo, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
@@ -9,8 +9,8 @@ import { istDate } from '../lib/format'
 
 export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
-type SalesNav = SalesPage | 'reminders'
-const OWN_ROUTE: Partial<Record<SalesNav, string>> = { reminders: '/sales/reminders' }
+type SalesNav = SalesPage | 'reminders' | 'tasks'
+const OWN_ROUTE: Partial<Record<SalesNav, string>> = { reminders: '/sales/reminders', tasks: '/sales/tasks' }
 
 type NavItem = { label: string; hint?: string; page?: SalesNav; icon: LucideIcon; perm?: string }
 
@@ -23,7 +23,13 @@ const NAV: { title: string; items: NavItem[] }[] = [
     ],
   },
   { title: 'Leads', items: [{ label: 'My Leads', page: 'leads', icon: Filter, perm: 'mod_leads' }] },
-  { title: 'Productivity', items: [{ label: 'My Reminders', page: 'reminders', icon: AlarmClock, perm: 'mod_reminders' }] },
+  {
+    title: 'Productivity',
+    items: [
+      { label: 'My Tasks', page: 'tasks', icon: ListTodo, perm: 'mod_tasks' },
+      { label: 'My Reminders', page: 'reminders', icon: AlarmClock, perm: 'mod_reminders' },
+    ],
+  },
   { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp, perm: 'mod_performance' }] },
   { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
 ]

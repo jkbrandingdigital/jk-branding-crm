@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, CalendarPlus, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
@@ -101,6 +102,22 @@ export default function LeadsBoard() {
   const [toD, setToD] = useState('')
 
   const [openId, setOpenId] = useState<string | null>(null)
+  const [params, setParams] = useSearchParams()
+
+  // Opened from a notification: ?lead=<id> shows that lead straight away
+  useEffect(() => {
+    const wanted = params.get('lead')
+    if (wanted) setOpenId(wanted)
+  }, [params])
+
+  function closeDrawer() {
+    setOpenId(null)
+    if (params.get('lead')) {
+      const next = new URLSearchParams(params)
+      next.delete('lead')
+      setParams(next, { replace: true })
+    }
+  }
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'assign' | 'stage' } | null>(null)
   const [adding, setAdding] = useState(false)
   const [nl, setNl] = useState<NewLead>(emptyNew)
@@ -801,7 +818,7 @@ export default function LeadsBoard() {
 
       {/* Lead detail */}
       {openId && (
-        <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={() => setOpenId(null)} onChanged={load} />
+        <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={closeDrawer} onChanged={load} />
       )}
 
       {/* Cancel reason */}
