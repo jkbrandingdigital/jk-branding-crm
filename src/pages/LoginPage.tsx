@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Filter, Target, FileBarChart, ClipboardCheck, Users, CalendarCheck, CalendarOff,
   Building2, Megaphone, Share2, Tag, TrendingUp, Shuffle, Settings,
   type LucideIcon,
 } from 'lucide-react'
 import { signIn } from '../lib/auth'
+import { applyTheme, getTheme } from '../lib/appearance'
 
 type Node = { label: string; icon: LucideIcon; angle: number; soon?: boolean }
 
@@ -38,6 +39,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // The sign-in screen is always dark; the person's own choice returns once they are in
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', 'dark')
+    return () => applyTheme(getTheme())
+  }, [])
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
@@ -67,23 +74,23 @@ export default function LoginPage() {
       <div className="relative hidden items-center justify-center overflow-hidden border-r border-[#1b1b1b] bg-[#121212] lg:flex">
         <div
           className="pointer-events-none absolute inset-0 opacity-70"
-          style={{ background: 'radial-gradient(60% 50% at 50% 45%, rgba(249,115,22,.10), transparent 70%)' }}
+          style={{ background: 'radial-gradient(60% 50% at 50% 45%, rgba(255,94,0,.12), transparent 70%)' }}
         />
 
         <div className="relative h-[560px] w-[560px]">
           {/* connecting lines */}
           <svg viewBox="-280 -280 560 560" className="absolute inset-0 h-full w-full">
-            <circle className="jk-orbit" r={R} fill="none" stroke="#242424" strokeWidth="1" strokeDasharray="3 7"
+            <circle className="jk-orbit text-gray-600" r={R} fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 7"
               style={{ animation: 'jk-spin 90s linear infinite', transformOrigin: 'center' }} />
             {NODES.map((n, i) => {
               const { x, y } = pos(n.angle)
               return (
                 <line
                   key={n.label}
-                  className="jk-line"
+                  className="jk-line text-orange-500"
                   x1="0" y1="0" x2={x} y2={y}
-                  stroke="#f97316"
-                  strokeOpacity="0.22"
+                  stroke="currentColor"
+                  strokeOpacity="0.3"
                   strokeWidth="1"
                   strokeDasharray="4 8"
                   style={{ animation: `jk-dash ${7 + (i % 5)}s linear infinite` }}
@@ -98,7 +105,7 @@ export default function LoginPage() {
               style={{ animation: 'jk-pulse 3.2s ease-out infinite' }} />
             <span className="jk-ring absolute inset-0 rounded-full border border-orange-500/30"
               style={{ animation: 'jk-pulse 3.2s ease-out 1.6s infinite' }} />
-            <div className="relative flex h-28 w-28 items-center justify-center rounded-full border border-[#2a2a2a] bg-[#161616] shadow-[0_0_40px_rgba(249,115,22,.15)]">
+            <div className="relative flex h-28 w-28 items-center justify-center rounded-full border border-[#2a2a2a] bg-[#161616] shadow-[0_0_40px_rgba(255,94,0,.18)]">
               <img src="/jklogoicon.png" alt="JK Branding" className="h-12 w-auto" />
             </div>
           </div>
@@ -113,7 +120,7 @@ export default function LoginPage() {
                 className="jk-node absolute left-1/2 top-1/2 flex w-24 -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1.5"
                 style={{ marginLeft: x, marginTop: y, animation: `jk-float ${4 + (i % 4)}s ease-in-out ${i * 0.25}s infinite` }}
               >
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl border ${n.soon ? 'border-[#242424] bg-[#151515] text-gray-600' : 'border-orange-500/30 bg-[#1a1512] text-orange-400'}`}>
+                <div className={`flex h-11 w-11 items-center justify-center rounded-xl border ${n.soon ? 'border-[#242424] bg-[#151515] text-gray-600' : 'border-orange-500/30 bg-orange-500/10 text-orange-400'}`}>
                   <Icon size={19} />
                 </div>
                 <span className={`text-center text-[11px] leading-tight ${n.soon ? 'text-gray-600' : 'text-gray-400'}`}>{n.label}</span>
@@ -138,7 +145,7 @@ export default function LoginPage() {
             <p className="mt-3 text-gray-400">Sign in to continue to your dashboard</p>
           </div>
 
-          <div className="rounded-2xl border border-[#2a2a2a] bg-[#1a1a1a] p-8">
+          <div className="rounded-2xl border border-[#2a2a2a] bg-[#151515] p-8">
             {error && (
               <div className="mb-6 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
                 {error}

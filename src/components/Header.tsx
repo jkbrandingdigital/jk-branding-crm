@@ -4,6 +4,7 @@ import { signOut } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import ProfileModal from './ProfileModal'
 import NotificationBell from './NotificationBell'
+import AppearanceMenu from './AppearanceMenu'
 
 const ROLE_LABEL: Record<string, string> = {
   super_admin: 'Super Admin',
@@ -94,6 +95,7 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-3">
+      <AppearanceMenu />
       <NotificationBell remindersPath={REMINDERS_PATH[role] ?? '/'} leadsPath={LEADS_PATH[role] ?? '/'} tasksPath={TASKS_PATH[role] ?? '/'} />
       <div className="relative" ref={boxRef}>
         <button
