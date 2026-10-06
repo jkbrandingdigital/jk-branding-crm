@@ -33,6 +33,21 @@ import ManagerTasks from './pages/manager/Tasks'
 import HrTasks from './pages/hr/Tasks'
 import SalesTasks from './pages/sales/Tasks'
 import DesignTasks from './pages/design/Tasks'
+import AdminNotes from './pages/admin/Notes'
+import ManagerNotes from './pages/manager/Notes'
+import HrNotes from './pages/hr/Notes'
+import SalesNotes from './pages/sales/Notes'
+import DesignNotes from './pages/design/Notes'
+import AdminQuotations from './pages/admin/Quotations'
+import AdminQuotationEdit from './pages/admin/QuotationEdit'
+import AdminQuotationView from './pages/admin/QuotationView'
+import AdminQuotationSettings from './pages/admin/QuotationSettingsPage'
+import ManagerQuotations from './pages/manager/Quotations'
+import ManagerQuotationEdit from './pages/manager/QuotationEdit'
+import ManagerQuotationView from './pages/manager/QuotationView'
+import SalesQuotations from './pages/sales/Quotations'
+import SalesQuotationEdit from './pages/sales/QuotationEdit'
+import SalesQuotationView from './pages/sales/QuotationView'
 
 function AppRoutes() {
   const { user, role, loading } = useAuth()
@@ -68,6 +83,12 @@ function AppRoutes() {
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/reminders" element={<AdminReminders />} />
           <Route path="/admin/tasks" element={<AdminTasks />} />
+          <Route path="/admin/notes" element={<AdminNotes />} />
+          <Route path="/admin/quotations" element={<AdminQuotations />} />
+          <Route path="/admin/quotations/settings" element={<AdminQuotationSettings />} />
+          <Route path="/admin/quotations/new" element={<AdminQuotationEdit />} />
+          <Route path="/admin/quotations/:id/preview" element={<AdminQuotationView />} />
+          <Route path="/admin/quotations/:id" element={<AdminQuotationEdit />} />
           <Route path="/admin/*" element={<AdminDashboard />} />
           
         </>
@@ -81,6 +102,11 @@ function AppRoutes() {
           <Route path="/manager/employee/:id" element={<ManagerEmployeeReport />} />
           <Route path="/manager/reminders" element={<ManagerReminders />} />
           <Route path="/manager/tasks" element={<ManagerTasks />} />
+          <Route path="/manager/notes" element={<ManagerNotes />} />
+          <Route path="/manager/quotations" element={<ManagerQuotations />} />
+          <Route path="/manager/quotations/new" element={<ManagerQuotationEdit />} />
+          <Route path="/manager/quotations/:id/preview" element={<ManagerQuotationView />} />
+          <Route path="/manager/quotations/:id" element={<ManagerQuotationEdit />} />
           <Route path="/manager/*" element={<ManagerDashboard />} />
         </>
       )}
@@ -88,6 +114,11 @@ function AppRoutes() {
         <>
           <Route path="/sales/reminders" element={<SalesReminders />} />
           <Route path="/sales/tasks" element={<SalesTasks />} />
+          <Route path="/sales/notes" element={<SalesNotes />} />
+          <Route path="/sales/quotations" element={<SalesQuotations />} />
+          <Route path="/sales/quotations/new" element={<SalesQuotationEdit />} />
+          <Route path="/sales/quotations/:id/preview" element={<SalesQuotationView />} />
+          <Route path="/sales/quotations/:id" element={<SalesQuotationEdit />} />
           <Route path="/sales/*" element={<SalesDashboard />} />
         </>
       )}
@@ -97,6 +128,7 @@ function AppRoutes() {
           <Route path="/hr/employees" element={<HrEmployees />} />
           <Route path="/hr/reminders" element={<HrReminders />} />
           <Route path="/hr/tasks" element={<HrTasks />} />
+          <Route path="/hr/notes" element={<HrNotes />} />
           <Route path="/hr/*" element={<HRDashboard />} />
         </>
       )}
@@ -104,6 +136,7 @@ function AppRoutes() {
         <>
           <Route path="/design/reminders" element={<DesignReminders />} />
           <Route path="/design/tasks" element={<DesignTasks />} />
+          <Route path="/design/notes" element={<DesignNotes />} />
           <Route path="/design/*" element={<DesignDashboard />} />
         </>
       )}

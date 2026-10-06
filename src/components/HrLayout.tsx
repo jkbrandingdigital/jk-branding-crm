@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, StickyNote, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
 
@@ -21,6 +21,7 @@ const GROUPS: Group[] = [
     items: [
       { label: 'Tasks', path: '/hr/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
       { label: 'Reminders', path: '/hr/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
+      { label: 'Notes', path: '/hr/notes', icon: StickyNote, ready: true, perm: 'mod_notes' },
     ],
   },
   {

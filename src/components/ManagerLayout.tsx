@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, type LucideIcon,
+  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, StickyNote, FileText, Plus, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
@@ -26,6 +26,14 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { label: 'Tasks', path: '/manager/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
       { label: 'Reminders', path: '/manager/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
+      { label: 'Notes', path: '/manager/notes', icon: StickyNote, ready: true, perm: 'mod_notes' },
+    ],
+  },
+  {
+    title: 'Business',
+    items: [
+      { label: 'Create Quotation', path: '/manager/quotations/new', icon: Plus, ready: true, perm: 'quote_create' },
+      { label: 'All Quotations', path: '/manager/quotations', icon: FileText, ready: true, perm: 'mod_quotations' },
     ],
   },
   {
@@ -63,7 +71,11 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => setOpen(false), [pathname])
 
-  const isActive = (path: string) => (path === '/manager' ? pathname === '/manager' : pathname.startsWith(path))
+  // Only the closest match lights up, so a "new" page does not also light up its list
+  const bestMatch = NAV_SECTIONS.flatMap((s) => s.items)
+    .filter((i) => pathname === i.path || pathname.startsWith(i.path + '/'))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.path ?? null
+  const isActive = (path: string) => (path === '/manager' ? pathname === '/manager' : path === bestMatch)
 
   // Only the modules this person is allowed to open
   const sections = NAV_SECTIONS.map((s) => ({

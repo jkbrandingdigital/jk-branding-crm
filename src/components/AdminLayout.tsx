@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, type LucideIcon,
+  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, StickyNote, FileText, Plus, Briefcase as BriefcaseIcon, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
@@ -46,6 +46,17 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: 'Tasks', path: '/admin/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
       { label: 'Reminders', path: '/admin/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
+      { label: 'Notes', path: '/admin/notes', icon: StickyNote, ready: true, perm: 'mod_notes' },
+    ],
+  },
+  {
+    key: 'business',
+    label: 'Business',
+    icon: BriefcaseIcon,
+    items: [
+      { label: 'Create Quotation', path: '/admin/quotations/new', icon: Plus, ready: true, perm: 'quote_create' },
+      { label: 'All Quotations', path: '/admin/quotations', icon: FileText, ready: true, perm: 'mod_quotations' },
+      { label: 'Quotation Settings', path: '/admin/quotations/settings', icon: Settings, ready: true, perm: 'quote_settings' },
     ],
   },
   { key: 'digital', label: 'Digital Department', icon: MonitorSmartphone, items: [] },
@@ -70,7 +81,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const [drawer, setDrawer] = useState(false)
   const [userName, setUserName] = useState('')
 
-  const activeGroup = GROUPS.find((g) => g.items.some((i) => pathname.startsWith(i.path)))?.key ?? null
+  // Only the closest match lights up: /admin/quotations/new must not also
+  // light up /admin/quotations
+  const bestMatch = GROUPS.flatMap((g) => g.items)
+    .filter((i) => pathname === i.path || pathname.startsWith(i.path + '/'))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.path ?? null
+  const isActive = (path: string) => path === bestMatch
+
+  const activeGroup = GROUPS.find((g) => g.items.some((i) => isActive(i.path)))?.key ?? null
   const [open, setOpen] = useState<string | null>(activeGroup)
 
   useEffect(() => {
@@ -148,7 +166,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     }
                     return (
                       <li key={item.path}>
-                        <Link to={item.path} className={`${linkCls(pathname.startsWith(item.path))} py-1.5`}>
+                        <Link to={item.path} className={`${linkCls(isActive(item.path))} py-1.5`}>
                           <Icon size={16} />
                           {item.label}
                         </Link>

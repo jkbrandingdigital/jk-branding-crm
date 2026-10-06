@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, Filter, AlarmClock, ListTodo, type LucideIcon } from 'lucide-react'
+import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, Filter, AlarmClock, ListTodo, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
@@ -9,8 +9,14 @@ import { istDate } from '../lib/format'
 
 export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
-type SalesNav = SalesPage | 'reminders' | 'tasks'
-const OWN_ROUTE: Partial<Record<SalesNav, string>> = { reminders: '/sales/reminders', tasks: '/sales/tasks' }
+type SalesNav = SalesPage | 'reminders' | 'tasks' | 'notes' | 'quotations' | 'quote-new'
+const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
+  reminders: '/sales/reminders',
+  tasks: '/sales/tasks',
+  notes: '/sales/notes',
+  quotations: '/sales/quotations',
+  'quote-new': '/sales/quotations/new',
+}
 
 type NavItem = { label: string; hint?: string; page?: SalesNav; icon: LucideIcon; perm?: string }
 
@@ -28,6 +34,14 @@ const NAV: { title: string; items: NavItem[] }[] = [
     items: [
       { label: 'My Tasks', page: 'tasks', icon: ListTodo, perm: 'mod_tasks' },
       { label: 'My Reminders', page: 'reminders', icon: AlarmClock, perm: 'mod_reminders' },
+      { label: 'My Notes', page: 'notes', icon: StickyNote, perm: 'mod_notes' },
+    ],
+  },
+  {
+    title: 'Business',
+    items: [
+      { label: 'Create Quotation', page: 'quote-new', icon: Plus, perm: 'quote_create' },
+      { label: 'All Quotations', page: 'quotations', icon: FileText, perm: 'mod_quotations' },
     ],
   },
   { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp, perm: 'mod_performance' }] },

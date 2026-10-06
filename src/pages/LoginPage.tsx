@@ -1,37 +1,41 @@
 import { useEffect, useState } from 'react'
 import {
   Filter, Target, FileBarChart, ClipboardCheck, Users, CalendarCheck, CalendarOff,
-  Building2, Megaphone, Share2, Tag, TrendingUp, Shuffle, Settings,
+  Building2, Megaphone, Share2, Tag, TrendingUp, Shuffle, Settings, ListTodo, AlarmClock,
   type LucideIcon,
 } from 'lucide-react'
 import { signIn } from '../lib/auth'
 import { applyTheme, getTheme } from '../lib/appearance'
 
-type Node = { label: string; icon: LucideIcon; angle: number; soon?: boolean }
+type Node = { label: string; icon: LucideIcon }
 
-// angle in degrees, 0 = right, going clockwise
+// Clockwise from the top; the ring spaces them out on its own
 const NODES: Node[] = [
-  { label: 'Leads', icon: Filter, angle: -90 },
-  { label: 'Lead Assignment', icon: Shuffle, angle: -64 },
-  { label: 'Labels', icon: Tag, angle: -38 },
-  { label: 'Facebook Ads', icon: Share2, angle: -12 },
-  { label: 'Targets', icon: Target, angle: 14 },
-  { label: 'Performance', icon: TrendingUp, angle: 40 },
-  { label: 'Daily Reports', icon: FileBarChart, angle: 66 },
-  { label: 'Evolution', icon: ClipboardCheck, angle: 92 },
-  { label: 'Employees', icon: Users, angle: 118 },
-  { label: 'Attendance', icon: CalendarCheck, angle: 144, soon: true },
-  { label: 'Leave', icon: CalendarOff, angle: 170, soon: true },
-  { label: 'Branches', icon: Building2, angle: 196, soon: true },
-  { label: 'Announcements', icon: Megaphone, angle: 222, soon: true },
-  { label: 'Settings', icon: Settings, angle: 248 },
+  { label: 'Leads', icon: Filter },
+  { label: 'Lead Assignment', icon: Shuffle },
+  { label: 'Labels', icon: Tag },
+  { label: 'Facebook Ads', icon: Share2 },
+  { label: 'Tasks', icon: ListTodo },
+  { label: 'Reminders', icon: AlarmClock },
+  { label: 'Targets', icon: Target },
+  { label: 'Performance', icon: TrendingUp },
+  { label: 'Daily Reports', icon: FileBarChart },
+  { label: 'Evolution', icon: ClipboardCheck },
+  { label: 'Employees', icon: Users },
+  { label: 'Attendance', icon: CalendarCheck },
+  { label: 'Leave', icon: CalendarOff },
+  { label: 'Branches', icon: Building2 },
+  { label: 'Announcements', icon: Megaphone },
+  { label: 'Settings', icon: Settings },
 ]
 
-const R = 190 // how far the icons sit from the centre
-const pos = (angle: number) => ({
-  x: Math.cos((angle * Math.PI) / 180) * R,
-  y: Math.sin((angle * Math.PI) / 180) * R,
-})
+const R = 196 // how far the icons sit from the centre
+const STEP = 360 / NODES.length // even all the way round, so nothing leans to one side
+const angleOf = (i: number) => -90 + i * STEP
+const pos = (i: number) => {
+  const a = (angleOf(i) * Math.PI) / 180
+  return { x: Math.cos(a) * R, y: Math.sin(a) * R }
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -77,13 +81,13 @@ export default function LoginPage() {
           style={{ background: 'radial-gradient(60% 50% at 50% 45%, rgba(255,94,0,.12), transparent 70%)' }}
         />
 
-        <div className="relative h-[560px] w-[560px]">
+        <div className="relative aspect-square w-[min(600px,78vh,78%)]">
           {/* connecting lines */}
-          <svg viewBox="-280 -280 560 560" className="absolute inset-0 h-full w-full">
+          <svg viewBox="-300 -300 600 600" className="absolute inset-0 h-full w-full">
             <circle className="jk-orbit text-gray-600" r={R} fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 7"
               style={{ animation: 'jk-spin 90s linear infinite', transformOrigin: 'center' }} />
             {NODES.map((n, i) => {
-              const { x, y } = pos(n.angle)
+              const { x, y } = pos(i)
               return (
                 <line
                   key={n.label}
@@ -112,18 +116,26 @@ export default function LoginPage() {
 
           {/* modules */}
           {NODES.map((n, i) => {
-            const { x, y } = pos(n.angle)
+            const { x, y } = pos(i)
             const Icon = n.icon
             return (
+              /* The outer box does the placing; the inner one does the floating.
+                 Keeping them apart matters: an animation's transform would otherwise
+                 wipe out the -50% that centres the box on its spot. */
               <div
                 key={n.label}
-                className="jk-node absolute left-1/2 top-1/2 flex w-24 -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1.5"
-                style={{ marginLeft: x, marginTop: y, animation: `jk-float ${4 + (i % 4)}s ease-in-out ${i * 0.25}s infinite` }}
+                className="absolute left-1/2 top-1/2 w-24 -translate-x-1/2 -translate-y-1/2"
+                style={{ marginLeft: x, marginTop: y - 14 }}
               >
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl border ${n.soon ? 'border-[#242424] bg-[#151515] text-gray-600' : 'border-orange-500/30 bg-orange-500/10 text-orange-400'}`}>
-                  <Icon size={19} />
+                <div
+                  className="jk-node flex flex-col items-center gap-1.5"
+                  style={{ animation: `jk-float ${4 + (i % 4)}s ease-in-out ${i * 0.25}s infinite` }}
+                >
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 text-orange-400">
+                    <Icon size={19} />
+                  </div>
+                  <span className="text-center text-[11px] leading-tight text-gray-400">{n.label}</span>
                 </div>
-                <span className={`text-center text-[11px] leading-tight ${n.soon ? 'text-gray-600' : 'text-gray-400'}`}>{n.label}</span>
               </div>
             )
           })}
