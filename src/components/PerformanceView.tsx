@@ -3,7 +3,8 @@ import {
   BarChart, Bar, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { ArrowDownRight, ArrowUpRight, Home, Building2 } from 'lucide-react'
-import DonutChart, { PIE_COLORS } from './DonutChart'
+import DonutChart from './DonutChart'
+import { useChartTheme } from '../lib/chartTheme'
 import { supabase } from '../lib/supabase'
 import { istDate, addDays, weekStart, addMonths, shortDate, monthLabel, inr, inrCompact } from '../lib/format'
 
@@ -75,11 +76,10 @@ async function fetchReports(from: string, userId?: string | null, branchId?: str
   return all
 }
 
-const tooltipStyle = { background: '#1a1a1a', border: '1px solid #2e2e2e', borderRadius: 8, color: '#fff', fontSize: 12 }
-
 export default function PerformanceView({
   userId, branchId, title = 'Performance', subtitle,
 }: { userId?: string | null; branchId?: string | null; title?: string; subtitle?: string }) {
+  const chart = useChartTheme()
   const [view, setView] = useState<View>('daily')
   const [rows, setRows] = useState<Row[]>([])
   const [norm, setNorm] = useState<Norm | null>(null)
@@ -170,10 +170,10 @@ export default function PerformanceView({
   const inView = rows.filter((r) => cfg.keyOf(r.work_date) >= firstKey)
   const sum = (k: keyof Row) => inView.reduce((s, r) => s + Number(r[k] ?? 0), 0)
   const sources = [
-    { name: 'IndiaMART', value: sum('indiamart_inquiry'), color: PIE_COLORS[0] },
-    { name: 'Facebook', value: sum('facebook_inquiry'), color: PIE_COLORS[1] },
-    { name: 'Incoming calls', value: sum('incoming_calls'), color: PIE_COLORS[2] },
-    { name: 'Old client reference', value: sum('old_client_ref'), color: PIE_COLORS[4] },
+    { name: 'IndiaMART', value: sum('indiamart_inquiry'), color: chart.series[0] },
+    { name: 'Facebook', value: sum('facebook_inquiry'), color: chart.series[1] },
+    { name: 'Incoming calls', value: sum('incoming_calls'), color: chart.series[2] },
+    { name: 'Old client reference', value: sum('old_client_ref'), color: chart.series[3] },
   ]
 
   return (
@@ -280,10 +280,10 @@ export default function PerformanceView({
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={buckets} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="#222" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={8} />
+                <CartesianGrid stroke={chart.grid} vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={8} />
                 <YAxis
-                  tick={{ fill: '#888', fontSize: 11 }}
+                  tick={{ fill: chart.axis, fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
                   width={60}
@@ -291,10 +291,21 @@ export default function PerformanceView({
                   domain={[0, (max: number) => Math.max(max, 10000)]}
                   tickFormatter={(v) => inrCompact(Number(v))}
                 />
-                <Tooltip cursor={{ fill: '#1c1c1c' }} contentStyle={tooltipStyle} itemStyle={{ color: '#e5e5e5' }} formatter={(v) => [inr(Number(v)), 'Revenue']} />
+                <Tooltip
+                  cursor={{ fill: chart.cursor }}
+                  contentStyle={chart.tooltip}
+                  itemStyle={chart.tooltipItem}
+                  labelStyle={{ color: chart.axisStrong, marginBottom: 2 }}
+                  formatter={(v) => [inr(Number(v)), 'Revenue']}
+                />
                 <Bar dataKey="revenue" radius={[5, 5, 0, 0]} maxBarSize={44}>
+                  {/* The period you are in stands out; the rest sit back */}
                   {buckets.map((b, i) => (
-                    <Cell key={b.key} fill={i === buckets.length - 1 ? '#f97316' : '#7c3a12'} />
+                    <Cell
+                      key={b.key}
+                      fill={chart.series[0]}
+                      fillOpacity={i === buckets.length - 1 ? 1 : chart.dark ? 0.35 : 0.3}
+                    />
                   ))}
                 </Bar>
               </BarChart>
@@ -308,21 +319,26 @@ export default function PerformanceView({
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-sm font-medium text-gray-300">Calls and leads</h2>
               <div className="flex gap-4 text-xs text-gray-400">
-                <Legend color="#f97316" label="Calls" />
-                <Legend color="#60a5fa" label="Positive leads" />
-                <Legend color="#f43f5e" label="Hot leads" />
+                <Legend color={chart.series[0]} label="Calls" />
+                <Legend color={chart.series[1]} label="Positive leads" />
+                <Legend color={chart.series[3]} label="Hot leads" />
               </div>
             </div>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={buckets} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#222" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={8} />
-                  <YAxis tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} width={40} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10)]} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Line type="monotone" dataKey="calls" name="Calls" stroke="#f97316" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="positive" name="Positive leads" stroke="#60a5fa" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="hot" name="Hot leads" stroke="#f43f5e" strokeWidth={2} dot={false} />
+                  <CartesianGrid stroke={chart.grid} vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={8} />
+                  <YAxis tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} width={40} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10)]} />
+                  <Tooltip
+                    contentStyle={chart.tooltip}
+                    itemStyle={chart.tooltipItem}
+                    labelStyle={{ color: chart.axisStrong, marginBottom: 2 }}
+                    cursor={{ stroke: chart.grid }}
+                  />
+                  <Line type="monotone" dataKey="calls" name="Calls" stroke={chart.series[0]} strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="positive" name="Positive leads" stroke={chart.series[1]} strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="hot" name="Hot leads" stroke={chart.series[3]} strokeWidth={2.5} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

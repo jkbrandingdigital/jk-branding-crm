@@ -104,6 +104,7 @@ export default function TaskBoard() {
   const canCreate = can('task_create')
   const canDelete = can('task_delete')
   const canAssign = can('task_assign')
+  const canClose = can('task_close')
 
   const load = useCallback(async () => {
     setError('')
@@ -152,9 +153,27 @@ export default function TaskBoard() {
     return (id: string | null) => (id ? m.get(id) : undefined)
   }, [labels])
 
+  // Completed and Rejected are a coordinator's call; for everyone else such a task is read-only
+  const isClosed = useCallback(
+    (t: Task) => {
+      const st = stageOf(t.stage_id)
+      return !!(st?.is_done || st?.is_rejected)
+    },
+    [stageOf],
+  )
+
   const canEditTask = useCallback(
-    (t: Task) => can('task_edit') && (t.created_by === me || currentAssignees(t).includes(me) || can('task_assign')),
-    [can, me],
+    (t: Task) =>
+      can('task_edit') &&
+      (t.created_by === me || currentAssignees(t).includes(me) || can('task_assign')) &&
+      (canClose || !isClosed(t)),
+    [can, me, canClose, isClosed],
+  )
+
+  // Stages this person may move a task into
+  const openStages = useMemo(
+    () => (canClose ? stages : stages.filter((st) => !st.is_done && !st.is_rejected)),
+    [stages, canClose],
   )
 
   const filtered = useMemo(() => {
@@ -276,6 +295,13 @@ export default function TaskBoard() {
   async function moveTo(taskId: string, stageId: string) {
     const t = tasks.find((x) => x.id === taskId)
     if (!t || t.stage_id === stageId) return
+    const target = stageOf(stageId)
+    if (!canClose && (target?.is_done || target?.is_rejected)) {
+      return setError('Only a coordinator can complete or reject a task.')
+    }
+    if (!canClose && isClosed(t)) {
+      return setError('This task is closed. Ask a coordinator to reopen it.')
+    }
     setTasks((list) => list.map((x) => (x.id === taskId ? { ...x, stage_id: stageId } : x))) // show it straight away
     const { error: e } = await supabase.from('tasks').update({ stage_id: stageId }).eq('id', taskId)
     if (e) {
@@ -297,7 +323,7 @@ export default function TaskBoard() {
 
     return (
       <div
-        draggable={mayEdit}
+        draggable={mayEdit && (canClose || !isClosed(t))}
         onDragStart={() => setDragId(t.id)}
         onDragEnd={() => setDragId(null)}
         onClick={() => setOpened(t)}
@@ -403,7 +429,7 @@ export default function TaskBoard() {
                   ))}
                 </>
               )}
-              {menu.kind === 'stage' && stages.map((st) => (
+              {menu.kind === 'stage' && openStages.map((st) => (
                 <MenuRow key={st.id} on={t.stage_id === st.id} onClick={() => { setMenu(null); moveTo(t.id, st.id) }}>
                   {st.name}
                 </MenuRow>
@@ -686,6 +712,8 @@ export default function TaskBoard() {
           labels={labels}
           staff={staff}
           canEdit={canEditTask(opened)}
+          stageChoices={openStages}
+          locked={!canClose && isClosed(opened)}
           onEdit={() => setEditing(opened)}
           onClose={() => { setOpened(null); setOpenTab('details') }}
           onChanged={load}

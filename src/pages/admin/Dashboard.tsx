@@ -5,7 +5,8 @@ import {
 } from 'recharts'
 import { supabase } from '../../lib/supabase'
 import AdminLayout from '../../components/AdminLayout'
-import DonutChart, { PIE_COLORS } from '../../components/DonutChart'
+import DonutChart from '../../components/DonutChart'
+import { useChartTheme } from '../../lib/chartTheme'
 
 // ---------- Types ----------
 type Branch = { id: string; name: string; city: string | null }
@@ -74,17 +75,10 @@ const PERIODS: { key: Period; label: string }[] = [
   { key: 'lastMonth', label: 'Last month' },
 ]
 
-const tooltipStyle = {
-  background: '#1a1a1a',
-  border: '1px solid #2e2e2e',
-  borderRadius: 8,
-  color: '#fff',
-  fontSize: 12,
-}
-
 // ---------- Component ----------
 export default function AdminDashboard() {
   const navigate = useNavigate()
+  const chart = useChartTheme()
   const [period, setPeriod] = useState<Period>('month')
   const [branchId, setBranchId] = useState<string>('all')
 
@@ -349,15 +343,21 @@ export default function AdminDashboard() {
                   <AreaChart data={trend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#f97316" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="#f97316" stopOpacity={0} />
+                        <stop offset="0%" stopColor={chart.series[0]} stopOpacity={chart.dark ? 0.35 : 0.22} />
+                        <stop offset="100%" stopColor={chart.series[0]} stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid stroke="#222" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={16} />
-                    <YAxis tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} width={64} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10000)]} tickFormatter={(v) => formatINR(Number(v))} />
-                    <Tooltip contentStyle={tooltipStyle} formatter={(v) => [formatINR(Number(v)), 'Revenue']} />
-                    <Area type="monotone" dataKey="revenue" stroke="#f97316" strokeWidth={2} fill="url(#rev)" />
+                    <CartesianGrid stroke={chart.grid} vertical={false} />
+                    <XAxis dataKey="date" tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={16} />
+                    <YAxis tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} width={64} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10000)]} tickFormatter={(v) => formatINR(Number(v))} />
+                    <Tooltip
+                      contentStyle={chart.tooltip}
+                      itemStyle={chart.tooltipItem}
+                      labelStyle={{ color: chart.axisStrong, marginBottom: 2 }}
+                      cursor={{ stroke: chart.grid }}
+                      formatter={(v) => [formatINR(Number(v)), 'Revenue']}
+                    />
+                    <Area type="monotone" dataKey="revenue" stroke={chart.series[0]} strokeWidth={2.5} fill="url(#rev)" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -366,10 +366,10 @@ export default function AdminDashboard() {
             <Panel title="Inquiry sources">
               <DonutChart
                 data={[
-                  { name: 'IndiaMART', value: totals.indiamart, color: PIE_COLORS[0] },
-                  { name: 'Facebook', value: totals.fb, color: PIE_COLORS[1] },
-                  { name: 'Incoming calls', value: totals.incoming, color: PIE_COLORS[2] },
-                  { name: 'Old client reference', value: totals.oldRef, color: PIE_COLORS[4] },
+                  { name: 'IndiaMART', value: totals.indiamart, color: chart.series[0] },
+                  { name: 'Facebook', value: totals.fb, color: chart.series[1] },
+                  { name: 'Incoming calls', value: totals.incoming, color: chart.series[2] },
+                  { name: 'Old client reference', value: totals.oldRef, color: chart.series[3] },
                 ]}
                 centerLabel="Inquiries"
                 empty="No inquiries in this period."
@@ -384,11 +384,17 @@ export default function AdminDashboard() {
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={branchRevenue} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid stroke="#222" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fill: '#bbb', fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} width={64} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10000)]} tickFormatter={(v) => formatINR(Number(v))} />
-                      <Tooltip cursor={{ fill: '#1c1c1c' }} contentStyle={tooltipStyle} itemStyle={{ color: '#e5e5e5' }} formatter={(v) => [formatINR(Number(v)), 'Revenue']} />
-                      <Bar dataKey="revenue" fill="#f97316" radius={[6, 6, 0, 0]} maxBarSize={56} />
+                      <CartesianGrid stroke={chart.grid} vertical={false} />
+                      <XAxis dataKey="name" tick={{ fill: chart.axisStrong, fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} width={64} allowDecimals={false} domain={[0, (max: number) => Math.max(max, 10000)]} tickFormatter={(v) => formatINR(Number(v))} />
+                      <Tooltip
+                        cursor={{ fill: chart.cursor }}
+                        contentStyle={chart.tooltip}
+                        itemStyle={chart.tooltipItem}
+                        labelStyle={{ color: chart.axisStrong, marginBottom: 2 }}
+                        formatter={(v) => [formatINR(Number(v)), 'Revenue']}
+                      />
+                      <Bar dataKey="revenue" fill={chart.series[0]} radius={[6, 6, 0, 0]} maxBarSize={56} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

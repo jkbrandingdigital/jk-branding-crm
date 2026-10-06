@@ -1,11 +1,10 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
+import { SERIES, useChartTheme } from '../lib/chartTheme'
 
 export type Slice = { name: string; value: number; color: string }
 
-// Brand-friendly palette for slices
-export const PIE_COLORS = ['#f97316', '#60a5fa', '#34d399', '#f43f5e', '#a78bfa', '#facc15', '#2dd4bf', '#fb7185']
-
-const tooltipStyle = { background: '#1a1a1a', border: '1px solid #2e2e2e', borderRadius: 8, fontSize: 12 }
+// The app's one chart palette (see lib/chartTheme)
+export const PIE_COLORS = SERIES
 
 export default function DonutChart({
   data,
@@ -18,7 +17,11 @@ export default function DonutChart({
   centerLabel?: string
   empty?: string
 }) {
-  const slices = data.filter((d) => d.value > 0)
+  const chart = useChartTheme()
+  // A slice with no colour of its own takes the next one from the palette
+  const slices = data
+    .filter((d) => d.value > 0)
+    .map((d, i) => ({ ...d, color: d.color || SERIES[i % SERIES.length] }))
   const total = slices.reduce((s, d) => s + d.value, 0)
 
   if (total === 0) return <p className="py-10 text-center text-sm text-gray-500">{empty}</p>
@@ -30,12 +33,12 @@ export default function DonutChart({
           <PieChart>
             <Pie data={slices} dataKey="value" nameKey="name" innerRadius="62%" outerRadius="100%" paddingAngle={0} stroke="none">
               {slices.map((s) => (
-                <Cell key={s.name} fill={s.color} stroke={s.color} strokeWidth={1} />
+                <Cell key={s.name} fill={s.color} stroke={chart.dark ? s.color : '#ffffff'} strokeWidth={chart.dark ? 1 : 2} />
               ))}
             </Pie>
             <Tooltip
-              contentStyle={tooltipStyle}
-              itemStyle={{ color: '#e5e5e5' }}
+              contentStyle={chart.tooltip}
+              itemStyle={chart.tooltipItem}
               formatter={(v, n) => [`${format(Number(v))} (${((Number(v) / total) * 100).toFixed(0)}%)`, String(n)]}
             />
           </PieChart>

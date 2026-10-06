@@ -71,6 +71,7 @@ const TASK_ACTION_LABEL: Record<string, string> = {
   task_create: 'Add tasks',
   task_edit: 'Edit tasks',
   task_assign: 'Assign tasks to others',
+  task_close: 'Complete or reject tasks',
   task_delete: 'Delete tasks',
   task_settings: 'Task settings (stages, labels)',
 }

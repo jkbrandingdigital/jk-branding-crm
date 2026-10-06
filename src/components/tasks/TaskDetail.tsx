@@ -23,13 +23,15 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 export default function TaskDetail({
-  task, stages, labels, staff, canEdit, initialTab = 'details', onEdit, onClose, onChanged,
+  task, stages, labels, staff, canEdit, stageChoices, locked = false, initialTab = 'details', onEdit, onClose, onChanged,
 }: {
   task: Task
   stages: TaskStage[]
   labels: TaskLabel[]
   staff: Staff[]
   canEdit: boolean
+  stageChoices?: TaskStage[]
+  locked?: boolean
   initialTab?: Tab
   onEdit: () => void
   onClose: () => void
@@ -192,6 +194,12 @@ export default function TaskDetail({
         <div className="flex-1 overflow-y-auto p-5">
           {error && <p className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm text-red-400">{error}</p>}
 
+          {locked && (
+            <p className="mb-4 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-4 py-2.5 text-sm text-gray-400">
+              This task is {stage?.name?.toLowerCase() ?? 'closed'}. Only a coordinator can reopen it.
+            </p>
+          )}
+
           {tab === 'details' && (
             <div>
               {row('Stage',
@@ -202,7 +210,7 @@ export default function TaskDetail({
                     onChange={(e) => changeStage(e.target.value)}
                     className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2.5 py-1 text-sm text-white focus:border-orange-500 focus:outline-none"
                   >
-                    {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {(stageChoices ?? stages).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 ) : (
                   stage?.name ?? '—'
@@ -241,6 +249,7 @@ export default function TaskDetail({
                 ))}
                 {comments.length === 0 && <li className="py-8 text-center text-sm text-gray-500">No comments yet.</li>}
               </ul>
+              {locked ? null : (
               <div className="flex gap-2">
                 <textarea
                   rows={2}
@@ -258,6 +267,7 @@ export default function TaskDetail({
                   {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                 </button>
               </div>
+              )}
             </div>
           )}
 
@@ -296,6 +306,7 @@ export default function TaskDetail({
                   e.target.value = ''
                 }}
               />
+              {!locked && (
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={busy}
@@ -303,6 +314,7 @@ export default function TaskDetail({
               >
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Paperclip size={15} />} Add a file
               </button>
+              )}
             </div>
           )}
 
