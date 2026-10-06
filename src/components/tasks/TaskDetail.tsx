@@ -23,20 +23,21 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 export default function TaskDetail({
-  task, stages, labels, staff, canEdit, onEdit, onClose, onChanged,
+  task, stages, labels, staff, canEdit, initialTab = 'details', onEdit, onClose, onChanged,
 }: {
   task: Task
   stages: TaskStage[]
   labels: TaskLabel[]
   staff: Staff[]
   canEdit: boolean
+  initialTab?: Tab
   onEdit: () => void
   onClose: () => void
   onChanged: () => void
 }) {
   const { user } = useAuth()
   const me = user?.id ?? ''
-  const [tab, setTab] = useState<Tab>('details')
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [comments, setComments] = useState<Comment[]>([])
   const [files, setFiles] = useState<FileRow[]>([])
   const [history, setHistory] = useState<Activity[]>([])

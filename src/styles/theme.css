@@ -343,3 +343,94 @@ html[data-theme='light'] .rounded-full.border.bg-\[\#161616\] {
   box-shadow: 0 0 44px rgba(255, 94, 0, 0.16), var(--lift-2);
 }
 html[data-theme='light'] .jk-node .bg-\[\#151515\] { background-color: var(--surface-2); }
+
+/* =====================================================================
+   Tinted panels (success, warning, error)
+   Dark tints turn into pale washes, and the writing on them goes dark
+   so it can be read on paper.
+   ===================================================================== */
+
+/* Green */
+html[data-theme='light'] .bg-green-500\/5,
+html[data-theme='light'] .bg-green-500\/10,
+html[data-theme='light'] .bg-green-500\/15,
+html[data-theme='light'] .bg-green-500\/20,
+html[data-theme='light'] .bg-green-600\/10,
+html[data-theme='light'] .bg-green-900\/20,
+html[data-theme='light'] .bg-green-900\/30,
+html[data-theme='light'] .bg-green-950\/20,
+html[data-theme='light'] .bg-green-950\/30,
+html[data-theme='light'] .bg-green-950\/40,
+html[data-theme='light'] .bg-green-950\/60,
+html[data-theme='light'] .bg-emerald-500\/10,
+html[data-theme='light'] .bg-emerald-900\/20,
+html[data-theme='light'] .bg-emerald-950\/20,
+html[data-theme='light'] .bg-emerald-950\/30,
+html[data-theme='light'] .bg-emerald-950\/40 { background-color: #e6f4ea; }
+html[data-theme='light'] .text-green-300,
+html[data-theme='light'] .text-green-400,
+html[data-theme='light'] .text-green-500,
+html[data-theme='light'] .text-emerald-400 { color: #14663c; }
+html[data-theme='light'] .border-green-500\/20,
+html[data-theme='light'] .border-green-500\/30,
+html[data-theme='light'] .border-green-500\/40,
+html[data-theme='light'] .border-green-900\/40,
+html[data-theme='light'] .border-green-900\/50,
+html[data-theme='light'] .border-emerald-500\/20,
+html[data-theme='light'] .border-emerald-900\/40 { border-color: #bcdfc7; }
+
+/* Red */
+html[data-theme='light'] .bg-red-500\/5,
+html[data-theme='light'] .bg-red-500\/20,
+html[data-theme='light'] .bg-red-600\/10,
+html[data-theme='light'] .bg-red-900\/20,
+html[data-theme='light'] .bg-red-900\/30,
+html[data-theme='light'] .bg-red-950\/30,
+html[data-theme='light'] .bg-red-950\/40,
+html[data-theme='light'] .bg-red-950\/60 { background-color: #fceceb; }
+html[data-theme='light'] .text-red-500 { color: #a5201c; }
+html[data-theme='light'] .border-red-500\/30,
+html[data-theme='light'] .border-red-500\/40,
+html[data-theme='light'] .border-red-900\/40 { border-color: #f1c4c1; }
+
+/* Amber and yellow */
+html[data-theme='light'] .bg-yellow-500\/10,
+html[data-theme='light'] .bg-yellow-500\/15,
+html[data-theme='light'] .bg-yellow-900\/20,
+html[data-theme='light'] .bg-amber-500\/10,
+html[data-theme='light'] .bg-amber-500\/15,
+html[data-theme='light'] .bg-amber-900\/20,
+html[data-theme='light'] .bg-amber-950\/30,
+html[data-theme='light'] .bg-amber-950\/40 { background-color: #fbf0d8; }
+html[data-theme='light'] .text-yellow-300,
+html[data-theme='light'] .text-amber-400 { color: #8a5a12; }
+html[data-theme='light'] .border-yellow-500\/20,
+html[data-theme='light'] .border-amber-500\/20,
+html[data-theme='light'] .border-amber-500\/30,
+html[data-theme='light'] .border-amber-900\/40 { border-color: #ecd7a6; }
+
+/* Blue, indigo, teal and purple panels */
+html[data-theme='light'] .bg-blue-500\/10,
+html[data-theme='light'] .bg-blue-900\/20,
+html[data-theme='light'] .bg-blue-950\/30,
+html[data-theme='light'] .bg-blue-950\/40 { background-color: #e4eef6; }
+html[data-theme='light'] .text-blue-400,
+html[data-theme='light'] .text-blue-500 { color: #17596f; }
+html[data-theme='light'] .bg-indigo-500\/10,
+html[data-theme='light'] .bg-indigo-950\/40,
+html[data-theme='light'] .bg-indigo-950\/60 { background-color: #e7e6f6; }
+html[data-theme='light'] .text-indigo-300 { color: #413a8f; }
+html[data-theme='light'] .bg-teal-500\/10,
+html[data-theme='light'] .bg-teal-950\/30,
+html[data-theme='light'] .bg-teal-950\/40 { background-color: #daefec; }
+html[data-theme='light'] .text-teal-400 { color: var(--teal); }
+html[data-theme='light'] .bg-purple-500\/10,
+html[data-theme='light'] .bg-purple-950\/30,
+html[data-theme='light'] .bg-purple-950\/40 { background-color: #e9e4f4; }
+html[data-theme='light'] .text-purple-400 { color: #553a8b; }
+
+/* A tinted panel's own heading and body text */
+html[data-theme='light'] [class*='bg-green-'] .text-white,
+html[data-theme='light'] [class*='bg-red-'] .text-white,
+html[data-theme='light'] [class*='bg-amber-'] .text-white,
+html[data-theme='light'] [class*='bg-yellow-'] .text-white { color: var(--ink); }

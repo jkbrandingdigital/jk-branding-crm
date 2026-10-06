@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, CalendarPlus, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
@@ -102,22 +101,6 @@ export default function LeadsBoard() {
   const [toD, setToD] = useState('')
 
   const [openId, setOpenId] = useState<string | null>(null)
-  const [params, setParams] = useSearchParams()
-
-  // Opened from a notification: ?lead=<id> shows that lead straight away
-  useEffect(() => {
-    const wanted = params.get('lead')
-    if (wanted) setOpenId(wanted)
-  }, [params])
-
-  function closeDrawer() {
-    setOpenId(null)
-    if (params.get('lead')) {
-      const next = new URLSearchParams(params)
-      next.delete('lead')
-      setParams(next, { replace: true })
-    }
-  }
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'assign' | 'stage' } | null>(null)
   const [adding, setAdding] = useState(false)
   const [nl, setNl] = useState<NewLead>(emptyNew)
@@ -134,6 +117,7 @@ export default function LeadsBoard() {
   const [fu, setFu] = useState<{ lead: LeadL; when: string; text: string } | null>(null)
   const [cancelFor, setCancelFor] = useState<{ leadId: string; stageId: string; name: string } | null>(null)
   const [reasons, setReasons] = useState<{ id: string; name: string }[]>([])
+  const [fuCounts, setFuCounts] = useState<Record<string, number>>({})
   const [cancelPick, setCancelPick] = useState('')
   const [cancelNote, setCancelNote] = useState('')
   const [fuErr, setFuErr] = useState<string | null>(null)
@@ -143,7 +127,7 @@ export default function LeadsBoard() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [{ data: u }, st, sf, ls, lb, lm, cr] = await Promise.all([
+      const [{ data: u }, st, sf, ls, lb, lm, cr, fc] = await Promise.all([
         supabase.auth.getUser(),
         supabase.from('lead_stages').select('*').eq('is_active', true).order('sort_order'),
         loadStaff(),
@@ -151,6 +135,7 @@ export default function LeadsBoard() {
         supabase.from('lead_labels').select('*').eq('is_active', true).order('sort_order'),
         supabase.from('leads').select('id, label_id'),
         supabase.from('lead_cancel_reasons').select('id, name').eq('is_active', true).order('sort_order'),
+        supabase.from('lead_followup_counts').select('lead_id, follow_ups'),
       ])
       const labelOf = new Map<string, string | null>(((lm.data ?? []) as { id: string; label_id: string | null }[]).map((r) => [r.id, r.label_id]))
       setMyId(u.user?.id ?? null)
@@ -159,6 +144,9 @@ export default function LeadsBoard() {
       setLeads((ls as LeadL[]).map((l) => ({ ...l, label_id: labelOf.get(l.id) ?? null })))
       setLabels((lb.data ?? []) as Label[])
       setReasons((cr.data ?? []) as { id: string; name: string }[])
+      const counts: Record<string, number> = {}
+      for (const r of (fc.data ?? []) as { lead_id: string; follow_ups: number }[]) counts[r.lead_id] = r.follow_ups
+      setFuCounts(counts)
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -509,10 +497,15 @@ export default function LeadsBoard() {
             {can('lead_edit') && (
               <button
                 onClick={() => { setFuErr(null); setFu({ lead: l, when: toInputDT(l.next_follow_up), text: '' }) }}
-                className={iconBtn}
-                title="Add follow-up"
+                className={`${iconBtn} relative`}
+                title={fuCounts[l.id] ? `${fuCounts[l.id]} follow-ups so far` : 'Add follow-up'}
               >
                 <CalendarPlus size={14} />
+                {fuCounts[l.id] > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-semibold leading-none text-white">
+                    {fuCounts[l.id] > 99 ? '99+' : fuCounts[l.id]}
+                  </span>
+                )}
               </button>
             )}
             {can('lead_edit') && (
@@ -818,7 +811,7 @@ export default function LeadsBoard() {
 
       {/* Lead detail */}
       {openId && (
-        <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={closeDrawer} onChanged={load} />
+        <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={() => setOpenId(null)} onChanged={load} />
       )}
 
       {/* Cancel reason */}

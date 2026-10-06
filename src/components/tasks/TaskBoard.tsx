@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Clock, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Pencil, Plus,
-  Search, SlidersHorizontal, Trash2, User, X,
+  Bookmark, Check, Clock, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Pencil, Plus,
+  Save, Search, SlidersHorizontal, Tag, Trash2, TrendingUp, User, UserCog, X,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
@@ -11,11 +11,55 @@ import TaskModal from './TaskModal'
 import TaskDetail from './TaskDetail'
 import {
   currentAssignees, fmtTaskDT, isTaskOverdue, loadTaskCounts, loadTaskLabels, loadTaskStages, loadTasks,
-  PRIORITIES, priorityOf, type Task, type TaskLabel, type TaskStage,
+  PRIORITIES, priorityOf, setAssignees, type Task, type TaskLabel, type TaskStage,
 } from './taskUtils'
 
 type View = 'board' | 'list'
 type Scope = 'all' | 'mine' | 'created'
+type Sort = 'newest' | 'oldest' | 'due_soon' | 'due_late' | 'priority' | 'subject'
+
+const SORTS: { key: Sort; label: string }[] = [
+  { key: 'newest', label: 'Newest first' },
+  { key: 'oldest', label: 'Oldest first' },
+  { key: 'due_soon', label: 'Due soonest' },
+  { key: 'due_late', label: 'Due latest' },
+  { key: 'priority', label: 'Priority: high first' },
+  { key: 'subject', label: 'Subject A–Z' },
+]
+
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+
+// A filter set the person saved, kept on this device
+type SavedFilter = {
+  name: string
+  scope: Scope
+  priority: string
+  labelF: string
+  creator: string
+  assignee: string
+  from: string
+  till: string
+  sort: Sort
+}
+
+const SAVED_KEY = 'jk_task_filters'
+
+function readSaved(): SavedFilter[] {
+  try {
+    const raw = localStorage.getItem(SAVED_KEY)
+    return raw ? (JSON.parse(raw) as SavedFilter[]) : []
+  } catch {
+    return []
+  }
+}
+
+function writeSaved(list: SavedFilter[]) {
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(list))
+  } catch {
+    /* private browsing: saved sets just won't be remembered */
+  }
+}
 
 const select =
   'rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-gray-300 focus:border-orange-500 focus:outline-none'
@@ -45,13 +89,21 @@ export default function TaskBoard() {
   const [assignee, setAssignee] = useState('all')
   const [from, setFrom] = useState('')
   const [till, setTill] = useState('')
+  const [sort, setSort] = useState<Sort>('newest')
+  const [saved, setSaved] = useState<SavedFilter[]>(readSaved)
+  const [savingName, setSavingName] = useState('')
 
   const [editing, setEditing] = useState<Task | 'new' | null>(null)
   const [opened, setOpened] = useState<Task | null>(null)
+  const [openTab, setOpenTab] = useState<'details' | 'comments' | 'files'>('details')
   const [dragId, setDragId] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'stage' | 'assign' } | null>(null)
+  const [uploadFor, setUploadFor] = useState<Task | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const canCreate = can('task_create')
   const canDelete = can('task_delete')
+  const canAssign = can('task_assign')
 
   const load = useCallback(async () => {
     setError('')
@@ -69,6 +121,14 @@ export default function TaskBoard() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // One click anywhere else closes an open card menu
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [menu])
 
   // Keep the open detail in step with freshly loaded data
   useEffect(() => {
@@ -123,9 +183,47 @@ export default function TaskBoard() {
     })
   }, [tasks, q, scope, priority, labelF, creator, assignee, from, till, me, nameOf])
 
-  const filtersOn = scope !== 'all' || priority !== 'all' || labelF !== 'all' || creator !== 'all' || assignee !== 'all' || !!from || !!till
+  const sorted = useMemo(() => {
+    const far = Number.MAX_SAFE_INTEGER
+    const due = (t: Task) => (t.due_at ? new Date(t.due_at).getTime() : far)
+    const made = (t: Task) => new Date(t.created_at).getTime()
+    const list = [...filtered]
+    switch (sort) {
+      case 'oldest': return list.sort((a, b) => made(a) - made(b))
+      case 'due_soon': return list.sort((a, b) => due(a) - due(b))
+      case 'due_late': return list.sort((a, b) => due(b) - due(a))
+      case 'priority': return list.sort((a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) || due(a) - due(b))
+      case 'subject': return list.sort((a, b) => a.subject.localeCompare(b.subject))
+      default: return list.sort((a, b) => made(b) - made(a))
+    }
+  }, [filtered, sort])
+
+  const filtersOn = scope !== 'all' || priority !== 'all' || labelF !== 'all' || creator !== 'all' || assignee !== 'all' || !!from || !!till || sort !== 'newest'
   const clearFilters = () => {
-    setScope('all'); setPriority('all'); setLabelF('all'); setCreator('all'); setAssignee('all'); setFrom(''); setTill('')
+    setScope('all'); setPriority('all'); setLabelF('all'); setCreator('all'); setAssignee('all')
+    setFrom(''); setTill(''); setSort('newest')
+  }
+
+  function saveCurrentFilter() {
+    const name = savingName.trim()
+    if (!name) return
+    const entry: SavedFilter = { name, scope, priority, labelF, creator, assignee, from, till, sort }
+    const next = [...saved.filter((f) => f.name !== name), entry]
+    setSaved(next)
+    writeSaved(next)
+    setSavingName('')
+  }
+
+  function applySaved(f: SavedFilter) {
+    setScope(f.scope); setPriority(f.priority); setLabelF(f.labelF)
+    setCreator(f.creator); setAssignee(f.assignee)
+    setFrom(f.from); setTill(f.till); setSort(f.sort ?? 'newest')
+  }
+
+  function removeSaved(name: string) {
+    const next = saved.filter((f) => f.name !== name)
+    setSaved(next)
+    writeSaved(next)
   }
 
   async function remove(t: Task) {
@@ -133,6 +231,45 @@ export default function TaskBoard() {
     const { error: e } = await supabase.from('tasks').delete().eq('id', t.id)
     if (e) return setError(e.message)
     setOpened(null)
+    load()
+  }
+
+  // Quick actions straight from the card
+  async function setLabel(t: Task, labelId: string | null) {
+    setMenu(null)
+    const { error: e } = await supabase.from('tasks').update({ label_id: labelId }).eq('id', t.id)
+    if (e) return setError(e.message)
+    load()
+  }
+
+  async function toggleAssignee(t: Task, userId: string) {
+    const now = currentAssignees(t)
+    const next = now.includes(userId) ? now.filter((u) => u !== userId) : [...now, userId]
+    if (next.length === 0) return setError('A task needs at least one person.')
+    try {
+      await setAssignees(t.id, next, t.task_assignees)
+      load()
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  function openAt(t: Task, tab: 'details' | 'comments' | 'files') {
+    setOpenTab(tab)
+    setOpened(t)
+  }
+
+  // Paperclip on the card: pick a file and it goes straight up
+  async function uploadToTask(t: Task, f: File) {
+    if (f.size > 25 * 1024 * 1024) return setError('Files must be under 25 MB.')
+    const safe = f.name.replace(/[^\w.\- ]/g, '_')
+    const path = `${t.id}/${Date.now()}-${safe}`
+    const { error: upErr } = await supabase.storage.from('task-files').upload(path, f)
+    if (upErr) return setError(upErr.message)
+    const { error: e } = await supabase
+      .from('task_attachments')
+      .insert({ task_id: t.id, file_path: path, file_name: f.name, file_size: f.size })
+    if (e) return setError(e.message)
     load()
   }
 
@@ -163,13 +300,20 @@ export default function TaskBoard() {
         draggable={mayEdit}
         onDragStart={() => setDragId(t.id)}
         onDragEnd={() => setDragId(null)}
-        className={`rounded-lg border bg-[#171717] p-3 transition-colors ${
+        onClick={() => setOpened(t)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setOpened(t)
+          }
+        }}
+        className={`cursor-pointer rounded-lg border bg-[#171717] p-3 transition-colors hover:border-[#3a3a3a] focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
           late ? 'border-red-500/40' : 'border-[#242424]'
-        } ${dragId === t.id ? 'opacity-50' : ''} ${mayEdit ? 'cursor-grab active:cursor-grabbing' : ''}`}
+        } ${dragId === t.id ? 'opacity-50' : ''}`}
       >
-        <button onClick={() => setOpened(t)} className="block w-full text-left">
-          <p className="text-sm font-medium text-white">{t.subject}</p>
-        </button>
+        <p className="text-sm font-medium text-white">{t.subject}</p>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className={`rounded px-1.5 py-0.5 text-[11px] ${p.cls}`}>{p.label}</span>
@@ -189,18 +333,88 @@ export default function TaskBoard() {
           </div>
         </dl>
 
-        <div className="mt-2.5 flex items-center gap-1 border-t border-[#222] pt-2">
-          <button onClick={() => setOpened(t)} aria-label="Open task" className={iconBtn}><Clock size={14} /></button>
+        <div
+          className="relative mt-2.5 flex items-center gap-0.5 border-t border-[#222] pt-2"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button onClick={() => setOpened(t)} aria-label="Open task" title="Open" className={iconBtn}>
+            <Clock size={14} />
+          </button>
+
+          {mayEdit && labels.length > 0 && (
+            <button
+              onClick={() => setMenu(menu?.id === t.id && menu.kind === 'label' ? null : { id: t.id, kind: 'label' })}
+              aria-label="Label" title="Label"
+              className={iconBtn}
+            >
+              <Tag size={14} />
+            </button>
+          )}
+
           {mayEdit && (
-            <button onClick={() => setEditing(t)} aria-label="Edit task" className={iconBtn}><Pencil size={14} /></button>
+            <button
+              onClick={() => setMenu(menu?.id === t.id && menu.kind === 'stage' ? null : { id: t.id, kind: 'stage' })}
+              aria-label="Change status" title="Change status"
+              className={iconBtn}
+            >
+              <TrendingUp size={14} />
+            </button>
+          )}
+
+          {canAssign && (
+            <button
+              onClick={() => setMenu(menu?.id === t.id && menu.kind === 'assign' ? null : { id: t.id, kind: 'assign' })}
+              aria-label="Assign to" title="Assign to"
+              className={iconBtn}
+            >
+              <UserCog size={14} />
+            </button>
+          )}
+
+          <button onClick={() => openAt(t, 'comments')} aria-label="Comments" title="Comments" className={`${iconBtn} relative`}>
+            <MessageSquare size={14} />
+            {nc > 0 && <Badge n={nc} />}
+          </button>
+
+          <button
+            onClick={() => { setUploadFor(t); fileRef.current?.click() }}
+            aria-label="Add a file" title="Add a file"
+            className={`${iconBtn} relative`}
+          >
+            <Paperclip size={14} />
+            {nf > 0 && <Badge n={nf} />}
+          </button>
+
+          {mayEdit && (
+            <button onClick={() => setEditing(t)} aria-label="Edit task" title="Edit" className={iconBtn}><Pencil size={14} /></button>
           )}
           {canDelete && (
-            <button onClick={() => remove(t)} aria-label="Delete task" className={`${iconBtn} hover:text-red-400`}><Trash2 size={14} /></button>
+            <button onClick={() => remove(t)} aria-label="Delete task" title="Delete" className={`${iconBtn} hover:text-red-400`}><Trash2 size={14} /></button>
           )}
-          <span className="ml-auto flex items-center gap-3 text-[11px] text-gray-500">
-            {nc > 0 && <span className="flex items-center gap-1"><MessageSquare size={12} /> {nc}</span>}
-            {nf > 0 && <span className="flex items-center gap-1"><Paperclip size={12} /> {nf}</span>}
-          </span>
+
+          {menu?.id === t.id && (
+            <div className="absolute bottom-9 left-0 z-20 max-h-56 w-56 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
+              {menu.kind === 'label' && (
+                <>
+                  <MenuRow on={!t.label_id} onClick={() => setLabel(t, null)}>No label</MenuRow>
+                  {labels.map((l) => (
+                    <MenuRow key={l.id} on={t.label_id === l.id} onClick={() => setLabel(t, l.id)}>{l.name}</MenuRow>
+                  ))}
+                </>
+              )}
+              {menu.kind === 'stage' && stages.map((st) => (
+                <MenuRow key={st.id} on={t.stage_id === st.id} onClick={() => { setMenu(null); moveTo(t.id, st.id) }}>
+                  {st.name}
+                </MenuRow>
+              ))}
+              {menu.kind === 'assign' && staff.filter((p) => p.is_active).map((p) => (
+                <MenuRow key={p.id} on={currentAssignees(t).includes(p.id)} onClick={() => toggleAssignee(t, p.id)}>
+                  {p.full_name}
+                </MenuRow>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     )
@@ -300,9 +514,51 @@ export default function TaskBoard() {
             Due till
             <input type="date" value={till} onChange={(e) => setTill(e.target.value)} className={`${select} mt-1 block [color-scheme:dark]`} />
           </label>
+          <label className="text-xs text-gray-500">
+            Sort by
+            <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className={`${select} mt-1 block`} aria-label="Sort by">
+              {SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+          </label>
+
           {filtersOn && (
             <button onClick={clearFilters} className="pb-2 text-sm text-gray-400 hover:text-white">Clear</button>
           )}
+
+          {/* Saved sets, kept on this device */}
+          <div className="w-full border-t border-[#242424] pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1.5 text-xs text-gray-500">
+                <Bookmark size={13} /> Saved filters
+              </span>
+              {saved.map((f) => (
+                <span key={f.name} className="flex items-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] py-1 pl-3 pr-1 text-sm">
+                  <button onClick={() => applySaved(f)} className="text-gray-300 hover:text-white">{f.name}</button>
+                  <button onClick={() => removeSaved(f.name)} aria-label={`Delete ${f.name}`} className="rounded p-0.5 text-gray-500 hover:text-red-400">
+                    <X size={13} />
+                  </button>
+                </span>
+              ))}
+              {saved.length === 0 && <span className="text-sm text-gray-600">None yet.</span>}
+
+              <span className="ml-auto flex items-center gap-2">
+                <input
+                  value={savingName}
+                  onChange={(e) => setSavingName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveCurrentFilter()}
+                  placeholder="Name this filter"
+                  className="w-44 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-1.5 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
+                />
+                <button
+                  onClick={saveCurrentFilter}
+                  disabled={!savingName.trim()}
+                  className="flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-sm text-gray-300 hover:text-white disabled:opacity-40"
+                >
+                  <Save size={14} /> Save
+                </button>
+              </span>
+            </div>
+          </div>
         </div>
       )}
 
@@ -313,7 +569,7 @@ export default function TaskBoard() {
       ) : view === 'board' ? (
         <div className="flex gap-4 overflow-x-auto pb-2">
           {stages.map((s) => {
-            const items = filtered.filter((t) => t.stage_id === s.id)
+            const items = sorted.filter((t) => t.stage_id === s.id)
             return (
               <div
                 key={s.id}
@@ -351,7 +607,7 @@ export default function TaskBoard() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((t) => {
+                {sorted.map((t) => {
                   const stage = stageOf(t.stage_id)
                   const p = priorityOf(t.priority)
                   const late = isTaskOverdue(t, stage)
@@ -379,7 +635,7 @@ export default function TaskBoard() {
                     </tr>
                   )
                 })}
-                {filtered.length === 0 && (
+                {sorted.length === 0 && (
                   <tr>
                     <td colSpan={9} className="py-16 text-center text-gray-500">
                       {tasks.length === 0 ? (
@@ -394,7 +650,7 @@ export default function TaskBoard() {
             </table>
           </div>
           <div className="flex items-center gap-2 border-t border-[#242424] px-5 py-3 text-sm text-gray-500">
-            <User size={14} /> {filtered.length} of {tasks.length} tasks
+            <User size={14} /> {sorted.length} of {tasks.length} tasks
           </div>
         </div>
       )}
@@ -410,18 +666,53 @@ export default function TaskBoard() {
         />
       )}
 
+      <input
+        ref={fileRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f && uploadFor) uploadToTask(uploadFor, f)
+          e.target.value = ''
+          setUploadFor(null)
+        }}
+      />
+
       {opened && !editing && (
         <TaskDetail
           task={opened}
+          initialTab={openTab}
           stages={stages}
           labels={labels}
           staff={staff}
           canEdit={canEditTask(opened)}
           onEdit={() => setEditing(opened)}
-          onClose={() => setOpened(null)}
+          onClose={() => { setOpened(null); setOpenTab('details') }}
           onChanged={load}
         />
       )}
     </div>
+  )
+}
+
+function Badge({ n }: { n: number }) {
+  return (
+    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-semibold leading-none text-white">
+      {n > 99 ? '99+' : n}
+    </span>
+  )
+}
+
+function MenuRow({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-[#222] hover:text-white"
+    >
+      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        {on && <Check size={12} className="text-orange-400" />}
+      </span>
+      <span className="truncate">{children}</span>
+    </button>
   )
 }

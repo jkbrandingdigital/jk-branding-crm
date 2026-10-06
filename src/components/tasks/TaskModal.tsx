@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Check, Loader2, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, Loader2, Paperclip, Search, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
@@ -51,8 +51,10 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
   const [leadQ, setLeadQ] = useState('')
   const [leadHits, setLeadHits] = useState<LeadLite[]>([])
   const [staffQ, setStaffQ] = useState('')
+  const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
 
   // Everyone the task can be handed to
   const options = useMemo(
@@ -126,6 +128,19 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
 
       const { setAssignees } = await import('./taskUtils')
       await setAssignees(id, [...to], task?.task_assignees ?? [])
+
+      // Files picked above go up once the task has an id
+      for (const f of files) {
+        const safe = f.name.replace(/[^\w.\- ]/g, '_')
+        const path = `${id}/${Date.now()}-${safe}`
+        const { error: upErr } = await supabase.storage.from('task-files').upload(path, f)
+        if (upErr) throw upErr
+        const { error: aErr } = await supabase
+          .from('task_attachments')
+          .insert({ task_id: id, file_path: path, file_name: f.name, file_size: f.size })
+        if (aErr) throw aErr
+      }
+
       onSaved()
     } catch (e) {
       setError((e as { message?: string }).message ?? 'Could not save the task.')
@@ -297,6 +312,49 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
             <label className={label} htmlFor="task-desc">Description</label>
             <textarea id="task-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} className={`${input} resize-y`} />
           </div>
+
+          {/* Attachments */}
+          <div>
+            <span className={label}>Attachments <span className="text-gray-600">(optional)</span></span>
+            {files.length > 0 && (
+              <ul className="mb-2 space-y-1.5">
+                {files.map((f, i) => (
+                  <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm">
+                    <Paperclip size={14} className="shrink-0 text-gray-500" />
+                    <span className="min-w-0 flex-1 truncate text-white">{f.name}</span>
+                    <span className="shrink-0 text-xs text-gray-500">{Math.max(1, Math.round(f.size / 1024))} KB</span>
+                    <button
+                      onClick={() => setFiles((list) => list.filter((_, n) => n !== i))}
+                      aria-label={`Remove ${f.name}`}
+                      className="shrink-0 text-gray-400 hover:text-white"
+                    >
+                      <X size={15} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const picked = Array.from(e.target.files ?? [])
+                const tooBig = picked.find((f) => f.size > 25 * 1024 * 1024)
+                if (tooBig) setError(`${tooBig.name} is over 25 MB.`)
+                setFiles((list) => [...list, ...picked.filter((f) => f.size <= 25 * 1024 * 1024)])
+                e.target.value = ''
+              }}
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-gray-300 hover:text-white"
+            >
+              <Paperclip size={15} /> Add files
+            </button>
+            {task && <p className="mt-1 text-xs text-gray-500">Files already on this task are in its Files tab.</p>}
+          </div>
         </div>
 
         <div className="flex justify-end gap-3 border-t border-[#242424] bg-[#171717] px-5 py-3">
@@ -309,7 +367,7 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
             className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
           >
             {busy && <Loader2 size={16} className="animate-spin" />}
-            {task ? 'Save task' : 'Add task'}
+            {busy && files.length > 0 ? 'Uploading…' : task ? 'Save task' : 'Add task'}
           </button>
         </div>
       </div>
