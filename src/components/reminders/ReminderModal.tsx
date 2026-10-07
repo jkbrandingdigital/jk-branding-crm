@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Loader2, Search, X } from 'lucide-react'
+import { Loader2, Search, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { fromInputDT, toInputDT, type Staff } from '../leads/leadUtils'
 import { DateTimeField } from '../DateField'
+import PeoplePicker from '../PeoplePicker'
 import { DAYS, TYPE_LABEL, searchLeads, type LeadLite, type Reminder, type ReminderType } from './reminderUtils'
 
 type Props = {
@@ -42,7 +43,6 @@ export default function ReminderModal({ reminder, staff, lead: initialLead, onCl
   )
   const [leadQ, setLeadQ] = useState('')
   const [leadHits, setLeadHits] = useState<LeadLite[]>([])
-  const [staffQ, setStaffQ] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -61,7 +61,6 @@ export default function ReminderModal({ reminder, staff, lead: initialLead, onCl
       .sort((a, b) => (a.id === me ? -1 : b.id === me ? 1 : a.full_name.localeCompare(b.full_name)))
   }, [staff, me, role, to])
   const canPickOthers = role === 'super_admin' || role === 'branch_manager'
-  const shownOptions = options.filter((s) => s.full_name.toLowerCase().includes(staffQ.trim().toLowerCase()))
 
   // Lead search with a short pause while typing
   useEffect(() => {
@@ -76,13 +75,6 @@ export default function ReminderModal({ reminder, staff, lead: initialLead, onCl
     return () => window.removeEventListener('keydown', esc)
   }, [onClose])
 
-  const toggleTo = (id: string) =>
-    setTo((s) => {
-      const n = new Set(s)
-      if (n.has(id)) n.delete(id)
-      else n.add(id)
-      return n
-    })
   const toggleDay = (n: number) => setDays((d) => (d.includes(n) ? d.filter((x) => x !== n) : [...d, n]))
 
   async function save() {
@@ -278,37 +270,13 @@ export default function ReminderModal({ reminder, staff, lead: initialLead, onCl
           <div>
             <span className={label}>Remind</span>
             {canPickOthers ? (
-              <div className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a]">
-                <div className="relative border-b border-[#242424]">
-                  <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                  <input
-                    value={staffQ}
-                    onChange={(e) => setStaffQ(e.target.value)}
-                    placeholder="Search people"
-                    className="w-full bg-transparent py-2 pl-9 pr-3 text-sm text-white placeholder:text-gray-600 focus:outline-none"
-                  />
-                </div>
-                <ul className="max-h-44 overflow-y-auto py-1">
-                  {shownOptions.map((s) => {
-                    const on = to.has(s.id)
-                    return (
-                      <li key={s.id}>
-                        <button
-                          onClick={() => toggleTo(s.id)}
-                          aria-pressed={on}
-                          className="flex w-full items-center gap-3 px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-[#202020]"
-                        >
-                          <span className={`flex h-4 w-4 items-center justify-center rounded border ${on ? 'border-orange-500 bg-orange-500' : 'border-[#3a3a3a]'}`}>
-                            {on && <Check size={12} className="text-white" />}
-                          </span>
-                          <span className="flex-1">{s.full_name}{s.id === me && <span className="ml-1 text-gray-500">(me)</span>}</span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                  {shownOptions.length === 0 && <li className="px-3 py-2 text-sm text-gray-500">No one matches.</li>}
-                </ul>
-              </div>
+              <PeoplePicker
+                people={options}
+                value={[...to]}
+                onChange={(ids) => setTo(new Set(ids))}
+                me={me}
+                placeholder="Who should be reminded"
+              />
             ) : (
               <p className="text-sm text-gray-400">You</p>
             )}

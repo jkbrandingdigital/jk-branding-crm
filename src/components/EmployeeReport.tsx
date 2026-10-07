@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { ArrowLeft, ChevronLeft, ChevronRight, Check, X, Eye, Download, Printer, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useChartTheme } from '../lib/chartTheme'
 import { istDate, addDays, addMonths, prettyDate, inr, inrCompact } from '../lib/format'
 import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../lib/targets'
 
@@ -66,6 +67,7 @@ function printDoc(title: string, subtitle: string, body: string) {
 }
 
 export default function EmployeeReport({ userId, backTo }: { userId: string; backTo: string }) {
+  const chart = useChartTheme()
   const today = istDate()
   const [ym, setYm] = useState(today.slice(0, 7))
   const year = ym.slice(0, 4)
@@ -123,6 +125,14 @@ export default function EmployeeReport({ userId, backTo }: { userId: string; bac
   useEffect(() => {
     load()
   }, [load])
+
+  // Esc closes the report popup
+  useEffect(() => {
+    if (!view) return
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setView(null)
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [view])
 
   // ---------- Derived ----------
   const monthReports = yearReports.filter((r) => txt(r.work_date).startsWith(ym))
@@ -433,17 +443,19 @@ export default function EmployeeReport({ userId, backTo }: { userId: string; bac
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={yearRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="#222" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} width={60} tickFormatter={(v) => inrCompact(Number(v))} domain={[0, (max: number) => Math.max(max, 10000)]} />
+                <CartesianGrid stroke={chart.grid} vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: chart.axis, fontSize: 11 }} axisLine={false} tickLine={false} width={60} tickFormatter={(v) => inrCompact(Number(v))} domain={[0, (max: number) => Math.max(max, 10000)]} />
                 <Tooltip
-                  cursor={{ fill: '#1c1c1c' }}
-                  contentStyle={{ background: '#1a1a1a', border: '1px solid #2e2e2e', borderRadius: 8, fontSize: 12 }}
-                  itemStyle={{ color: '#e5e5e5' }}
+                  cursor={{ fill: chart.cursor }}
+                  contentStyle={chart.tooltip}
+                  itemStyle={chart.tooltipItem}
+                  labelStyle={{ color: chart.axisStrong, marginBottom: 2 }}
                   formatter={(v, n) => [inr(Number(v)), n === 'target' ? 'Target' : 'Achieved']}
                 />
-                <Bar dataKey="target" fill="#3f3f46" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                <Bar dataKey="achieved" fill="#f97316" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                {/* The target sits back, what was achieved stands out */}
+                <Bar dataKey="target" fill={chart.series[0]} fillOpacity={chart.dark ? 0.3 : 0.25} radius={[4, 4, 0, 0]} maxBarSize={28} />
+                <Bar dataKey="achieved" fill={chart.series[0]} radius={[4, 4, 0, 0]} maxBarSize={28} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -488,15 +500,25 @@ export default function EmployeeReport({ userId, backTo }: { userId: string; bac
         </section>
       </div>
 
-      {/* View panel */}
+      {/* View popup */}
       {view && viewRow && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setView(null)} />
-          <aside className="relative flex h-full w-full max-w-lg flex-col border-l border-[#242424] bg-[#121212]">
-            <div className="flex items-center justify-between border-b border-[#222] px-6 py-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setView(null)}
+        >
+          <div className="absolute inset-0 bg-black/60" />
+          <div
+            className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[#242424] bg-[#121212] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#222] bg-[#171717] px-6 py-4">
               <div>
                 <h2 className="font-semibold">{view.kind === 'evolution' ? 'Evolution Form' : 'Daily Report'}</h2>
-                <p className="text-xs text-gray-500">{prettyDate(view.date)}</p>
+                <p className="text-xs text-gray-500">
+                  {person?.name} · {prettyDate(view.date)}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -512,7 +534,7 @@ export default function EmployeeReport({ userId, backTo }: { userId: string; bac
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-5">
               {view.kind === 'evolution' ? (
-                <dl className="space-y-4">
+                <dl className="grid gap-x-6 gap-y-4 md:grid-cols-2">
                   {questionsFor(viewRow).map((q, i) => (
                     <div key={q.id}>
                       <dt className="text-xs text-gray-500">
@@ -522,7 +544,7 @@ export default function EmployeeReport({ userId, backTo }: { userId: string; bac
                     </div>
                   ))}
                   {viewRow.review_note ? (
-                    <div className="rounded-lg border border-orange-900/60 bg-orange-950/20 p-3 text-sm">
+                    <div className="rounded-lg border border-orange-900/60 bg-orange-950/20 p-3 text-sm md:col-span-2">
                       <p className="text-xs text-orange-400">Review note</p>
                       <p className="mt-1">{txt(viewRow.review_note)}</p>
                     </div>
@@ -530,7 +552,7 @@ export default function EmployeeReport({ userId, backTo }: { userId: string; bac
                 </dl>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                     {NUM_FIELDS.map(([k, l]) => (
                       <div key={k} className="rounded-lg bg-[#1a1a1a] px-3 py-2">
                         <p className="text-[11px] text-gray-500">{l}</p>
@@ -565,7 +587,7 @@ export default function EmployeeReport({ userId, backTo }: { userId: string; bac
                 </>
               )}
             </div>
-          </aside>
+          </div>
         </div>
       )}
     </div>

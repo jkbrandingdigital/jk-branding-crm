@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Loader2, Paperclip, Search, X } from 'lucide-react'
+import { Loader2, Paperclip, Search, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
 import { fromInputDT, toInputDT, type Staff } from '../leads/leadUtils'
 import { DateTimeField } from '../DateField'
 import { RichText, plainText } from '../RichText'
+import PeoplePicker from '../PeoplePicker'
 import { searchLeads, type LeadLite } from '../reminders/reminderUtils'
 import {
   PRIORITIES, REPEATS, currentAssignees,
@@ -53,7 +54,6 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   const [to, setTo] = useState<Set<string>>(new Set(task ? currentAssignees(task) : []))
   const [leadQ, setLeadQ] = useState('')
   const [leadHits, setLeadHits] = useState<LeadLite[]>([])
-  const [staffQ, setStaffQ] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -67,7 +67,6 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
         .sort((a, b) => (a.id === me ? -1 : b.id === me ? 1 : a.full_name.localeCompare(b.full_name))),
     [staff, me, to],
   )
-  const shown = options.filter((s) => s.full_name.toLowerCase().includes(staffQ.trim().toLowerCase()))
 
   useEffect(() => {
     if (lead) return
@@ -87,14 +86,6 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
     setCustomer(l.name)
     if (l.phone) setPhone(l.phone)
   }
-
-  const toggleTo = (id: string) =>
-    setTo((s) => {
-      const n = new Set(s)
-      if (n.has(id)) n.delete(id)
-      else n.add(id)
-      return n
-    })
 
   async function save() {
     setError('')
@@ -273,41 +264,14 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
             {!canAssign && task && !task.task_assignees.some((a) => a.user_id === me) && (
               <p className="mb-2 text-xs text-gray-500">Only a coordinator can hand this to someone else.</p>
             )}
-            <div className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a]">
-              <div className="relative border-b border-[#242424]">
-                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                <input
-                  value={staffQ}
-                  onChange={(e) => setStaffQ(e.target.value)}
-                  placeholder="Search people"
-                  className="w-full bg-transparent py-2 pl-9 pr-3 text-sm text-white placeholder:text-gray-600 focus:outline-none"
-                />
-              </div>
-              <ul className="max-h-44 overflow-y-auto py-1">
-                {shown.map((s) => {
-                  const on = to.has(s.id)
-                  return (
-                    <li key={s.id}>
-                      <button
-                        onClick={() => toggleTo(s.id)}
-                        aria-pressed={on}
-                        className="flex w-full items-center gap-3 px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-[#202020]"
-                      >
-                        <span className={`flex h-4 w-4 items-center justify-center rounded border ${on ? 'border-orange-500 bg-orange-500' : 'border-[#3a3a3a]'}`}>
-                          {on && <Check size={12} className="text-white" />}
-                        </span>
-                        <span className="flex-1">
-                          {s.full_name}
-                          {s.id === me && <span className="ml-1 text-gray-500">(me)</span>}
-                        </span>
-                        {s.role && <span className="text-xs text-gray-600">{s.role.replace('_', ' ')}</span>}
-                      </button>
-                    </li>
-                  )
-                })}
-                {shown.length === 0 && <li className="px-3 py-2 text-sm text-gray-500">No one matches.</li>}
-              </ul>
-            </div>
+            <PeoplePicker
+              id="task-to"
+              people={options}
+              value={[...to]}
+              onChange={(ids) => setTo(new Set(ids))}
+              me={me}
+              placeholder="Select who should do this"
+            />
             <p className="mt-1 text-xs text-gray-500">{to.size} selected</p>
           </div>
 

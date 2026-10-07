@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, CalendarPlus, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock } from 'lucide-react'
+import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, CalendarPlus, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
@@ -70,6 +70,47 @@ const PREF_LABEL: [keyof CardPrefs, string][] = [
 ]
 const PREF_KEY = 'jk_leads_card_prefs'
 const STAGE_KEY = 'jk_leads_hidden_stages'
+const FILTER_KEY = 'jk_lead_filters'
+
+// Everything the Filter panel can narrow by
+type Filters = {
+  source: string
+  stage: string
+  owner: string
+  creator: string
+  label: string
+  madeFrom: string
+  madeTo: string
+  fuFrom: string
+  fuTo: string
+  overdueOnly: boolean
+}
+const NO_FILTERS: Filters = {
+  source: 'all', stage: 'all', owner: 'all', creator: 'all', label: 'all',
+  madeFrom: '', madeTo: '', fuFrom: '', fuTo: '', overdueOnly: false,
+}
+type SavedFilter = { name: string; f: Filters }
+
+const countOn = (f: Filters) =>
+  (f.source !== 'all' ? 1 : 0) + (f.stage !== 'all' ? 1 : 0) + (f.owner !== 'all' ? 1 : 0) +
+  (f.creator !== 'all' ? 1 : 0) + (f.label !== 'all' ? 1 : 0) +
+  (f.madeFrom || f.madeTo ? 1 : 0) + (f.fuFrom || f.fuTo ? 1 : 0) + (f.overdueOnly ? 1 : 0)
+
+function readSaved(): SavedFilter[] {
+  try {
+    const raw = localStorage.getItem(FILTER_KEY)
+    return raw ? (JSON.parse(raw) as SavedFilter[]) : []
+  } catch {
+    return []
+  }
+}
+function writeSaved(list: SavedFilter[]) {
+  try {
+    localStorage.setItem(FILTER_KEY, JSON.stringify(list))
+  } catch {
+    /* private browsing: the sets simply aren't remembered */
+  }
+}
 const readStore = <T,>(key: string, fallback: T): T => {
   try {
     const raw = localStorage.getItem(key)
@@ -77,6 +118,16 @@ const readStore = <T,>(key: string, fallback: T): T => {
   } catch {
     return fallback
   }
+}
+
+// One labelled row inside the filter panel
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs text-gray-500">{label}</span>
+      {children}
+    </label>
+  )
 }
 
 const emptyNew = (): NewLead => ({
@@ -95,12 +146,15 @@ export default function LeadsBoard() {
 
   const [view, setView] = useState<'board' | 'list'>('board')
   const [q, setQ] = useState('')
-  const [sourceF, setSourceF] = useState('all')
-  const [ownerF, setOwnerF] = useState('all')
-  const [labelF, setLabelF] = useState('all')
-  const [overdueOnly, setOverdueOnly] = useState(false)
-  const [fromD, setFromD] = useState('')
-  const [toD, setToD] = useState('')
+
+  const [f, setF] = useState<Filters>(NO_FILTERS)
+  const set = (patch: Partial<Filters>) => setF((x) => ({ ...x, ...patch }))
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [filterTab, setFilterTab] = useState<'filters' | 'saved'>('filters')
+  const [saved, setSaved] = useState<SavedFilter[]>(readSaved)
+  const [savingName, setSavingName] = useState('')
+  const filterRef = useRef<HTMLDivElement>(null)
+  const onCount = countOn(f)
 
   const [openId, setOpenId] = useState<string | null>(null)
   const [params, setParams] = useSearchParams()
@@ -194,6 +248,38 @@ export default function LeadsBoard() {
     return () => document.removeEventListener('click', close)
   }, [menu])
 
+  // The filter panel closes when you click away from it
+  useEffect(() => {
+    if (!filterOpen) return
+    const close = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [filterOpen])
+
+  // Esc closes the Add lead popup
+  useEffect(() => {
+    if (!adding) return
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && !busy && setAdding(false)
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [adding, busy])
+
+  function saveCurrentFilter() {
+    const name = savingName.trim()
+    if (!name) return
+    const next = [...saved.filter((s) => s.name !== name), { name, f }]
+    setSaved(next)
+    writeSaved(next)
+    setSavingName('')
+  }
+  function removeSaved(name: string) {
+    const next = saved.filter((s) => s.name !== name)
+    setSaved(next)
+    writeSaved(next)
+  }
+
   const nameOf = (id: string | null) => (id ? staff.find((s) => s.id === id)?.full_name ?? '—' : 'Unassigned')
   const stageOf = (id: string | null) => stages.find((s) => s.id === id)
   const labelOf = (id: string | null | undefined) => labels.find((x) => x.id === id)
@@ -201,21 +287,36 @@ export default function LeadsBoard() {
   const filtered = useMemo(() => {
     const text = q.trim().toLowerCase()
     return leads.filter((l) => {
-      if (sourceF !== 'all' && l.source !== sourceF) return false
-      if (ownerF !== 'all' && (ownerF === 'none' ? l.assigned_to : l.assigned_to !== ownerF)) return false
-      if (labelF !== 'all' && (labelF === 'none' ? l.label_id : l.label_id !== labelF)) return false
-      if (overdueOnly && !isOverdue(l, stageOf(l.stage_id))) return false
+      if (f.source !== 'all' && l.source !== f.source) return false
+      if (f.stage !== 'all' && l.stage_id !== f.stage) return false
+      if (f.owner !== 'all' && (f.owner === 'none' ? l.assigned_to : l.assigned_to !== f.owner)) return false
+      if (f.creator !== 'all' && l.created_by !== f.creator) return false
+      if (f.label !== 'all' && (f.label === 'none' ? l.label_id : l.label_id !== f.label)) return false
+      if (f.overdueOnly && !isOverdue(l, stageOf(l.stage_id))) return false
+
       const made = l.created_at.slice(0, 10)
-      if (fromD && made < fromD) return false
-      if (toD && made > toD) return false
+      if (f.madeFrom && made < f.madeFrom) return false
+      if (f.madeTo && made > f.madeTo) return false
+
+      if (f.fuFrom || f.fuTo) {
+        if (!l.next_follow_up) return false
+        const due = l.next_follow_up.slice(0, 10)
+        if (f.fuFrom && due < f.fuFrom) return false
+        if (f.fuTo && due > f.fuTo) return false
+      }
+
       if (!text) return true
       return `${l.lead_no} ${l.name} ${l.phone ?? ''} ${l.company ?? ''} ${l.city ?? ''} ${l.campaign_name ?? ''}`.toLowerCase().includes(text)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leads, q, sourceF, ownerF, labelF, overdueOnly, fromD, toD, stages])
+  }, [leads, q, f, stages])
 
   const owners = useMemo(() => {
     const ids = new Set(leads.map((l) => l.assigned_to).filter(Boolean) as string[])
+    return staff.filter((s) => ids.has(s.id))
+  }, [leads, staff])
+  const creators = useMemo(() => {
+    const ids = new Set(leads.map((l) => l.created_by).filter(Boolean) as string[])
     return staff.filter((s) => ids.has(s.id))
   }, [leads, staff])
   const overdueCount = leads.filter((l) => isOverdue(l, stageOf(l.stage_id))).length
@@ -415,8 +516,8 @@ export default function LeadsBoard() {
 
   const inputCls =
     'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none'
-  const selectCls =
-    'rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500'
+  const panelSelect =
+    'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none'
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager' || s.role === 'hr'))
 
   const LabelChip = ({ id }: { id: string | null | undefined }) => {
@@ -649,51 +750,175 @@ export default function LeadsBoard() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="mt-5 flex flex-wrap gap-3">
+      {/* Search + Filter */}
+      <div className="mt-5 flex flex-wrap items-center gap-3">
         <div className="relative min-w-[220px] flex-1">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone, company, city, #no" className={`${inputCls} pl-9`} />
         </div>
-        <select value={sourceF} onChange={(e) => setSourceF(e.target.value)} className={selectCls} aria-label="Source">
-          <option value="all">All sources</option>
-          {SOURCES.map((s) => (
-            <option key={s.key} value={s.key}>{s.label}</option>
-          ))}
-        </select>
-        {labels.length > 0 && (
-          <select value={labelF} onChange={(e) => setLabelF(e.target.value)} className={selectCls} aria-label="Label">
-            <option value="all">All labels</option>
-            <option value="none">No label</option>
-            {labels.map((lb) => (
-              <option key={lb.id} value={lb.id}>{lb.name}</option>
-            ))}
-          </select>
-        )}
-        {owners.length > 1 && (
-          <select value={ownerF} onChange={(e) => setOwnerF(e.target.value)} className={selectCls} aria-label="Assigned to">
-            <option value="all">Everyone</option>
-            <option value="none">Unassigned</option>
-            {owners.map((s) => (
-              <option key={s.id} value={s.id}>{s.full_name}</option>
-            ))}
-          </select>
-        )}
-        <div className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-1.5 text-sm text-gray-300">
-          <span className="text-xs text-gray-500">Created</span>
-          <DateField value={fromD} onChange={setFromD} className="w-36" placeholder="Any date" />
-          <span className="text-gray-600">→</span>
-          <DateField value={toD} onChange={setToD} className="w-36" placeholder="Any date" />
-          {(fromD || toD) && (
-            <button onClick={() => { setFromD(''); setToD('') }} className="text-xs text-orange-400 hover:underline">
-              Clear
-            </button>
+
+        <div className="relative" ref={filterRef}>
+          <button
+            onClick={() => setFilterOpen((o) => !o)}
+            aria-expanded={filterOpen}
+            className={`flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm transition-colors ${
+              onCount > 0
+                ? 'border-orange-500/60 bg-orange-500/10 text-orange-400'
+                : 'border-[#2a2a2a] bg-[#161616] text-gray-300 hover:border-[#3a3a3a] hover:text-white'
+            }`}
+          >
+            <FilterIcon size={16} /> Filter
+            {onCount > 0 && (
+              <span className="rounded-full bg-orange-500 px-1.5 text-[11px] font-semibold leading-5 text-white">{onCount}</span>
+            )}
+          </button>
+
+          {filterOpen && (
+            <div className="absolute right-0 top-12 z-30 w-[22rem] overflow-hidden rounded-xl border border-[#242424] bg-[#151515] shadow-2xl">
+              {/* Tabs */}
+              <div className="flex items-center border-b border-[#242424] px-2">
+                {([['filters', 'FILTERS'], ['saved', 'SAVED FILTERS']] as const).map(([key, text]) => (
+                  <button
+                    key={key}
+                    onClick={() => setFilterTab(key)}
+                    className={`-mb-px border-b-2 px-3 py-2.5 text-xs font-semibold tracking-wide transition-colors ${
+                      filterTab === key ? 'border-orange-500 text-orange-400' : 'border-transparent text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    {text}
+                  </button>
+                ))}
+                <button onClick={() => setFilterOpen(false)} aria-label="Close" className="ml-auto rounded-md p-1.5 text-gray-500 hover:text-white">
+                  <X size={16} />
+                </button>
+              </div>
+
+              {filterTab === 'filters' ? (
+                <div className="max-h-[65vh] space-y-3.5 overflow-y-auto px-4 py-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-gray-300">Filters</p>
+                    {onCount > 0 && (
+                      <button onClick={() => setF(NO_FILTERS)} className="flex items-center gap-1 text-xs text-orange-400 hover:underline">
+                        <X size={13} /> Clear all
+                      </button>
+                    )}
+                  </div>
+
+                  <Field label="Lead platform">
+                    <select value={f.source} onChange={(e) => set({ source: e.target.value })} className={panelSelect}>
+                      <option value="all">All platform</option>
+                      {SOURCES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                  </Field>
+
+                  <Field label="Stage">
+                    <select value={f.stage} onChange={(e) => set({ stage: e.target.value })} className={panelSelect}>
+                      <option value="all">All stages</option>
+                      {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </Field>
+
+                  <Field label="Created by">
+                    <select value={f.creator} onChange={(e) => set({ creator: e.target.value })} className={panelSelect}>
+                      <option value="all">All lead</option>
+                      {creators.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                    </select>
+                  </Field>
+
+                  <Field label="Assign to">
+                    <select value={f.owner} onChange={(e) => set({ owner: e.target.value })} className={panelSelect}>
+                      <option value="all">All assign</option>
+                      <option value="none">Unassigned</option>
+                      {owners.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                    </select>
+                  </Field>
+
+                  <Field label="Labels">
+                    <select value={f.label} onChange={(e) => set({ label: e.target.value })} className={panelSelect}>
+                      <option value="all">All labels</option>
+                      <option value="none">No label</option>
+                      {labels.map((lb) => <option key={lb.id} value={lb.id}>{lb.name}</option>)}
+                    </select>
+                  </Field>
+
+                  <Field label="Search by created date">
+                    <div className="flex items-center gap-2">
+                      <DateField value={f.madeFrom} onChange={(v) => set({ madeFrom: v })} className="flex-1" placeholder="From" />
+                      <span className="text-gray-600">→</span>
+                      <DateField value={f.madeTo} onChange={(v) => set({ madeTo: v })} className="flex-1" placeholder="To" />
+                    </div>
+                  </Field>
+
+                  <Field label="Search by follow-up date">
+                    <div className="flex items-center gap-2">
+                      <DateField value={f.fuFrom} onChange={(v) => set({ fuFrom: v })} className="flex-1" placeholder="From" />
+                      <span className="text-gray-600">→</span>
+                      <DateField value={f.fuTo} onChange={(v) => set({ fuTo: v })} className="flex-1" placeholder="To" />
+                    </div>
+                  </Field>
+
+                  <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2.5 text-sm text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={f.overdueOnly}
+                      onChange={(e) => set({ overdueOnly: e.target.checked })}
+                      className="h-4 w-4 accent-red-500"
+                    />
+                    Overdue only
+                    {overdueCount > 0 && <span className="ml-auto text-xs text-red-400">{overdueCount}</span>}
+                  </label>
+
+                  {/* Keep this set for next time */}
+                  <div className="flex gap-2 border-t border-[#242424] pt-3.5">
+                    <input
+                      value={savingName}
+                      onChange={(e) => setSavingName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && saveCurrentFilter()}
+                      placeholder="Name this filter"
+                      className="min-w-0 flex-1 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
+                    />
+                    <button
+                      onClick={saveCurrentFilter}
+                      disabled={!savingName.trim()}
+                      className="flex items-center gap-1.5 rounded-lg bg-orange-500 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-40"
+                    >
+                      <Save size={14} /> Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="max-h-[65vh] overflow-y-auto px-4 py-4">
+                  {saved.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-gray-500">
+                      No saved filters yet. Set a filter and save it with a name.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {saved.map((s) => (
+                        <li key={s.name} className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2">
+                          <Bookmark size={14} className="shrink-0 text-orange-400" />
+                          <button
+                            onClick={() => { setF(s.f); setFilterTab('filters') }}
+                            className="min-w-0 flex-1 truncate text-left text-sm text-gray-300 hover:text-white"
+                          >
+                            {s.name}
+                          </button>
+                          <span className="shrink-0 text-xs text-gray-600">{countOn(s.f)}</span>
+                          <button onClick={() => removeSaved(s.name)} aria-label={`Delete ${s.name}`} className="shrink-0 rounded p-1 text-gray-500 hover:text-red-400">
+                            <X size={14} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="mt-4 border-t border-[#242424] pt-3 text-xs text-gray-500">
+                    Saved on this device only, for your own screen.
+                  </p>
+                </div>
+              )}
+            </div>
           )}
         </div>
-        <label className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 text-sm text-gray-300">
-          <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} className="h-4 w-4 accent-red-500" />
-          Overdue only
-        </label>
       </div>
 
       {error && (
@@ -1016,10 +1241,18 @@ export default function LeadsBoard() {
 
       {/* Add lead */}
       {adding && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/60" onClick={() => !busy && setAdding(false)} />
-          <aside className="relative flex h-full w-full max-w-md flex-col border-l border-[#242424] bg-[#121212]">
-            <div className="flex items-center justify-between border-b border-[#222] px-6 py-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => !busy && setAdding(false)}
+        >
+          <div className="absolute inset-0 bg-black/60" />
+          <div
+            className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#242424] bg-[#121212] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#222] bg-[#171717] px-6 py-4">
               <h2 className="font-semibold">Add lead</h2>
               <button onClick={() => setAdding(false)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
                 <X size={18} />
@@ -1046,33 +1279,30 @@ export default function LeadsBoard() {
                   </button>
                 </div>
               )}
-              {(
-                [
-                  ['name', 'Name *'],
-                  ['phone', 'Phone *'],
-                  ['email', 'Email'],
-                  ['company', 'Company'],
-                  ['city', 'City'],
-                ] as const
-              ).map(([k, l]) => (
-                <label key={k} className="block">
-                  <span className="mb-1 block text-xs text-gray-400">{l}</span>
-                  <input
-                    value={nl[k]}
-                    onChange={(e) => {
-                      setNl({ ...nl, [k]: e.target.value })
-                      if (k === 'phone') setDup(null)
-                    }}
-                    inputMode={k === 'phone' ? 'tel' : undefined}
-                    className={inputCls}
-                  />
-                </label>
-              ))}
-              <label className="block">
-                <span className="mb-1 block text-xs text-gray-400">Requirement</span>
-                <textarea rows={2} value={nl.requirement} onChange={(e) => setNl({ ...nl, requirement: e.target.value })} className={`${inputCls} resize-y`} />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
+              {/* Two to a row, so the whole form is visible without scrolling */}
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(
+                  [
+                    ['name', 'Name *'],
+                    ['phone', 'Phone *'],
+                    ['email', 'Email'],
+                    ['company', 'Company'],
+                    ['city', 'City'],
+                  ] as const
+                ).map(([k, l]) => (
+                  <label key={k} className="block">
+                    <span className="mb-1 block text-xs text-gray-400">{l}</span>
+                    <input
+                      value={nl[k]}
+                      onChange={(e) => {
+                        setNl({ ...nl, [k]: e.target.value })
+                        if (k === 'phone') setDup(null)
+                      }}
+                      inputMode={k === 'phone' ? 'tel' : undefined}
+                      className={inputCls}
+                    />
+                  </label>
+                ))}
                 <label className="block">
                   <span className="mb-1 block text-xs text-gray-400">Source</span>
                   <select value={nl.source} onChange={(e) => setNl({ ...nl, source: e.target.value })} className={inputCls}>
@@ -1085,25 +1315,29 @@ export default function LeadsBoard() {
                   <span className="mb-1 block text-xs text-gray-400">Estimated amount (₹)</span>
                   <input type="number" min={0} onWheel={(e) => e.currentTarget.blur()} value={nl.estimated_amount} onChange={(e) => setNl({ ...nl, estimated_amount: e.target.value })} className={inputCls} />
                 </label>
-              </div>
-              <label className="block">
-                <span className="mb-1 block text-xs text-gray-400">Next follow-up</span>
-                <DateTimeField value={nl.next_follow_up} onChange={(v) => setNl({ ...nl, next_follow_up: v })} />
-              </label>
-              {can('lead_assign') && (
                 <label className="block">
-                  <span className="mb-1 block text-xs text-gray-400">Assign to</span>
-                  <select value={nl.assign} onChange={(e) => setNl({ ...nl, assign: e.target.value })} className={inputCls}>
-                    <option value="auto">Auto (round robin)</option>
-                    <option value="me">Me</option>
-                    {assignable.map((s) => (
-                      <option key={s.id} value={s.id}>{s.full_name}</option>
-                    ))}
-                  </select>
+                  <span className="mb-1 block text-xs text-gray-400">Next follow-up</span>
+                  <DateTimeField value={nl.next_follow_up} onChange={(v) => setNl({ ...nl, next_follow_up: v })} />
                 </label>
-              )}
+                {can('lead_assign') && (
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-gray-400">Assign to</span>
+                    <select value={nl.assign} onChange={(e) => setNl({ ...nl, assign: e.target.value })} className={inputCls}>
+                      <option value="auto">Auto (round robin)</option>
+                      <option value="me">Me</option>
+                      {assignable.map((s) => (
+                        <option key={s.id} value={s.id}>{s.full_name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="block sm:col-span-2">
+                  <span className="mb-1 block text-xs text-gray-400">Requirement</span>
+                  <textarea rows={3} value={nl.requirement} onChange={(e) => setNl({ ...nl, requirement: e.target.value })} className={`${inputCls} resize-y`} />
+                </label>
+              </div>
             </div>
-            <div className="flex justify-end gap-3 border-t border-[#222] px-6 py-4">
+            <div className="flex justify-end gap-3 border-t border-[#222] bg-[#171717] px-6 py-4">
               <button onClick={() => setAdding(false)} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white">
                 Cancel
               </button>
@@ -1111,7 +1345,7 @@ export default function LeadsBoard() {
                 {busy ? 'Saving…' : 'Add lead'}
               </button>
             </div>
-          </aside>
+          </div>
         </div>
       )}
     </div>
