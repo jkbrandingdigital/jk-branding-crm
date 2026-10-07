@@ -61,6 +61,10 @@ html[data-theme='light'] textarea.bg-\[\#1a1a1a\] { background-color: var(--surf
 html[data-theme='light'] .hover\:bg-\[\#1a1a1a\]:hover,
 html[data-theme='light'] .hover\:bg-\[\#1f1f1f\]:hover,
 html[data-theme='light'] .hover\:bg-\[\#202020\]:hover,
+html[data-theme='light'] .hover\:bg-\[\#212121\]:hover,
+html[data-theme='light'] .hover\:bg-\[\#232323\]:hover,
+html[data-theme='light'] .hover\:bg-\[\#242424\]:hover,
+html[data-theme='light'] .hover\:bg-\[\#2a2a2a\]:hover,
 html[data-theme='light'] .hover\:bg-\[\#222\]:hover { background-color: var(--surface-3); }
 
 html[data-theme='light'] .bg-black\/60 { background-color: rgba(60, 50, 38, 0.35); }
@@ -455,3 +459,70 @@ html[data-theme='light'] .text-yellow-400 { color: #8a5a12; }
 html[data-theme='light'] .bg-yellow-500 { background-color: #d9a21b; }
 html[data-theme='light'] .bg-green-500 { background-color: #1f8a4c; }
 html[data-theme='light'] .bg-red-500 { background-color: #cf3b32; }
+
+/* =====================================================================
+   Any near-black surface that slipped through
+   A few panels were written with their own shade; on paper they have to
+   turn light as well, or their writing disappears.
+   ===================================================================== */
+html[data-theme='light'] .bg-\[\#0a0a0a\],
+html[data-theme='light'] .bg-\[\#0d0d0d\],
+html[data-theme='light'] .bg-\[\#0e0e0e\],
+html[data-theme='light'] .bg-\[\#100f0f\],
+html[data-theme='light'] .bg-\[\#101010\],
+html[data-theme='light'] .bg-\[\#141414\],
+html[data-theme='light'] .bg-\[\#181818\],
+html[data-theme='light'] .bg-\[\#1b1b1b\],
+html[data-theme='light'] .bg-\[\#1c1c1c\],
+html[data-theme='light'] .bg-\[\#1d1d1d\],
+html[data-theme='light'] .bg-\[\#1e1e1e\],
+html[data-theme='light'] .bg-\[\#212121\],
+html[data-theme='light'] .bg-\[\#262626\],
+html[data-theme='light'] .bg-\[\#2a2a2a\],
+html[data-theme='light'] .bg-\[\#2e2e2e\],
+html[data-theme='light'] .bg-\[\#333\],
+html[data-theme='light'] .bg-\[\#333333\] { background-color: var(--surface-3); }
+
+/* A solid black panel turns light. The see-through ones must stay
+   see-through, or a popup hides the whole screen behind it. */
+html[data-theme='light'] .bg-black { background-color: var(--surface-3); }
+
+html[data-theme='light'] .bg-black\/80 { background-color: rgba(60, 50, 38, 0.45); }
+html[data-theme='light'] .bg-black\/70 { background-color: rgba(60, 50, 38, 0.40); }
+html[data-theme='light'] .bg-black\/60 { background-color: rgba(60, 50, 38, 0.35); }
+html[data-theme='light'] .bg-black\/50 { background-color: rgba(60, 50, 38, 0.30); }
+html[data-theme='light'] .bg-black\/40 { background-color: rgba(60, 50, 38, 0.25); }
+html[data-theme='light'] .bg-black\/30 { background-color: rgba(60, 50, 38, 0.20); }
+html[data-theme='light'] .bg-black\/25 { background-color: rgba(60, 50, 38, 0.18); }
+html[data-theme='light'] .bg-black\/20 { background-color: rgba(60, 50, 38, 0.15); }
+
+html[data-theme='light'] .border-\[\#0f0f0f\],
+html[data-theme='light'] .border-\[\#141414\],
+html[data-theme='light'] .border-\[\#181818\],
+html[data-theme='light'] .border-\[\#1b1b1b\],
+html[data-theme='light'] .border-\[\#1d1d1d\],
+html[data-theme='light'] .border-\[\#212121\],
+html[data-theme='light'] .border-black { border-color: var(--line); }
+
+/* Writing on those panels */
+html[data-theme='light'] .text-gray-100,
+html[data-theme='light'] .text-gray-50 { color: var(--ink); }
+html[data-theme='light'] .text-black { color: var(--ink); }
+
+/* A dark footer strip reads as a quiet band on paper, not a black bar */
+html[data-theme='light'] .bg-\[\#0f0f0f\] { background-color: var(--surface-2); }
+
+/* Faded panels written as bg-[#hex]/NN — the slash makes a separate class */
+html[data-theme='light'] [class*="bg-[#0f0f0f]/"],
+html[data-theme='light'] [class*="bg-[#111]/"],
+html[data-theme='light'] [class*="bg-[#121212]/"],
+html[data-theme='light'] [class*="bg-[#151515]/"],
+html[data-theme='light'] [class*="bg-[#161616]/"],
+html[data-theme='light'] [class*="bg-[#171717]/"],
+html[data-theme='light'] [class*="bg-[#1a1a1a]/"] { background-color: var(--surface-2); }
+
+/* A brand-orange button always carries white writing */
+html[data-theme='light'] .bg-orange-500.text-black,
+html[data-theme='light'] .bg-orange-500 .text-black,
+html[data-theme='light'] button.bg-orange-500,
+html[data-theme='light'] a.bg-orange-500 { color: #ffffff; }

@@ -3,6 +3,7 @@ import { Check, Loader2, Search, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { fromInputDT, toInputDT, type Staff } from '../leads/leadUtils'
+import { DateTimeField } from '../DateField'
 import { DAYS, TYPE_LABEL, searchLeads, type LeadLite, type Reminder, type ReminderType } from './reminderUtils'
 
 type Props = {
@@ -244,7 +245,7 @@ export default function ReminderModal({ reminder, staff, lead: initialLead, onCl
               {type === 'once' ? (
                 <div>
                   <label className="mb-1 block text-xs text-gray-500" htmlFor="rem-at">Date and time</label>
-                  <input id="rem-at" type="datetime-local" value={onceAt} onChange={(e) => setOnceAt(e.target.value)} className={`${input} w-auto [color-scheme:dark]`} />
+                  <DateTimeField id="rem-at" value={onceAt} onChange={setOnceAt} className="w-56" />
                 </div>
               ) : (
                 <div>

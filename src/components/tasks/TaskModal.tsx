@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
 import { fromInputDT, toInputDT, type Staff } from '../leads/leadUtils'
+import { DateTimeField } from '../DateField'
+import { RichText, plainText } from '../RichText'
 import { searchLeads, type LeadLite } from '../reminders/reminderUtils'
 import {
   PRIORITIES, REPEATS, currentAssignees,
@@ -15,6 +17,7 @@ type Props = {
   stages: TaskStage[]
   labels: TaskLabel[]
   staff: Staff[]
+  lead?: LeadLite | null // opened from a lead: the customer comes pre-filled
   onClose: () => void
   onSaved: () => void
 }
@@ -30,7 +33,7 @@ function tomorrow() {
   return toInputDT(d.toISOString())
 }
 
-export default function TaskModal({ task, stages, labels, staff, onClose, onSaved }: Props) {
+export default function TaskModal({ task, stages, labels, staff, lead: fromLead = null, onClose, onSaved }: Props) {
   const { user } = useAuth()
   const { can } = usePermissions()
   const me = user?.id ?? ''
@@ -44,9 +47,9 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
   const [start, setStart] = useState(toInputDT(task?.start_at ?? new Date().toISOString()))
   const [due, setDue] = useState(task?.due_at ? toInputDT(task.due_at) : tomorrow())
   const [repeat, setRepeat] = useState(task?.repeat_every ?? 'none')
-  const [lead, setLead] = useState<LeadLite | null>(null)
-  const [customer, setCustomer] = useState(task?.customer_name ?? '')
-  const [phone, setPhone] = useState(task?.customer_phone ?? '')
+  const [lead, setLead] = useState<LeadLite | null>(fromLead)
+  const [customer, setCustomer] = useState(task?.customer_name ?? fromLead?.name ?? '')
+  const [phone, setPhone] = useState(task?.customer_phone ?? fromLead?.phone ?? '')
   const [to, setTo] = useState<Set<string>>(new Set(task ? currentAssignees(task) : []))
   const [leadQ, setLeadQ] = useState('')
   const [leadHits, setLeadHits] = useState<LeadLite[]>([])
@@ -102,7 +105,7 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
 
     const payload = {
       subject: subject.trim(),
-      description: description.trim() || null,
+      description: plainText(description) ? description : null,
       priority,
       stage_id: stageId || null,
       label_id: labelId || null,
@@ -206,11 +209,11 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
               <label className={label} htmlFor="task-start">Start</label>
-              <input id="task-start" type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} className={`${input} [color-scheme:dark]`} />
+              <DateTimeField id="task-start" value={start} onChange={setStart} />
             </div>
             <div>
               <label className={label} htmlFor="task-due">Due</label>
-              <input id="task-due" type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} className={`${input} [color-scheme:dark]`} />
+              <DateTimeField id="task-due" value={due} onChange={setDue} />
             </div>
             <div>
               <label className={label} htmlFor="task-repeat">Repeat</label>
@@ -310,7 +313,7 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
 
           <div>
             <label className={label} htmlFor="task-desc">Description</label>
-            <textarea id="task-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} className={`${input} resize-y`} />
+            <RichText id="task-desc" value={description} onChange={setDescription} placeholder="What has to be done, in detail…" />
           </div>
 
           {/* Attachments */}

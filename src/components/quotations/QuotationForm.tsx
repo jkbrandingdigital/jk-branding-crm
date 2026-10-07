@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Eye, Loader2, Plus, Save, Search, X } from 'lucide-react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, Download, FileCheck2, Loader2, Plus, Search, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { searchLeads, type LeadLite } from '../reminders/reminderUtils'
+import { DateField } from '../DateField'
 import {
   GST_TYPES, STATUSES, emptyItem, lineTotal, loadBrochures, loadCompany, loadQuotation,
   money, nextQuoteNo, totalsOf,
@@ -16,6 +17,8 @@ const label = 'mb-1.5 block text-xs text-gray-400'
 export default function QuotationForm({ basePath }: { basePath: string }) {
   const navigate = useNavigate()
   const { id } = useParams()
+  const [params] = useSearchParams()
+  const fromLead = params.get('lead') // came from a lead's 3-dot menu
   const editing = Boolean(id)
 
   const [company, setCompany] = useState<CompanyProfile | null>(null)
@@ -51,6 +54,23 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
       setBrochures(b)
       if (!editing) setTerms(c?.default_terms ?? '')
 
+      // Opened from a lead: its details fill the top of the form
+      if (!editing && fromLead) {
+        const { data: l } = await supabase
+          .from('leads')
+          .select('id, name, phone, email, company, city')
+          .eq('id', fromLead)
+          .maybeSingle()
+        if (l) {
+          setLeadId(l.id as string)
+          setCustomer((l.name as string) ?? '')
+          setMobile((l.phone as string) ?? '')
+          setEmail((l.email as string) ?? '')
+          setCompanyName((l.company as string) ?? '')
+          setAddress((l.city as string) ?? '')
+        }
+      }
+
       if (editing && id) {
         const q = await loadQuotation(id)
         if (!q) {
@@ -77,7 +97,7 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
       setError((e as Error).message)
     }
     setLoading(false)
-  }, [editing, id])
+  }, [editing, id, fromLead])
 
   useEffect(() => { load() }, [load])
 
@@ -101,7 +121,7 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
     setLeadHits([])
   }
 
-  async function save(andPreview: boolean) {
+  async function save(then: 'generate' | 'download') {
     setError('')
     if (!customer.trim()) return setError('Who is this quotation for?')
     const rows = items.filter((it) => it.name.trim())
@@ -162,7 +182,8 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
       )
       if (iErr) throw iErr
 
-      navigate(andPreview ? `${basePath}/${quoteId}/preview` : basePath)
+      // Download lands on the sheet with the print dialog already open
+      navigate(`${basePath}/${quoteId}/preview${then === 'download' ? '?print=1' : ''}`)
     } catch (e) {
       setError((e as { message?: string }).message ?? 'Could not save the quotation.')
       setBusy(false)
@@ -201,11 +222,11 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
           <div className="flex gap-3">
             <div>
               <label className={label} htmlFor="q-date">Date</label>
-              <input id="q-date" type="date" value={quoteDate} onChange={(e) => setQuoteDate(e.target.value)} className={`${input} [color-scheme:dark]`} />
+              <DateField id="q-date" value={quoteDate} onChange={setQuoteDate} className="w-44" />
             </div>
             <div>
               <label className={label} htmlFor="q-valid">Valid until</label>
-              <input id="q-valid" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} className={`${input} [color-scheme:dark]`} />
+              <DateField id="q-valid" value={validUntil} onChange={setValidUntil} className="w-44" placeholder="Not set" />
             </div>
           </div>
         </div>
@@ -458,18 +479,18 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
 
           <div className="mt-5 space-y-2">
             <button
-              onClick={() => save(false)}
+              onClick={() => save('generate')}
               disabled={busy}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 py-2.5 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
             >
-              {busy ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Save
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <FileCheck2 size={16} />} Generate
             </button>
             <button
-              onClick={() => save(true)}
+              onClick={() => save('download')}
               disabled={busy}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#2a2a2a] py-2.5 text-sm text-gray-300 hover:text-white disabled:opacity-50"
             >
-              <Eye size={16} /> Save and preview
+              <Download size={16} /> Download
             </button>
           </div>
         </div>

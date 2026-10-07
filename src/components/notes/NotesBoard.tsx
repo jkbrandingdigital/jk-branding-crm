@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { fmtDT } from '../leads/leadUtils'
+import { plainText } from '../RichText'
 import NoteModal from './NoteModal'
 
 export type NoteColor = 'default' | 'orange' | 'teal' | 'amber' | 'blue' | 'plum' | 'green'
@@ -52,7 +53,7 @@ export default function NotesBoard() {
   const shown = useMemo(() => {
     const term = q.trim().toLowerCase()
     if (!term) return notes
-    return notes.filter((n) => `${n.title ?? ''} ${n.body}`.toLowerCase().includes(term))
+    return notes.filter((n) => `${n.title ?? ''} ${plainText(n.body)}`.toLowerCase().includes(term))
   }, [notes, q])
 
   async function togglePin(n: Note) {
@@ -140,7 +141,8 @@ export default function NotesBoard() {
                   {n.is_pinned && <Pin size={14} className="mt-1 shrink-0 text-orange-400" />}
                 </div>
 
-                <p className="mt-2 line-clamp-6 flex-1 whitespace-pre-wrap text-sm text-gray-300">{n.body}</p>
+                {/* The card shows the words only, so one big heading cannot stretch the board */}
+                <p className="mt-2 line-clamp-6 flex-1 text-sm text-gray-300">{plainText(n.body)}</p>
 
                 <div className="mt-3 flex items-center gap-1 border-t border-[#ffffff14] pt-2" onClick={(e) => e.stopPropagation()}>
                   <span className="mr-auto text-[11px] text-gray-500">{fmtDT(n.updated_at)}</span>

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, CalendarPlus, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
 import LeadDrawer from './LeadDrawer'
+import { DateField, DateTimeField } from '../DateField'
 import ImportLeads from './ImportLeads'
 import { LABEL_CLS, type Label } from './labels'
 import { SOURCES, sourceOf, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadLeads, loadStaff, type Lead, type Stage, type Staff } from './leadUtils'
@@ -101,6 +103,22 @@ export default function LeadsBoard() {
   const [toD, setToD] = useState('')
 
   const [openId, setOpenId] = useState<string | null>(null)
+  const [params, setParams] = useSearchParams()
+
+  // Opened from a notification: ?lead=<id> shows that lead straight away
+  useEffect(() => {
+    const wanted = params.get('lead')
+    if (wanted) setOpenId(wanted)
+  }, [params])
+
+  function closeDrawer() {
+    setOpenId(null)
+    if (params.get('lead')) {
+      const next = new URLSearchParams(params)
+      next.delete('lead')
+      setParams(next, { replace: true })
+    }
+  }
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'assign' | 'stage' } | null>(null)
   const [adding, setAdding] = useState(false)
   const [nl, setNl] = useState<NewLead>(emptyNew)
@@ -663,21 +681,9 @@ export default function LeadsBoard() {
         )}
         <div className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-1.5 text-sm text-gray-300">
           <span className="text-xs text-gray-500">Created</span>
-          <input
-            type="date"
-            value={fromD}
-            onChange={(e) => setFromD(e.target.value)}
-            aria-label="Created from"
-            className="bg-transparent text-sm text-white [color-scheme:dark] focus:outline-none"
-          />
+          <DateField value={fromD} onChange={setFromD} className="w-36" placeholder="Any date" />
           <span className="text-gray-600">→</span>
-          <input
-            type="date"
-            value={toD}
-            onChange={(e) => setToD(e.target.value)}
-            aria-label="Created to"
-            className="bg-transparent text-sm text-white [color-scheme:dark] focus:outline-none"
-          />
+          <DateField value={toD} onChange={setToD} className="w-36" placeholder="Any date" />
           {(fromD || toD) && (
             <button onClick={() => { setFromD(''); setToD('') }} className="text-xs text-orange-400 hover:underline">
               Clear
@@ -811,7 +817,7 @@ export default function LeadsBoard() {
 
       {/* Lead detail */}
       {openId && (
-        <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={() => setOpenId(null)} onChanged={load} />
+        <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={closeDrawer} onChanged={load} />
       )}
 
       {/* Cancel reason */}
@@ -916,12 +922,7 @@ export default function LeadsBoard() {
               )}
               <label className="block">
                 <span className="mb-1.5 block text-xs text-gray-400">Next follow-up date *</span>
-                <input
-                  type="datetime-local"
-                  value={fu.when}
-                  onChange={(e) => setFu({ ...fu, when: e.target.value })}
-                  className={`${inputCls} [color-scheme:dark]`}
-                />
+                <DateTimeField value={fu.when} onChange={(v) => setFu({ ...fu, when: v })} />
               </label>
               <label className="block">
                 <span className="mb-1.5 block text-xs text-gray-400">Comment / message *</span>
@@ -1087,7 +1088,7 @@ export default function LeadsBoard() {
               </div>
               <label className="block">
                 <span className="mb-1 block text-xs text-gray-400">Next follow-up</span>
-                <input type="datetime-local" value={nl.next_follow_up} onChange={(e) => setNl({ ...nl, next_follow_up: e.target.value })} className={`${inputCls} [color-scheme:dark]`} />
+                <DateTimeField value={nl.next_follow_up} onChange={(v) => setNl({ ...nl, next_follow_up: v })} />
               </label>
               {can('lead_assign') && (
                 <label className="block">

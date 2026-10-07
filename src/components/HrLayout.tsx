@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, StickyNote, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, StickyNote, ChevronDown, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
 
@@ -34,10 +34,20 @@ const GROUPS: Group[] = [
   },
 ]
 
+// This section opens on a click; the rest stay in plain view
+const FOLDABLE = ['Productivity']
+
 export default function HrLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const { can, ready: permsReady } = usePermissions()
   const [drawer, setDrawer] = useState(false)
+  const [shut, setShut] = useState<string[]>(FOLDABLE)
+
+  // Whichever section holds the page you are on stays open
+  useEffect(() => {
+    const here = GROUPS.find((g) => g.items.some((i) => pathname === i.path || pathname.startsWith(i.path + '/')))?.title
+    if (here) setShut((list) => list.filter((t) => t !== here))
+  }, [pathname])
 
   const linkCls = (active: boolean) =>
     `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
@@ -49,10 +59,26 @@ export default function HrLayout({ children }: { children: ReactNode }) {
       <div className="flex-1 space-y-5 overflow-y-auto [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
         {GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.perm || !permsReady || can(i.perm)) }))
           .filter((g) => g.items.length > 0)
-          .map((g) => (
+          .map((g) => {
+          const foldable = FOLDABLE.includes(g.title)
+          const openSection = !foldable || !shut.includes(g.title)
+          return (
           <div key={g.title}>
-            <p className="px-3 pb-1.5 text-xs uppercase tracking-wide text-gray-600">{g.title}</p>
-            <ul className="space-y-0.5">
+            {foldable ? (
+              <button
+                onClick={() =>
+                  setShut((list) => (list.includes(g.title) ? list.filter((t) => t !== g.title) : [...list, g.title]))
+                }
+                aria-expanded={openSection}
+                className="flex w-full items-center gap-2 rounded-lg px-3 pb-1.5 text-xs uppercase tracking-wide text-gray-600 transition-colors hover:text-gray-400"
+              >
+                <span className="flex-1 text-left">{g.title}</span>
+                <ChevronDown size={14} className={`transition-transform ${openSection ? '' : '-rotate-90'}`} />
+              </button>
+            ) : (
+              <p className="px-3 pb-1.5 text-xs uppercase tracking-wide text-gray-600">{g.title}</p>
+            )}
+            <ul className={`space-y-0.5 ${openSection ? '' : 'hidden'}`}>
               {g.items.map((item) => {
                 const Icon = item.icon
                 if (!item.ready) {
@@ -78,7 +104,8 @@ export default function HrLayout({ children }: { children: ReactNode }) {
               })}
             </ul>
           </div>
-        ))}
+          )
+        })}
       </div>
       <div className="border-t border-[#222] px-2 pt-4">
         <p className="text-xs text-orange-400">HR</p>

@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { loadStaff, waLink, type Staff } from '../leads/leadUtils'
+import { DateField } from '../DateField'
 import {
   GST_TYPES, STATUSES, fmtDate, loadQuotation, loadQuotations, money, nextQuoteNo, statusOf,
   type Quotation, type QuoteStatus,
@@ -182,11 +183,11 @@ export default function QuotationList({ basePath }: { basePath: string }) {
           </select>
           <label className="text-xs text-gray-500">
             From
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${select} mt-1 block [color-scheme:dark]`} />
+            <DateField value={from} onChange={setFrom} className="mt-1 w-40" placeholder="Any date" />
           </label>
           <label className="text-xs text-gray-500">
             To
-            <input type="date" value={till} onChange={(e) => setTill(e.target.value)} className={`${select} mt-1 block [color-scheme:dark]`} />
+            <DateField value={till} onChange={setTill} className="mt-1 w-40" placeholder="Any date" />
           </label>
           {filtersOn && (
             <button

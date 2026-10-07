@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Check, Loader2, Pin, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { RichText, plainText } from '../RichText'
 import { NOTE_COLORS, type Note, type NoteColor } from './NotesBoard'
 
 export default function NoteModal({
-  note, onClose, onSaved,
+  note, leadId = null, leadName, onClose, onSaved,
 }: {
   note: Note | null
+  leadId?: string | null // set when the note is made from a lead
+  leadName?: string
   onClose: () => void
   onSaved: () => void
 }) {
@@ -25,11 +28,11 @@ export default function NoteModal({
 
   async function save() {
     setError('')
-    if (!title.trim() && !body.trim()) return setError('Write something first.')
+    if (!title.trim() && !plainText(body)) return setError('Write something first.')
 
     const payload = {
       title: title.trim() || null,
-      body: body.trim(),
+      body: plainText(body) ? body : '',
       color,
       is_pinned: pinned,
     }
@@ -37,7 +40,7 @@ export default function NoteModal({
     setBusy(true)
     const { error: e } = note
       ? await supabase.from('notes').update(payload).eq('id', note.id)
-      : await supabase.from('notes').insert(payload)
+      : await supabase.from('notes').insert({ ...payload, lead_id: leadId })
     setBusy(false)
     if (e) return setError(e.message)
     onSaved()
@@ -53,7 +56,10 @@ export default function NoteModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[#242424] bg-[#171717] px-5 py-3.5">
-          <h2 id="note-modal-title" className="font-semibold text-white">{note ? 'Edit note' : 'Add note'}</h2>
+          <div className="min-w-0">
+            <h2 id="note-modal-title" className="font-semibold text-white">{note ? 'Edit note' : 'Add note'}</h2>
+            {!note && leadName && <p className="mt-0.5 truncate text-xs text-gray-500">For {leadName}</p>}
+          </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setPinned((p) => !p)}
@@ -82,14 +88,7 @@ export default function NoteModal({
             className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
           />
 
-          <textarea
-            rows={10}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="Write it down…"
-            aria-label="Note"
-            className="w-full resize-y rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
-          />
+          <RichText value={body} onChange={setBody} placeholder="Write it down…" minHeight={220} />
 
           <div>
             <span className="mb-1.5 block text-sm text-gray-300">Colour</span>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellRing, CheckCheck, ListTodo, UserPlus, X } from 'lucide-react'
+import { Bell, BellRing, Check, CheckCheck, ListTodo, UserPlus, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fmtDT } from './leads/leadUtils'
 
@@ -172,8 +172,8 @@ export default function NotificationBell({
             <ul className="max-h-96 overflow-y-auto">
               {items.length === 0 && <li className="px-4 py-8 text-center text-sm text-gray-500">Nothing here yet.</li>}
               {items.map((n) => (
-                <li key={n.id} className="border-b border-[#222] last:border-0">
-                  <button onClick={() => openItem(n)} className="flex w-full gap-3 px-4 py-3 text-left hover:bg-[#1f1f1f]">
+                <li key={n.id} className="flex items-start border-b border-[#222] last:border-0 hover:bg-[#1f1f1f]">
+                  <button onClick={() => openItem(n)} className="flex min-w-0 flex-1 gap-3 py-3 pl-4 text-left">
                     {isTask(n) ? (
                       <ListTodo className={`mt-0.5 h-4 w-4 shrink-0 ${n.read_at ? 'text-gray-600' : 'text-indigo-400'}`} />
                     ) : isLead(n) ? (
@@ -187,6 +187,18 @@ export default function NotificationBell({
                       <span className="mt-1 block text-[11px] text-gray-600">{fmtDT(n.created_at)}</span>
                     </span>
                   </button>
+
+                  {/* Marks this one read and leaves the rest of the list alone */}
+                  {!n.read_at && (
+                    <button
+                      onClick={() => markRead(n)}
+                      aria-label="Mark as read"
+                      title="Mark as read"
+                      className="mr-3 mt-3 shrink-0 rounded-md border border-[#2a2a2a] p-1.5 text-gray-400 transition-colors hover:border-orange-500/60 hover:text-orange-400"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -194,7 +206,7 @@ export default function NotificationBell({
               onClick={() => { setOpen(false); navigate(remindersPath) }}
               className="w-full border-t border-[#2a2a2a] px-4 py-2.5 text-sm text-orange-400 hover:bg-[#1f1f1f]"
             >
-              Open all reminders
+              Open reminders
             </button>
           </div>
         )}

@@ -7,6 +7,8 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
 import { loadStaff, type Staff } from '../leads/leadUtils'
+import { DateField } from '../DateField'
+import { plainText } from '../RichText'
 import TaskModal from './TaskModal'
 import TaskDetail from './TaskDetail'
 import {
@@ -195,7 +197,7 @@ export default function TaskBoard() {
         if (tillMs && d > tillMs) return false
       }
       if (!term) return true
-      return [t.subject, t.description, t.customer_name, nameOf(t.created_by), ...to.map(nameOf)]
+      return [t.subject, plainText(t.description ?? ''), t.customer_name, nameOf(t.created_by), ...to.map(nameOf)]
         .join(' ')
         .toLowerCase()
         .includes(term)
@@ -534,11 +536,11 @@ export default function TaskBoard() {
           </select>
           <label className="text-xs text-gray-500">
             Due from
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${select} mt-1 block [color-scheme:dark]`} />
+            <DateField value={from} onChange={setFrom} className="mt-1 w-40" placeholder="Any date" />
           </label>
           <label className="text-xs text-gray-500">
             Due till
-            <input type="date" value={till} onChange={(e) => setTill(e.target.value)} className={`${select} mt-1 block [color-scheme:dark]`} />
+            <DateField value={till} onChange={setTill} className="mt-1 w-40" placeholder="Any date" />
           </label>
           <label className="text-xs text-gray-500">
             Sort by

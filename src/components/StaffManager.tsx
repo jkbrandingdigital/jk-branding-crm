@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { DateField } from './DateField'
 
 type Profile = {
   id: string
@@ -583,7 +584,7 @@ export default function StaffManager() {
                   <input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} placeholder="e.g. Sales Executive" className={inputCls} />
                 </Field>
                 <Field label="Date of joining">
-                  <input type="date" value={form.date_of_joining} onChange={(e) => setForm({ ...form, date_of_joining: e.target.value })} className={`${inputCls} [color-scheme:dark]`} />
+                  <DateField value={form.date_of_joining} onChange={(v) => setForm({ ...form, date_of_joining: v })} placeholder="Not set" />
                 </Field>
               </div>
 

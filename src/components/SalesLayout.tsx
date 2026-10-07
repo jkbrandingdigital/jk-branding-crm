@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, Filter, AlarmClock, ListTodo, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
+import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
@@ -19,6 +19,9 @@ const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
 }
 
 type NavItem = { label: string; hint?: string; page?: SalesNav; icon: LucideIcon; perm?: string }
+
+// These two open on a click; the rest stay in plain view
+const FOLDABLE = ['Productivity', 'Business']
 
 const NAV: { title: string; items: NavItem[] }[] = [
   {
@@ -56,6 +59,7 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
   const [name, setName] = useState('')
   const [branch, setBranch] = useState('')
   const [done, setDone] = useState<{ evolution: boolean; report: boolean }>({ evolution: false, report: false })
+  const [shut, setShut] = useState<string[]>(FOLDABLE)
 
   const loadStatus = useCallback(async () => {
     const user = await getCurrentUser()
@@ -99,13 +103,38 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
     items: s.items.filter((i) => !i.perm || !ready || can(i.perm)),
   })).filter((s) => s.items.length > 0)
 
+  // Whichever section holds the page you are on stays open
+  useEffect(() => {
+    const here = sections.find((s) => s.items.some((i) => i.page === active))?.title
+    if (here) setShut((list) => list.filter((t) => t !== here))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, ready])
+
   const sidebar = (
     <nav className="flex h-full flex-col">
       <div className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
-        {sections.map((section) => (
+        {sections.map((section) => {
+          const foldable = FOLDABLE.includes(section.title)
+          const openSection = !foldable || !shut.includes(section.title)
+          return (
           <div key={section.title}>
-            <p className="mb-2 px-3 text-xs text-gray-500">{section.title}</p>
-            <ul className="space-y-0.5">
+            {foldable ? (
+              <button
+                onClick={() =>
+                  setShut((list) =>
+                    list.includes(section.title) ? list.filter((t) => t !== section.title) : [...list, section.title],
+                  )
+                }
+                aria-expanded={openSection}
+                className="mb-2 flex w-full items-center gap-2 rounded-lg px-3 py-1 text-xs text-gray-500 transition-colors hover:text-gray-300"
+              >
+                <span className="flex-1 text-left">{section.title}</span>
+                <ChevronDown size={14} className={`transition-transform ${openSection ? '' : '-rotate-90'}`} />
+              </button>
+            ) : (
+              <p className="mb-2 px-3 text-xs text-gray-500">{section.title}</p>
+            )}
+            <ul className={`space-y-0.5 ${openSection ? '' : 'hidden'}`}>
               {section.items.map((item) => {
                 const Icon = item.icon
                 const base = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors'
@@ -144,7 +173,8 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
               })}
             </ul>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       <div className="border-t border-[#222] px-5 py-4">

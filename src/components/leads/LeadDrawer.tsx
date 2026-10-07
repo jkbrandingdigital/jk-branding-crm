@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   X, Phone, MessageCircle, Star, Trash2, Send, AlertCircle, CheckCircle2, Clock,
   RefreshCw, Tag, UserCog, TrendingUp, Pencil, CalendarPlus,
+  MoreVertical, ListTodo, CalendarClock, FileText, AlarmClock, StickyNote, Loader2,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../contexts/AuthContext'
 import { inr } from '../../lib/format'
 import { LABEL_CLS, type Label } from './labels'
 import { sourceOf, fromInputDT, fmtDT, isOverdue, waLink, type Lead, type Stage, type Staff } from './leadUtils'
 import LeadEditModal from './LeadEditModal'
+import { DateTimeField } from '../DateField'
+import TaskModal from '../tasks/TaskModal'
+import { loadTaskLabels, loadTaskStages, type TaskLabel, type TaskStage } from '../tasks/taskUtils'
+import ReminderModal from '../reminders/ReminderModal'
+import NoteModal from '../notes/NoteModal'
+import type { LeadLite } from '../reminders/reminderUtils'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
 type LeadL = Lead & {
@@ -39,11 +48,19 @@ export default function LeadDrawer({
   onClose: () => void
   onChanged: () => void
 }) {
+  const navigate = useNavigate()
+  const { role } = useAuth()
   const [lead, setLead] = useState<LeadL | null>(null)
   const [acts, setActs] = useState<Activity[]>([])
   const [tab, setTab] = useState<TabKey>('details')
   const [editMode, setEditMode] = useState(false)
-  const [menu, setMenu] = useState<'stage' | 'assign' | 'label' | null>(null)
+  const [menu, setMenu] = useState<'stage' | 'assign' | 'label' | 'more' | null>(null)
+
+  // What the 3-dot menu opens
+  const [make, setMake] = useState<'task' | 'reminder' | 'note' | null>(null)
+  const [taskStages, setTaskStages] = useState<TaskStage[]>([])
+  const [taskLabels, setTaskLabels] = useState<TaskLabel[]>([])
+  const [loadingTask, setLoadingTask] = useState(false)
 
   const [actType, setActType] = useState('note')
   const [actText, setActText] = useState('')
@@ -62,6 +79,31 @@ export default function LeadDrawer({
   const nameOf = (id: string | null) => (id ? staff.find((s) => s.id === id)?.full_name ?? (id === myId ? 'You' : '—') : 'System')
   const stageName = (id: unknown) => stages.find((s) => s.id === id)?.name ?? '—'
   const editable = can('lead_edit')
+
+  // The same lead, in the small shape the task / reminder / quotation screens use
+  const leadLite: LeadLite | null = lead
+    ? { id: lead.id, name: lead.name, lead_no: lead.lead_no, phone: lead.phone ?? null }
+    : null
+
+  // Quotations live under each role's own folder
+  const quoteBase =
+    role === 'super_admin' ? '/admin' : role === 'branch_manager' ? '/manager' : role === 'sales' ? '/sales' : null
+
+  // Stages and labels are only fetched the first time someone makes a task from here
+  async function startTask() {
+    setMenu(null)
+    if (taskStages.length) return setMake('task')
+    setLoadingTask(true)
+    try {
+      const [s, l] = await Promise.all([loadTaskStages(), loadTaskLabels()])
+      setTaskStages(s)
+      setTaskLabels(l)
+      setMake('task')
+    } catch (e) {
+      setMsg({ type: 'error', text: (e as Error).message })
+    }
+    setLoadingTask(false)
+  }
 
   const load = useCallback(async () => {
     const [l, a] = await Promise.all([
@@ -258,7 +300,39 @@ export default function LeadDrawer({
             </button>
           )}
 
-          {menu && (
+          {/* Everything you can start from this lead */}
+          <div className="relative ml-auto">
+            <button
+              onClick={(e) => { e.stopPropagation(); setMenu(menu === 'more' ? null : 'more') }}
+              aria-haspopup="menu"
+              aria-expanded={menu === 'more'}
+              className={`${iconBtn} ${menu === 'more' ? 'bg-[#1f1f1f] text-white' : ''}`}
+              title="More"
+            >
+              {loadingTask ? <Loader2 size={17} className="animate-spin" /> : <MoreVertical size={17} />}
+            </button>
+
+            {menu === 'more' && (
+              <div
+                role="menu"
+                onClick={(e) => e.stopPropagation()}
+                className="absolute right-0 top-11 z-20 w-56 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl"
+              >
+                <MenuItem icon={ListTodo} label="Create Task" show={can('task_create')} onClick={startTask} />
+                <MenuItem icon={CalendarClock} label="Create Meeting" soon />
+                <MenuItem
+                  icon={FileText}
+                  label="Create Quotation"
+                  show={can('quote_create') && !!quoteBase}
+                  onClick={() => { setMenu(null); navigate(`${quoteBase}/quotations/new?lead=${lead?.id}`) }}
+                />
+                <MenuItem icon={AlarmClock} label="Set Reminder" show={can('mod_reminders')} onClick={() => { setMenu(null); setMake('reminder') }} />
+                <MenuItem icon={StickyNote} label="Create Notes" show={can('mod_notes')} onClick={() => { setMenu(null); setMake('note') }} />
+              </div>
+            )}
+          </div>
+
+          {menu && menu !== 'more' && (
             <div className="absolute left-4 top-12 z-20 max-h-64 w-56 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
               {menu === 'stage' &&
                 stages.map((s) => {
@@ -502,12 +576,7 @@ export default function LeadDrawer({
             <div className="space-y-4 px-5 py-5">
               <label className="block">
                 <span className="mb-1.5 block text-xs text-gray-400">Next follow-up date <span className="text-orange-400">*</span></span>
-                <input
-                  type="datetime-local"
-                  value={actFollow}
-                  onChange={(e) => setActFollow(e.target.value)}
-                  className={`${inputCls} [color-scheme:dark]`}
-                />
+                <DateTimeField value={actFollow} onChange={setActFollow} />
               </label>
 
               <label className="block">
@@ -648,6 +717,45 @@ export default function LeadDrawer({
           </div>
         </div>
       )}
+      {/* Started from the 3-dot menu — the lead is already filled in */}
+      {make === 'task' && lead && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <TaskModal
+            task={null}
+            stages={taskStages}
+            labels={taskLabels}
+            staff={staff}
+            lead={leadLite}
+            onClose={() => setMake(null)}
+            onSaved={() => { setMake(null); setMsg({ type: 'success', text: 'Task created.' }) }}
+          />
+        </div>
+      )}
+
+      {make === 'reminder' && lead && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <ReminderModal
+            reminder={null}
+            staff={staff}
+            lead={leadLite}
+            onClose={() => setMake(null)}
+            onSaved={() => { setMake(null); setMsg({ type: 'success', text: 'Reminder set.' }) }}
+          />
+        </div>
+      )}
+
+      {make === 'note' && lead && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <NoteModal
+            note={null}
+            leadId={lead.id}
+            leadName={`#${lead.lead_no} ${lead.name}`}
+            onClose={() => setMake(null)}
+            onSaved={() => { setMake(null); setMsg({ type: 'success', text: 'Note saved.' }) }}
+          />
+        </div>
+      )}
+
       {editMode && lead && (
         <LeadEditModal
           lead={lead}
@@ -660,6 +768,37 @@ export default function LeadDrawer({
         />
       )}
     </div>
+  )
+}
+
+function MenuItem({
+  icon: Icon, label, show = true, soon, onClick,
+}: {
+  icon: typeof ListTodo
+  label: string
+  show?: boolean
+  soon?: boolean
+  onClick?: () => void
+}) {
+  if (!show) return null
+  if (soon) {
+    return (
+      <span className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-600">
+        <Icon size={15} />
+        <span className="flex-1">{label}</span>
+        <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
+      </span>
+    )
+  }
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-300 hover:bg-[#232323] hover:text-white"
+    >
+      <Icon size={15} className="text-orange-400" />
+      {label}
+    </button>
   )
 }
 

@@ -3,6 +3,7 @@ import { Download, Loader2, Paperclip, Pencil, Send, Trash2, X } from 'lucide-re
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { fmtDT, type Staff } from '../leads/leadUtils'
+import { RichHtml } from '../RichText'
 import { currentAssignees, fmtTaskDT, priorityOf, type Task, type TaskLabel, type TaskStage } from './taskUtils'
 
 type Tab = 'details' | 'comments' | 'files' | 'history'
@@ -224,7 +225,7 @@ export default function TaskDetail({
               {task.completed_at && row('Finished', fmtTaskDT(task.completed_at))}
               {row('Customer', task.customer_name || '—')}
               {row('Customer mobile', task.customer_phone || '—')}
-              {row('Description', task.description ? <span className="whitespace-pre-wrap">{task.description}</span> : '—')}
+              {row('Description', <RichHtml html={task.description} />)}
             </div>
           )}
 
