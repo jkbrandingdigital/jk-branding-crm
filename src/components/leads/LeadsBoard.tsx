@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
 import LeadDrawer from './LeadDrawer'
@@ -136,6 +137,7 @@ const emptyNew = (): NewLead => ({
 
 export default function LeadsBoard() {
   const { can, ready } = usePermissions()
+  const { role } = useAuth()
   const [myId, setMyId] = useState<string | null>(null)
   const [stages, setStages] = useState<Stage[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
@@ -195,6 +197,9 @@ export default function LeadsBoard() {
   const [fuErr, setFuErr] = useState<string | null>(null)
   const [lookup, setLookup] = useState<LookupRow[]>([])
   const [looking, setLooking] = useState(false)
+  const [wipeOpen, setWipeOpen] = useState(false)
+  const [wipeWord, setWipeWord] = useState('')
+  const [wiping, setWiping] = useState<string>('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -379,6 +384,33 @@ export default function LeadsBoard() {
     const { error: e } = await supabase.from('leads').update({ assigned_to: userId }).eq('id', leadId)
     if (e) return setError(e.message)
     load()
+  }
+
+  // Takes out every lead the filters are showing right now.
+  // They are marked deleted, not erased — the backup zip still carries them.
+  async function deleteShown() {
+    const ids = filtered.map((l) => l.id)
+    if (ids.length === 0) return
+    const now = new Date().toISOString()
+    let gone = 0
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200)
+      setWiping(`Deleting ${Math.min(i + chunk.length, ids.length)} of ${ids.length}…`)
+      const { error: e } = await supabase.from('leads').update({ deleted_at: now }).in('id', chunk)
+      if (e) {
+        setWiping('')
+        setWipeOpen(false)
+        return setError(e.message)
+      }
+      gone += chunk.length
+    }
+    setWiping('')
+    setWipeOpen(false)
+    setWipeWord('')
+    setOpenId(null)
+    setError(null)
+    await load()
+    window.alert(`${gone} leads deleted.`)
   }
 
   async function removeLead(l: LeadL) {
@@ -731,6 +763,15 @@ export default function LeadsBoard() {
               title={`Export ${filtered.length} leads to Excel`}
             >
               <Download size={16} /> Export
+            </button>
+          )}
+          {role === 'super_admin' && filtered.length > 0 && (
+            <button
+              onClick={() => { setWipeWord(''); setWipeOpen(true) }}
+              className="flex items-center gap-2 rounded-lg border border-red-900/60 px-3 py-2 text-sm text-red-400 hover:border-red-700 hover:text-red-300"
+              title="Delete every lead shown right now"
+            >
+              <Trash2 size={16} /> Delete {filtered.length}
             </button>
           )}
           {ready && can('lead_create') && (
@@ -1122,11 +1163,76 @@ export default function LeadsBoard() {
         </div>
       )}
 
+      {/* Delete everything on screen */}
+      {wipeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => !wiping && setWipeOpen(false)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative w-full max-w-lg rounded-2xl border border-red-900/50 bg-[#151515]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
+              <h2 className="font-semibold text-red-300">Delete {filtered.length} leads</h2>
+              <button onClick={() => !wiping && setWipeOpen(false)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-5 text-sm">
+              <p className="text-gray-300">
+                Every lead the filters are showing right now will go — all {filtered.length} of them, out of {leads.length} in the CRM.
+                Their follow-ups go with them.
+              </p>
+              {onCount > 0 || q.trim() ? (
+                <p className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs text-gray-400">
+                  {q.trim() && <>A search is on. </>}
+                  {onCount > 0 && <>{onCount} filter{onCount > 1 ? 's are' : ' is'} on. </>}
+                  This is only part of the CRM.
+                </p>
+              ) : (
+                <p className="rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+                  No filters are on. This is every lead in the CRM.
+                </p>
+              )}
+              <p className="text-xs text-gray-500">
+                They are marked deleted, not wiped from the database, so a backup taken earlier still has them.
+                Take one from Company → Backup first if you have not.
+              </p>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs text-gray-400">
+                  Type <span className="font-semibold text-red-300">DELETE</span> to go ahead
+                </span>
+                <input
+                  autoFocus
+                  value={wipeWord}
+                  onChange={(e) => setWipeWord(e.target.value)}
+                  disabled={!!wiping}
+                  className={inputCls}
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-[#242424] px-5 py-4">
+              {wiping && <span className="mr-auto text-xs text-gray-400">{wiping}</span>}
+              <button onClick={() => setWipeOpen(false)} disabled={!!wiping} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white disabled:opacity-40">
+                Keep them
+              </button>
+              <button
+                onClick={deleteShown}
+                disabled={wipeWord.trim().toUpperCase() !== 'DELETE' || !!wiping}
+                className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
+              >
+                {wiping ? 'Deleting…' : `Delete ${filtered.length}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Import */}
       {importOpen && (
         <ImportLeads
           staff={staff}
           labels={labels}
+          stages={stages}
           myId={myId}
           canAssign={can('lead_assign')}
           onClose={() => setImportOpen(false)}

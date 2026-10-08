@@ -1,12 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Download } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { SOURCES, type Staff } from './leadUtils'
+import { SOURCES, type Stage, type Staff } from './leadUtils'
 import { type Label } from './labels'
 
 type Props = {
   staff: Staff[]
   labels: Label[]
+  stages: Stage[]
   myId: string | null
   canAssign: boolean
   onClose: () => void
@@ -25,7 +26,47 @@ const FIELDS: { key: string; label: string; hints: string[]; required?: boolean 
   { key: 'requirement', label: 'Requirement', hints: ['requirement', 'message', 'remark', 'note', 'comment', 'enquiry'] },
   { key: 'estimated_amount', label: 'Estimated amount', hints: ['amount', 'value', 'budget', 'estimate', 'deal size'] },
   { key: 'next_follow_up', label: 'Next follow-up', hints: ['follow up', 'followup', 'next follow', 'nfd'] },
+  { key: 'stage', label: 'Stage', hints: ['stage', 'status'] },
+  { key: 'lead_source', label: 'Source', hints: ['source', 'platform', 'lead platform'] },
+  { key: 'lead_label', label: 'Label', hints: ['label', 'tag'] },
+  { key: 'assigned', label: 'Assigned to', hints: ['assign', 'assigned to', 'owner', 'sales person', 'handled by'] },
+  { key: 'created_at', label: 'Created on', hints: ['created at', 'created on', 'created date', 'create date', 'lead date', 'date added', 'cd'] },
+  { key: 'rating', label: 'Rating', hints: ['rating', 'star'] },
+  { key: 'cancel_reason', label: 'Cancel reason', hints: ['cancel', 'cancle', 'lost reason'] },
 ]
+
+const tidy = (v: string) => (v ?? '').replace(/\s+/g, ' ').trim()
+const same = (a: string, b: string) => tidy(a).toLowerCase() === tidy(b).toLowerCase()
+
+/**
+ * 365 packs several answers into one Comment cell:
+ *   label::JK Rajkot service Lead New
+ *   city::Manmad
+ *   requirement_type?::customize_diary_design_&_printing
+ * This reads them out.
+ */
+function kvLines(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of (text ?? '').split(/\r?\n/)) {
+    const i = line.indexOf('::')
+    if (i > 0) {
+      const k = line.slice(0, i).trim().toLowerCase().replace(/\?$/, '')
+      const v = line.slice(i + 2).trim()
+      if (k && v) out[k] = v
+    }
+  }
+  return out
+}
+
+const title = (v: string) => v.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+
+/** The same cell, written so a person can read it */
+function readable(text: string): string {
+  const kv = kvLines(text)
+  const keys = Object.keys(kv).filter((k) => k !== 'label' && k !== 'company_name')
+  if (keys.length === 0) return tidy(text)
+  return keys.map((k) => `${title(k)}: ${title(kv[k])}`).join('\n')
+}
 
 // A small CSV reader: handles quotes, commas inside quotes and both line endings
 function parseCsv(text: string): { headers: string[]; rows: Row[] } {
@@ -132,14 +173,18 @@ async function phonesTaken(phones: string[]): Promise<Set<string> | null> {
   // No such function? Ask the table itself.
   const found = new Set<string>()
   for (let i = 0; i < phones.length; i += 200) {
-    const { data, error } = await supabase.from('leads').select('phone').in('phone', phones.slice(i, i + 200))
+    const { data, error } = await supabase
+      .from('leads')
+      .select('phone')
+      .is('deleted_at', null)          // deleted ones do not block a fresh import
+      .in('phone', phones.slice(i, i + 200))
     if (error) return null
     for (const r of (data ?? []) as { phone: string | null }[]) found.add(digits(r.phone ?? ''))
   }
   return found
 }
 
-export default function ImportLeads({ staff, labels, myId, canAssign, onClose, onDone }: Props) {
+export default function ImportLeads({ staff, labels, stages, myId, canAssign, onClose, onDone }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileName, setFileName] = useState('')
   const [headers, setHeaders] = useState<string[]>([])
@@ -178,6 +223,8 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
   }
 
   const preview = useMemo(() => rows.slice(0, 5), [rows])
+  // 365 keeps the city and the company inside the comment cell
+  const kvOf = (r: Row) => kvLines(map.requirement ? (r[map.requirement] ?? '') : '')
   const ready = Boolean(map.name && map.phone && rows.length > 0)
 
   async function runImport() {
@@ -187,20 +234,58 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
     setBusy(true)
     try {
       let noDate = 0
+      const unknown = new Set<string>()
       const cleaned = rows
         .map((r) => {
-          const rawWhen = map.next_follow_up ? (r[map.next_follow_up] ?? '').trim() : ''
+          const take = (k: string) => (map[k] ? (r[map[k]] ?? '').trim() : '')
+
+          const rawWhen = take('next_follow_up')
           const when = rawWhen ? parseWhen(rawWhen) : null
           if (rawWhen && !when) noDate++
+
+          const rawMade = take('created_at')
+          const made = rawMade ? parseWhen(rawMade) : null
+
+          // Stage, source, label and owner come by name — whatever does not
+          // match falls back to the choice made above
+          const stageName = take('stage')
+          const stage = stageName ? stages.find((x) => same(x.name, stageName)) : undefined
+          if (stageName && !stage) unknown.add(`Stage "${stageName}"`)
+
+          const srcName = take('lead_source')
+          const src = srcName ? SOURCES.find((x) => same(x.key, srcName) || same(x.label, srcName)) : undefined
+          if (srcName && !src) unknown.add(`Source "${srcName}"`)
+
+          const labName = take('lead_label') || kvLines(take('requirement')).label || ''
+          const lab = labName ? labels.find((x) => same(x.name, labName)) : undefined
+          if (labName && !lab) unknown.add(`Label "${labName}"`)
+
+          const owner = take('assigned')
+          const person = owner ? staff.find((x) => same(x.full_name, owner)) : undefined
+          if (owner && !person) unknown.add(`Person "${owner}"`)
+
+          const stars = Math.round(Number(take('rating')) || 0)
+
+          // 365 hides the city and the requirement inside the comment cell
+          const note = take('requirement')
+          const kv = kvLines(note)
+
           return {
-            name: (r[map.name] ?? '').trim(),
+            name: tidy(r[map.name] ?? ''),
             phone: digits(r[map.phone] ?? ''),
-            email: map.email ? (r[map.email] ?? '').trim() : '',
-            company: map.company ? (r[map.company] ?? '').trim() : '',
-            city: map.city ? (r[map.city] ?? '').trim() : '',
-            requirement: map.requirement ? (r[map.requirement] ?? '').trim() : '',
-            amount: map.estimated_amount ? Number((r[map.estimated_amount] ?? '').replace(/[^0-9.]/g, '')) || 0 : 0,
+            email: take('email'),
+            company: take('company') || kv.company_name || '',
+            city: take('city') || kv.city || kv['city/state'] || '',
+            requirement: readable(note),
+            cancelReason: take('cancel_reason'),
+            amount: map.estimated_amount ? Number(take('estimated_amount').replace(/[^0-9.]/g, '')) || 0 : 0,
             when,
+            made,
+            stageId: stage?.id ?? null,
+            source: src?.key ?? null,
+            labelId: lab?.id ?? null,
+            ownerId: person?.id ?? null,
+            rating: Math.min(Math.max(stars, 0), 5),
           }
         })
         .filter((r) => r.name && r.phone.length >= 10)
@@ -211,6 +296,7 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
       }
 
       const why: string[] = []
+      for (const u of [...unknown].slice(0, 5)) why.push(`${u} is not in the CRM — the choice below was used instead.`)
       let skipped = rows.length - cleaned.length
       let list = cleaned
 
@@ -232,19 +318,30 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
       skipped += list.length - unique.length
 
       const assigned_to = assign === 'auto' ? null : assign === 'me' ? myId : assign
-      const rowOf = (r: (typeof unique)[number]) => ({
-        name: r.name,
-        phone: r.phone,
-        email: r.email || null,
-        company: r.company || null,
-        city: r.city || null,
-        requirement: r.requirement || null,
-        source,
-        estimated_amount: r.amount,
-        next_follow_up: r.when,
-        label_id: labelId || null,
-        assigned_to,
-      })
+      const rowOf = (r: (typeof unique)[number]) => {
+        const row: Record<string, unknown> = {
+          name: r.name,
+          phone: r.phone,
+          email: r.email || null,
+          company: r.company || null,
+          city: r.city || null,
+          requirement: r.requirement || null,
+          source: r.source ?? source,
+          estimated_amount: r.amount,
+          next_follow_up: r.when,
+          label_id: r.labelId ?? (labelId || null),
+          assigned_to: r.ownerId ?? assigned_to,
+          rating: r.rating,
+        }
+        // Only when the file said so — otherwise the database decides
+        if (r.stageId) row.stage_id = r.stageId
+        if (r.made) row.created_at = r.made
+        if (r.cancelReason) row.cancel_reason = r.cancelReason
+        return row
+      }
+
+      // Oldest first, so lead numbers come out in the same order as the file
+      unique.sort((a, b) => (a.made ?? '').localeCompare(b.made ?? ''))
 
       let added = 0
       let failed = 0
@@ -395,7 +492,10 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
               {/* 3. settings */}
               {headers.length > 0 && (
                 <div>
-                  <p className="mb-2 text-sm font-medium text-gray-300">3. What to do with them</p>
+                  <p className="mb-1 text-sm font-medium text-gray-300">3. What to do with them</p>
+                  <p className="mb-2 text-xs text-gray-500">
+                    Used when the file does not carry it, or when a name in the file is not in the CRM yet.
+                  </p>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <label className="block">
                       <span className="mb-1 block text-xs text-gray-400">Source</span>
@@ -451,8 +551,12 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
                           <tr key={i} className="border-b border-[#1c1c1c] last:border-0">
                             <td className="px-3 py-2 text-white">{r[map.name]}</td>
                             <td className="px-3 py-2 text-gray-300">{digits(r[map.phone] ?? '')}</td>
-                            <td className="px-3 py-2 text-gray-400">{map.company ? r[map.company] : '—'}</td>
-                            <td className="px-3 py-2 text-gray-400">{map.city ? r[map.city] : '—'}</td>
+                            <td className="px-3 py-2 text-gray-400">
+                              {(map.company ? r[map.company] : '') || kvOf(r).company_name || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-400">
+                              {(map.city ? r[map.city] : '') || kvOf(r).city || kvOf(r)['city/state'] || '—'}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
