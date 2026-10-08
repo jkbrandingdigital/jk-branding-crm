@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Loader2, MessageCircle, Pencil, Printer } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, Download, Loader2, MessageCircle, Pencil, Printer } from 'lucide-react'
 import { waLink } from '../leads/leadUtils'
 import {
   GST_TYPES, fmtDate, lineTotal, loadCompany, loadQuotation, money, totalsOf,
@@ -12,6 +12,9 @@ import {
 export default function QuotationPreview({ basePath, canEdit }: { basePath: string; canEdit: boolean }) {
   const navigate = useNavigate()
   const { id } = useParams()
+  const [params, setParams] = useSearchParams()
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const [making, setMaking] = useState(false)
   const [quote, setQuote] = useState<Quotation | null>(null)
   const [company, setCompany] = useState<CompanyProfile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -31,6 +34,61 @@ export default function QuotationPreview({ basePath, canEdit }: { basePath: stri
 
   useEffect(() => { load() }, [load])
 
+  // Draws the sheet and saves it as a PDF, the way any other download behaves
+  const downloadPdf = useCallback(async () => {
+    const node = sheetRef.current
+    if (!node || making) return
+    setMaking(true)
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ])
+      const canvas = await html2canvas(node, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        logging: false,
+      })
+
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const margin = 8
+      const drawW = pageW - margin * 2
+      const drawH = (canvas.height * drawW) / canvas.width
+
+      // Taller than one page: lay it across as many pages as it needs
+      let left = drawH
+      let y = margin
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, y, drawW, drawH)
+      left -= pageH - margin * 2
+      while (left > 0) {
+        y = margin - (drawH - left)
+        pdf.addPage()
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, y, drawW, drawH)
+        left -= pageH - margin * 2
+      }
+
+      pdf.save(`${quote?.quote_no ?? 'quotation'}.pdf`)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+    setMaking(false)
+  }, [making, quote])
+
+  // Arriving with ?print=1 (the Download button on the form) saves it straight away
+  useEffect(() => {
+    if (loading || error || !quote || params.get('print') !== '1') return
+    const t = setTimeout(() => {
+      downloadPdf()
+      const next = new URLSearchParams(params)
+      next.delete('print')
+      setParams(next, { replace: true })
+    }, 500)
+    return () => clearTimeout(t)
+  }, [loading, error, quote, params, setParams, downloadPdf])
+
   if (loading) {
     return <div className="py-24 text-center text-gray-500"><Loader2 size={22} className="mx-auto animate-spin" /></div>
   }
@@ -39,6 +97,8 @@ export default function QuotationPreview({ basePath, canEdit }: { basePath: stri
   }
 
   const items = quote.quotation_items ?? []
+  // HSN no column tyare j, jyare settings ma chalu hoy ane koi item par HSN hoy
+  const showHsn = (company?.show_hsn ?? true) && items.some((it) => (it.hsn_code ?? '').trim() !== '')
   const totals = totalsOf(items, quote.gst_type, Number(quote.gst_percent))
   const half = totals.tax_total / 2
   const wa = waLink(quote.mobile)
@@ -80,14 +140,21 @@ export default function QuotationPreview({ basePath, canEdit }: { basePath: stri
         )}
         <button
           onClick={() => window.print()}
-          className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600"
+          className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-gray-300 hover:text-white"
         >
-          <Printer size={16} /> Print or save as PDF
+          <Printer size={16} /> Print
+        </button>
+        <button
+          onClick={downloadPdf}
+          disabled={making}
+          className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-60"
+        >
+          {making ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Download PDF
         </button>
       </div>
 
       {/* The sheet */}
-      <div className="jk-sheet rounded-xl bg-white p-10 text-[13px] leading-relaxed text-[#1a1a1a] shadow-xl">
+      <div ref={sheetRef} className="jk-sheet rounded-xl bg-white p-10 text-[13px] leading-relaxed text-[#1a1a1a] shadow-xl">
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-6 border-b border-[#e5e0d6] pb-6">
           <div className="min-w-0">
@@ -135,6 +202,7 @@ export default function QuotationPreview({ basePath, canEdit }: { basePath: stri
             <tr className="bg-[#f4efe6] text-left">
               <th className="border border-[#e5e0d6] px-3 py-2 font-semibold">#</th>
               <th className="border border-[#e5e0d6] px-3 py-2 font-semibold">Item</th>
+              {showHsn && <th className="border border-[#e5e0d6] px-3 py-2 font-semibold">HSN</th>}
               <th className="border border-[#e5e0d6] px-3 py-2 text-right font-semibold">Cost</th>
               <th className="border border-[#e5e0d6] px-3 py-2 text-right font-semibold">Qty</th>
               <th className="border border-[#e5e0d6] px-3 py-2 text-right font-semibold">Discount</th>
@@ -149,8 +217,14 @@ export default function QuotationPreview({ basePath, canEdit }: { basePath: stri
                   {it.name}
                   {it.comments && <span className="mt-0.5 block whitespace-pre-wrap text-[11.5px] text-[#666]">{it.comments}</span>}
                 </td>
+                {showHsn && (
+                  <td className="border border-[#e5e0d6] px-3 py-2 align-top tabular-nums">{it.hsn_code || '—'}</td>
+                )}
                 <td className="border border-[#e5e0d6] px-3 py-2 text-right align-top tabular-nums">{money(Number(it.cost), quote.currency)}</td>
-                <td className="border border-[#e5e0d6] px-3 py-2 text-right align-top tabular-nums">{Number(it.qty)}</td>
+                <td className="border border-[#e5e0d6] px-3 py-2 text-right align-top tabular-nums">
+                  {Number(it.qty)}
+                  {it.unit && <span className="ml-1 text-[#666]">{it.unit}</span>}
+                </td>
                 <td className="border border-[#e5e0d6] px-3 py-2 text-right align-top tabular-nums">
                   {Number(it.discount) > 0
                     ? it.discount_type === 'percent'

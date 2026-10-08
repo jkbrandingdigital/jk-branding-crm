@@ -5,6 +5,7 @@ import {
 import { ArrowDownRight, ArrowUpRight, Home, Building2 } from 'lucide-react'
 import DonutChart from './DonutChart'
 import { useChartTheme } from '../lib/chartTheme'
+import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { istDate, addDays, weekStart, addMonths, shortDate, monthLabel, inr, inrCompact } from '../lib/format'
 
@@ -80,6 +81,10 @@ export default function PerformanceView({
   userId, branchId, title = 'Performance', subtitle,
 }: { userId?: string | null; branchId?: string | null; title?: string; subtitle?: string }) {
   const chart = useChartTheme()
+  const { role } = useAuth()
+  // The daily norms belong to one person. On a team or branch view there is
+  // nobody to measure, so that panel stays away.
+  const onePerson = Boolean(userId) || (!branchId && role === 'sales')
   const [view, setView] = useState<View>('daily')
   const [rows, setRows] = useState<Row[]>([])
   const [norm, setNorm] = useState<Norm | null>(null)
@@ -107,8 +112,9 @@ export default function PerformanceView({
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      if (!onePerson) return setNorm(null)
       let id = userId ?? null
-      if (!id && !branchId) {
+      if (!id) {
         const { data } = await supabase.auth.getUser()
         id = data.user?.id ?? null
       }
@@ -121,7 +127,7 @@ export default function PerformanceView({
     return () => {
       cancelled = true
     }
-  }, [userId, branchId])
+  }, [userId, branchId, onePerson])
 
   const buckets: Bucket[] = useMemo(() => {
     const map = new Map<string, Bucket>(

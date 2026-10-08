@@ -5,9 +5,9 @@ import { supabase } from '../../lib/supabase'
 import { searchLeads, type LeadLite } from '../reminders/reminderUtils'
 import { DateField } from '../DateField'
 import {
-  GST_TYPES, STATUSES, emptyItem, lineTotal, loadBrochures, loadCompany, loadQuotation,
+  GST_TYPES, STATUSES, emptyItem, lineTotal, loadBrochures, loadCompany, loadProducts, loadQuotation,
   money, nextQuoteNo, totalsOf,
-  type Brochure, type CompanyProfile, type GstType, type QuoteItem, type QuoteStatus,
+  type Brochure, type CompanyProfile, type GstType, type Product, type QuoteItem, type QuoteStatus,
 } from './Quoteutils'
 
 const input =
@@ -23,6 +23,8 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
 
   const [company, setCompany] = useState<CompanyProfile | null>(null)
   const [brochures, setBrochures] = useState<Brochure[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [pickFor, setPickFor] = useState<number | null>(null)   // which row has its product list open
 
   const [customer, setCustomer] = useState('')
   const [companyName, setCompanyName] = useState('')
@@ -49,10 +51,15 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
 
   const load = useCallback(async () => {
     try {
-      const [c, b] = await Promise.all([loadCompany(), loadBrochures()])
+      const [c, b, pr] = await Promise.all([loadCompany(), loadBrochures(), loadProducts()])
       setCompany(c)
       setBrochures(b)
-      if (!editing) setTerms(c?.default_terms ?? '')
+      setProducts(pr)
+      if (!editing) {
+        setTerms(c?.default_terms ?? '')
+        // Non GST band hoy to navu quotation GST sathe j shuru thay
+        if (!c?.allow_non_gst) setGstType('sgst_cgst')
+      }
 
       // Opened from a lead: its details fill the top of the form
       if (!editing && fromLead) {
@@ -101,6 +108,17 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
 
   useEffect(() => { load() }, [load])
 
+  // Clicking elsewhere closes the product list
+  useEffect(() => {
+    if (pickFor === null) return
+    const away = () => setPickFor(null)
+    const t = setTimeout(() => document.addEventListener('click', away), 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', away)
+    }
+  }, [pickFor])
+
   useEffect(() => {
     if (leadId) return
     const t = setTimeout(async () => setLeadHits(await searchLeads(leadQ)), 300)
@@ -109,8 +127,33 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
 
   const totals = useMemo(() => totalsOf(items, gstType, gstPercent), [items, gstType, gstPercent])
 
+  // Non GST fakt tyare, jyare settings ma chalu hoy — ke pachhi juno
+  // quotation pehlathi non GST hoy, jethi e kholi ane save kari shakay
+  const gstChoices = GST_TYPES.filter(
+    (t) => t.key !== 'non_gst' || company?.allow_non_gst || gstType === 'non_gst',
+  )
+
   function setItem(i: number, patch: Partial<QuoteItem>) {
     setItems((list) => list.map((it, n) => (n === i ? { ...it, ...patch } : it)))
+  }
+
+  // Saved products whose name carries these letters
+  function matches(text: string) {
+    const t = text.trim().toLowerCase()
+    const list = t ? products.filter((p) => p.name.toLowerCase().includes(t)) : products
+    return list.slice(0, 8)
+  }
+
+  // Picking a product fills the name, HSN, unit and rate
+  function pickProduct(i: number, p: Product) {
+    setItem(i, {
+      product_id: p.id,
+      name: p.name,
+      hsn_code: p.hsn_code,
+      unit: p.unit,
+      cost: Number(p.rate) || 0,
+    })
+    setPickFor(null)
   }
 
   function pickLead(l: LeadLite) {
@@ -172,6 +215,9 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
           quotation_id: quoteId,
           sort_order: n,
           name: it.name.trim(),
+          hsn_code: it.hsn_code?.trim() || null,
+          unit: it.unit?.trim() || null,
+          product_id: it.product_id,
           cost: Number(it.cost) || 0,
           qty: Number(it.qty) || 0,
           discount: Number(it.discount) || 0,
@@ -297,7 +343,7 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
           <div>
             <span className={label}>GST type</span>
             <div className="flex gap-4">
-              {GST_TYPES.map((t) => (
+              {gstChoices.map((t) => (
                 <label key={t.key} className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
                   <input
                     type="radio"
@@ -337,15 +383,53 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
           {items.map((it, i) => (
             <div key={i} className="rounded-lg border border-[#242424] bg-[#171717] p-4">
               <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
+                <div className="relative min-w-0 flex-1">
                   <label className={label} htmlFor={`it-name-${i}`}>Item</label>
                   <input
                     id={`it-name-${i}`}
                     value={it.name}
-                    onChange={(e) => setItem(i, { name: e.target.value })}
+                    onChange={(e) => {
+                      setItem(i, it.product_id
+                        ? { name: e.target.value, product_id: null, hsn_code: null, unit: null }
+                        : { name: e.target.value })
+                      setPickFor(i)
+                    }}
+                    onFocus={() => setPickFor(i)}
                     placeholder="Product or service"
+                    autoComplete="off"
                     className={input}
                   />
+                  {/* Saved products, offered while typing */}
+                  {pickFor === i && matches(it.name).length > 0 && (
+                    <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
+                      {matches(it.name).map((p) => (
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            onClick={() => pickProduct(i, p)}
+                            className="flex w-full items-start gap-3 px-3 py-2 text-left text-sm text-gray-300 hover:bg-[#232323] hover:text-white"
+                          >
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate">{p.name}</span>
+                              {p.hsn_code && <span className="text-xs text-gray-500">HSN {p.hsn_code}</span>}
+                            </span>
+                            <span className="shrink-0 text-xs tabular-nums text-orange-400">{money(Number(p.rate))}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {/* What the chosen product brings along — it prints, nobody types it here */}
+                  {(it.hsn_code || it.unit) && (
+                    <p className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                      {it.hsn_code && (
+                        <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 tabular-nums text-gray-400">HSN {it.hsn_code}</span>
+                      )}
+                      {it.unit && <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-gray-400">{it.unit}</span>}
+                      <span>from the product list</span>
+                    </p>
+                  )}
                 </div>
                 {items.length > 1 && (
                   <button

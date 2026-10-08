@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Download } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { SOURCES, fromInputDT, type Staff } from './leadUtils'
+import { SOURCES, type Staff } from './leadUtils'
 import { type Label } from './labels'
 
 type Props = {
@@ -59,6 +59,86 @@ const digits = (v: string) => {
   return d.length > 10 && d.startsWith('91') ? d.slice(-10) : d
 }
 
+const MONTHS: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+}
+
+/**
+ * Reads the date formats that actually turn up in exported files:
+ *   08 Oct 2026, 02:36 pm    ·  14  Oct 2026, 2:36 PM
+ *   08-10-2026 14:36         ·  8/10/2026
+ *   2026-10-08T14:36         ·  2026-10-08
+ * Day comes first when the file uses numbers, the way it is written here.
+ * Anything it cannot read comes back as null — it never throws.
+ */
+function parseWhen(raw: string): string | null {
+  const t = (raw ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return null
+
+  let hh = 0
+  let mm = 0
+  const time = t.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?/i)
+  if (time) {
+    hh = Number(time[1])
+    mm = Number(time[2])
+    const ap = time[3]?.toLowerCase()
+    if (ap === 'pm' && hh < 12) hh += 12
+    if (ap === 'am' && hh === 12) hh = 0
+  }
+
+  let y = 0
+  let mo = -1
+  let d = 0
+
+  const dayFirst = t.match(/(\d{1,2})[ .\-/]+([A-Za-z]{3,})[ .,\-/]+(\d{2,4})/)
+  const monthFirst = t.match(/([A-Za-z]{3,})[ .\-/]+(\d{1,2})[ .,\-/]+(\d{2,4})/)
+  const allNumbers = t.match(/(\d{1,4})[-/.](\d{1,2})[-/.](\d{1,4})/)
+
+  const monthOf = (w: string) => MONTHS[w.slice(0, 3).toLowerCase()]
+
+  if (dayFirst && monthOf(dayFirst[2]) !== undefined) {
+    d = Number(dayFirst[1])
+    mo = monthOf(dayFirst[2])
+    y = Number(dayFirst[3])
+  } else if (monthFirst && monthOf(monthFirst[1]) !== undefined) {
+    mo = monthOf(monthFirst[1])
+    d = Number(monthFirst[2])
+    y = Number(monthFirst[3])
+  } else if (allNumbers) {
+    const a = Number(allNumbers[1])
+    const b = Number(allNumbers[2])
+    const c = Number(allNumbers[3])
+    if (allNumbers[1].length === 4) { y = a; mo = b - 1; d = c }
+    else { d = a; mo = b - 1; y = c }
+  } else {
+    return null
+  }
+
+  if (y < 100) y += 2000
+  if (mo < 0 || mo > 11 || d < 1 || d > 31 || y < 1900 || y > 2200) return null
+
+  // What is written in the file is India time
+  const dt = new Date(Date.UTC(y, mo, d, hh, mm) - 330 * 60 * 1000)
+  return Number.isNaN(dt.getTime()) ? null : dt.toISOString()
+}
+
+/** Numbers already in the CRM. Returns null if it could not be checked. */
+async function phonesTaken(phones: string[]): Promise<Set<string> | null> {
+  const rpc = await supabase.rpc('lead_phones_exist', { p_phones: phones })
+  if (!rpc.error) {
+    return new Set(((rpc.data ?? []) as { phone_digits: string }[]).map((x) => x.phone_digits))
+  }
+  // No such function? Ask the table itself.
+  const found = new Set<string>()
+  for (let i = 0; i < phones.length; i += 200) {
+    const { data, error } = await supabase.from('leads').select('phone').in('phone', phones.slice(i, i + 200))
+    if (error) return null
+    for (const r of (data ?? []) as { phone: string | null }[]) found.add(digits(r.phone ?? ''))
+  }
+  return found
+}
+
 export default function ImportLeads({ staff, labels, myId, canAssign, onClose, onDone }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileName, setFileName] = useState('')
@@ -71,7 +151,7 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
   const [skipDup, setSkipDup] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<{ added: number; skipped: number; failed: number } | null>(null)
+  const [result, setResult] = useState<{ added: number; skipped: number; failed: number; noDate: number; why: string[] } | null>(null)
 
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager'))
 
@@ -105,50 +185,54 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
     if (!ready) return setError('Pick which column holds the name and the phone.')
 
     setBusy(true)
-    const cleaned = rows
-      .map((r) => ({
-        name: (r[map.name] ?? '').trim(),
-        phone: digits(r[map.phone] ?? ''),
-        email: map.email ? (r[map.email] ?? '').trim() : '',
-        company: map.company ? (r[map.company] ?? '').trim() : '',
-        city: map.city ? (r[map.city] ?? '').trim() : '',
-        requirement: map.requirement ? (r[map.requirement] ?? '').trim() : '',
-        amount: map.estimated_amount ? Number((r[map.estimated_amount] ?? '').replace(/[^0-9.]/g, '')) || 0 : 0,
-        follow: map.next_follow_up ? (r[map.next_follow_up] ?? '').trim() : '',
-      }))
-      .filter((r) => r.name && r.phone.length >= 10)
+    try {
+      let noDate = 0
+      const cleaned = rows
+        .map((r) => {
+          const rawWhen = map.next_follow_up ? (r[map.next_follow_up] ?? '').trim() : ''
+          const when = rawWhen ? parseWhen(rawWhen) : null
+          if (rawWhen && !when) noDate++
+          return {
+            name: (r[map.name] ?? '').trim(),
+            phone: digits(r[map.phone] ?? ''),
+            email: map.email ? (r[map.email] ?? '').trim() : '',
+            company: map.company ? (r[map.company] ?? '').trim() : '',
+            city: map.city ? (r[map.city] ?? '').trim() : '',
+            requirement: map.requirement ? (r[map.requirement] ?? '').trim() : '',
+            amount: map.estimated_amount ? Number((r[map.estimated_amount] ?? '').replace(/[^0-9.]/g, '')) || 0 : 0,
+            when,
+          }
+        })
+        .filter((r) => r.name && r.phone.length >= 10)
 
-    if (cleaned.length === 0) {
-      setBusy(false)
-      return setError('No usable rows. Every lead needs a name and a 10 digit phone number.')
-    }
-
-    // Drop numbers that are already in the CRM
-    let skipped = rows.length - cleaned.length
-    let list = cleaned
-    if (skipDup) {
-      const { data, error: dErr } = await supabase.rpc('lead_phones_exist', { p_phones: cleaned.map((r) => r.phone) })
-      if (dErr) {
+      if (cleaned.length === 0) {
         setBusy(false)
-        return setError(dErr.message)
+        return setError('No usable rows. Every lead needs a name and a 10 digit phone number.')
       }
-      const taken = new Set(((data ?? []) as { phone_digits: string }[]).map((x) => x.phone_digits))
-      const before = list.length
-      list = list.filter((r) => !taken.has(r.phone))
-      skipped += before - list.length
-    }
 
-    // Also drop repeats inside the file itself
-    const seen = new Set<string>()
-    const unique = list.filter((r) => (seen.has(r.phone) ? false : (seen.add(r.phone), true)))
-    skipped += list.length - unique.length
+      const why: string[] = []
+      let skipped = rows.length - cleaned.length
+      let list = cleaned
 
-    const assigned_to = assign === 'auto' ? null : assign === 'me' ? myId : assign
-    let added = 0
-    let failed = 0
+      // Drop numbers that are already in the CRM
+      if (skipDup) {
+        const taken = await phonesTaken(cleaned.map((r) => r.phone))
+        if (taken === null) {
+          why.push('Could not check for numbers already in the CRM, so nothing was skipped for that.')
+        } else {
+          const before = list.length
+          list = list.filter((r) => !taken.has(r.phone))
+          skipped += before - list.length
+        }
+      }
 
-    for (let i = 0; i < unique.length; i += 100) {
-      const batch = unique.slice(i, i + 100).map((r) => ({
+      // Also drop repeats inside the file itself
+      const seen = new Set<string>()
+      const unique = list.filter((r) => (seen.has(r.phone) ? false : (seen.add(r.phone), true)))
+      skipped += list.length - unique.length
+
+      const assigned_to = assign === 'auto' ? null : assign === 'me' ? myId : assign
+      const rowOf = (r: (typeof unique)[number]) => ({
         name: r.name,
         phone: r.phone,
         email: r.email || null,
@@ -157,18 +241,40 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
         requirement: r.requirement || null,
         source,
         estimated_amount: r.amount,
-        next_follow_up: r.follow ? fromInputDT(r.follow.replace(' ', 'T')) : null,
+        next_follow_up: r.when,
         label_id: labelId || null,
         assigned_to,
-      }))
-      const { error: iErr, count } = await supabase.from('leads').insert(batch, { count: 'exact' })
-      if (iErr) failed += batch.length
-      else added += count ?? batch.length
-    }
+      })
 
-    setBusy(false)
-    setResult({ added, skipped, failed })
-    if (added > 0) onDone()
+      let added = 0
+      let failed = 0
+
+      for (let i = 0; i < unique.length; i += 100) {
+        const slice = unique.slice(i, i + 100)
+        const { data, error: iErr } = await supabase.from('leads').insert(slice.map(rowOf)).select('id')
+        if (!iErr) {
+          added += data?.length ?? slice.length
+          continue
+        }
+        // One bad row should not cost the whole batch — try them one by one
+        for (const r of slice) {
+          const { error: oneErr } = await supabase.from('leads').insert(rowOf(r))
+          if (oneErr) {
+            failed++
+            if (why.length < 5) why.push(`${r.name} (${r.phone}) — ${oneErr.message}`)
+          } else {
+            added++
+          }
+        }
+      }
+
+      setResult({ added, skipped, failed, noDate, why })
+      if (added > 0) onDone()
+    } catch (e) {
+      setError((e as Error).message || 'Something went wrong while importing.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   function downloadTemplate() {
@@ -212,6 +318,19 @@ export default function ImportLeads({ staff, labels, myId, canAssign, onClose, o
                 {result.skipped} skipped (already in the CRM, repeated, or missing a name or phone)
                 {result.failed > 0 && <span className="text-red-400"> · {result.failed} failed</span>}
               </p>
+              {result.noDate > 0 && (
+                <p className="mt-2 text-xs text-gray-500">
+                  {result.noDate} follow-up date{result.noDate > 1 ? 's' : ''} could not be read, so those leads came in
+                  without one. Everything else is there.
+                </p>
+              )}
+              {result.why.length > 0 && (
+                <ul className="mx-auto mt-3 max-w-md space-y-1 text-left text-xs text-red-300">
+                  {result.why.map((w, i) => (
+                    <li key={i} className="truncate" title={w}>· {w}</li>
+                  ))}
+                </ul>
+              )}
               <button onClick={onClose} className="mt-5 rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400">
                 Done
               </button>

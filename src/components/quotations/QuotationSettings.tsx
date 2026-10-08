@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Save, Trash2, Upload } from 'lucide-react'
+import { Loader2, Package, Plus, Save, Trash2, Upload } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
-import { loadBrochures, loadCompany, type Brochure, type CompanyProfile } from './Quoteutils'
+import { loadBrochures, loadCompany, loadProducts, type Brochure, type CompanyProfile, type Product } from './Quoteutils'
 
 const input =
   'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none'
@@ -14,6 +14,8 @@ export default function QuotationSettings() {
 
   const [c, setC] = useState<CompanyProfile | null>(null)
   const [brochures, setBrochures] = useState<Brochure[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [newProd, setNewProd] = useState({ name: '', hsn_code: '', unit: '', rate: '' })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -23,9 +25,10 @@ export default function QuotationSettings() {
   const brochureRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
-    const [p, b] = await Promise.all([loadCompany(), loadBrochures()])
+    const [p, b, pr] = await Promise.all([loadCompany(), loadBrochures(), loadProducts(false)])
     setC(p)
     setBrochures(b)
+    setProducts(pr)
     setLoading(false)
   }, [])
 
@@ -94,6 +97,47 @@ export default function QuotationSettings() {
     await supabase.storage.from('brochures').remove([b.file_path])
     const { error } = await supabase.from('quotation_brochures').delete().eq('id', b.id)
     if (error) return setMsg({ ok: false, text: error.message })
+    load()
+  }
+
+  // ---------- Products ----------
+  async function addProduct() {
+    const name = newProd.name.trim()
+    if (!name) return setMsg({ ok: false, text: 'Write the product name first.' })
+    setBusy(true)
+    const { error } = await supabase.from('products').insert({
+      name,
+      hsn_code: newProd.hsn_code.trim() || null,
+      unit: newProd.unit.trim() || null,
+      rate: Number(newProd.rate) || 0,
+      sort_order: products.length,
+    })
+    setBusy(false)
+    if (error) {
+      return setMsg({
+        ok: false,
+        text: error.code === '23505' ? 'A product with this name already exists.' : error.message,
+      })
+    }
+    setNewProd({ name: '', hsn_code: '', unit: '', rate: '' })
+    setMsg({ ok: true, text: 'Product added.' })
+    load()
+  }
+
+  async function saveProduct(p: Product, patch: Partial<Product>) {
+    setProducts((list) => list.map((x) => (x.id === p.id ? { ...x, ...patch } : x)))
+    const { error } = await supabase.from('products').update(patch).eq('id', p.id)
+    if (error) {
+      setMsg({ ok: false, text: error.message })
+      load()
+    }
+  }
+
+  async function removeProduct(p: Product) {
+    if (!window.confirm(`Remove "${p.name}"? Quotations already saved stay as they are.`)) return
+    const { error } = await supabase.from('products').delete().eq('id', p.id)
+    if (error) return setMsg({ ok: false, text: error.message })
+    setMsg({ ok: true, text: 'Product removed.' })
     load()
   }
 
@@ -235,12 +279,142 @@ export default function QuotationSettings() {
               className={`${input} tabular-nums`}
             />
           </div>
+          <div className="sm:col-span-2 flex flex-wrap items-center gap-6 rounded-lg border border-[#242424] bg-[#171717] px-4 py-3">
+            <Toggle on={c.allow_non_gst} onChange={(v) => set({ allow_non_gst: v })} label="Allow Non GST quotations" />
+            <p className="text-xs text-gray-500">
+              Off, and everyone has to pick IGST or SGST / CGST. Quotations already saved stay as they are.
+            </p>
+          </div>
           <div className="sm:col-span-2">
             <label className={label} htmlFor="c-terms">Default terms and conditions</label>
             <textarea id="c-terms" rows={5} value={c.default_terms ?? ''} onChange={(e) => set({ default_terms: e.target.value })} className={`${input} resize-y`} />
             <p className="mt-1 text-xs text-gray-500">Every new quotation starts with these; they can be changed one by one.</p>
           </div>
         </div>
+      </section>
+
+      {/* Products */}
+      <section className="rounded-xl border border-[#242424] bg-[#151515] p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-sm font-medium text-gray-300">
+            <Package size={15} /> Products
+          </h2>
+          <Toggle
+            on={c.show_hsn}
+            onChange={(v) => set({ show_hsn: v })}
+            label="Show HSN column on the PDF"
+          />
+        </div>
+
+        {/* New product */}
+        <div className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr_1fr_auto]">
+          <input
+            value={newProd.name}
+            onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && addProduct()}
+            placeholder="Product name"
+            aria-label="Product name"
+            className={input}
+          />
+          <input
+            value={newProd.hsn_code}
+            onChange={(e) => setNewProd({ ...newProd, hsn_code: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && addProduct()}
+            placeholder="HSN / SAC"
+            aria-label="HSN code"
+            inputMode="numeric"
+            className={`${input} tabular-nums`}
+          />
+          <input
+            value={newProd.unit}
+            onChange={(e) => setNewProd({ ...newProd, unit: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && addProduct()}
+            placeholder="Unit"
+            aria-label="Unit"
+            className={input}
+          />
+          <input
+            value={newProd.rate}
+            onChange={(e) => setNewProd({ ...newProd, rate: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && addProduct()}
+            placeholder="Rate"
+            aria-label="Rate"
+            type="number"
+            min={0}
+            step="0.01"
+            onWheel={(e) => e.currentTarget.blur()}
+            className={`${input} tabular-nums`}
+          />
+          <button
+            onClick={addProduct}
+            disabled={busy || !newProd.name.trim()}
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-40"
+          >
+            <Plus size={16} /> Add
+          </button>
+        </div>
+
+        {/* What is already there */}
+        {products.length === 0 ? (
+          <p className="py-6 text-center text-sm text-gray-500">
+            No products yet. Add one above and it will come up while typing an item on a quotation.
+          </p>
+        ) : (
+          <ul className="mt-4 space-y-2">
+            {products.map((p) => (
+              <li
+                key={p.id}
+                className={`grid gap-3 rounded-lg border border-[#242424] bg-[#171717] p-3 sm:grid-cols-[2fr_1fr_1fr_1fr_auto] ${
+                  p.is_active ? '' : 'opacity-50'
+                }`}
+              >
+                <input
+                  value={p.name}
+                  onChange={(e) => saveProduct(p, { name: e.target.value })}
+                  aria-label="Product name"
+                  className={input}
+                />
+                <input
+                  value={p.hsn_code ?? ''}
+                  onChange={(e) => saveProduct(p, { hsn_code: e.target.value })}
+                  placeholder="HSN"
+                  aria-label="HSN code"
+                  className={`${input} tabular-nums`}
+                />
+                <input
+                  value={p.unit ?? ''}
+                  onChange={(e) => saveProduct(p, { unit: e.target.value })}
+                  placeholder="Unit"
+                  aria-label="Unit"
+                  className={input}
+                />
+                <input
+                  value={p.rate}
+                  onChange={(e) => saveProduct(p, { rate: Number(e.target.value) || 0 })}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  onWheel={(e) => e.currentTarget.blur()}
+                  aria-label="Rate"
+                  className={`${input} tabular-nums`}
+                />
+                <div className="flex items-center gap-1">
+                  <Toggle on={p.is_active} onChange={(v) => saveProduct(p, { is_active: v })} label="" />
+                  <button
+                    onClick={() => removeProduct(p)}
+                    aria-label={`Remove ${p.name}`}
+                    className="rounded-md p-1.5 text-gray-400 hover:bg-[#222] hover:text-red-400"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-xs text-gray-500">
+          Changes here save as you type. Switch one off to keep it out of the list — quotations already saved stay as they are.
+        </p>
       </section>
 
       {/* Brochures */}

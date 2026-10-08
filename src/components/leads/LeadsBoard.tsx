@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, CalendarPlus, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save } from 'lucide-react'
+import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
@@ -619,7 +619,7 @@ export default function LeadsBoard() {
                 className={`${iconBtn} relative`}
                 title={fuCounts[l.id] ? `${fuCounts[l.id]} follow-ups so far` : 'Add follow-up'}
               >
-                <CalendarPlus size={14} />
+                <Send size={14} className="-rotate-12" />
                 {fuCounts[l.id] > 0 && (
                   <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-semibold leading-none text-white">
                     {fuCounts[l.id] > 99 ? '99+' : fuCounts[l.id]}
@@ -1042,7 +1042,17 @@ export default function LeadsBoard() {
 
       {/* Lead detail */}
       {openId && (
-        <LeadDrawer leadId={openId} stages={stages} staff={staff} labels={labels} can={can} myId={myId} onClose={closeDrawer} onChanged={load} />
+        <LeadDrawer
+          leadId={openId}
+          stages={stages}
+          staff={staff}
+          labels={labels}
+          can={can}
+          myId={myId}
+          onClose={closeDrawer}
+          onChanged={load}
+          onOpenLead={(id) => setOpenId(id)}
+        />
       )}
 
       {/* Cancel reason */}

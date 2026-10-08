@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, StickyNote, FileText, Plus, Briefcase as BriefcaseIcon, type LucideIcon,
+  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, StickyNote, FileText, Plus, DatabaseBackup, Briefcase as BriefcaseIcon, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
@@ -45,6 +45,7 @@ const GROUPS: NavGroup[] = [
     icon: CalendarClock,
     items: [
       { label: 'Tasks', path: '/admin/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
+      { label: 'Task Settings', path: '/admin/tasks/settings', icon: Settings, ready: true, perm: 'task_settings' },
       { label: 'Reminders', path: '/admin/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
       { label: 'Notes', path: '/admin/notes', icon: StickyNote, ready: true, perm: 'mod_notes' },
     ],
@@ -71,6 +72,7 @@ const GROUPS: NavGroup[] = [
       { label: 'Branches', path: '/admin/branches', icon: Building2, ready: false },
       { label: 'Announcements', path: '/admin/announcements', icon: Megaphone, ready: false },
       { label: 'General Settings', path: '/admin/settings', icon: Settings, ready: true },
+      { label: 'Backup', path: '/admin/backup', icon: DatabaseBackup, ready: true },
     ],
   },
 ]

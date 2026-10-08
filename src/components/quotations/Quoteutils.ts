@@ -21,12 +21,17 @@ export type CompanyProfile = {
   default_terms: string | null
   quote_prefix: string
   next_number: number
+  show_hsn: boolean
+  allow_non_gst: boolean
 }
 
 export type QuoteItem = {
   id?: string
   sort_order: number
   name: string
+  hsn_code: string | null
+  unit: string | null
+  product_id: string | null
   cost: number
   qty: number
   discount: number
@@ -65,6 +70,18 @@ export type Quotation = {
 }
 
 export type Brochure = { id: string; name: string; file_path: string; is_active: boolean }
+
+// Ek vaar lakhelu product, pachhi dar vakhate pick kari lo
+export type Product = {
+  id: string
+  name: string
+  hsn_code: string | null
+  unit: string | null
+  rate: number
+  description: string | null
+  is_active: boolean
+  sort_order: number
+}
 
 export const GST_TYPES: { key: GstType; label: string }[] = [
   { key: 'non_gst', label: 'Non GST' },
@@ -126,6 +143,13 @@ export async function loadBrochures(): Promise<Brochure[]> {
   return (data ?? []) as Brochure[]
 }
 
+export async function loadProducts(onlyActive = true): Promise<Product[]> {
+  let q = supabase.from('products').select('*').order('sort_order').order('name')
+  if (onlyActive) q = q.eq('is_active', true)
+  const { data } = await q
+  return (data ?? []) as Product[]
+}
+
 export async function loadQuotations(): Promise<Quotation[]> {
   const out: Quotation[] = []
   for (let start = 0; ; start += 1000) {
@@ -166,6 +190,9 @@ export async function nextQuoteNo(): Promise<{ quote_no: string; seq: number }> 
 export const emptyItem = (sort_order: number): QuoteItem => ({
   sort_order,
   name: '',
+  hsn_code: null,
+  unit: null,
+  product_id: null,
   cost: 0,
   qty: 1,
   discount: 0,

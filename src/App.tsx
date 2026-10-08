@@ -42,6 +42,8 @@ import AdminQuotations from './pages/admin/Quotations'
 import AdminQuotationEdit from './pages/admin/QuotationEdit'
 import AdminQuotationView from './pages/admin/QuotationView'
 import AdminQuotationSettings from './pages/admin/QuotationSettingsPage'
+import AdminTaskSettings from './pages/admin/TaskSettingsPage'
+import AdminBackup from './pages/admin/Backup'
 import ManagerQuotations from './pages/manager/Quotations'
 import ManagerQuotationEdit from './pages/manager/QuotationEdit'
 import ManagerQuotationView from './pages/manager/QuotationView'
@@ -81,8 +83,10 @@ function AppRoutes() {
           <Route path="/admin/employee/:id" element={<AdminEmployeeReport />} />
           <Route path="/admin/lead-assignment" element={<AdminLeadAssignment />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
+          <Route path="/admin/backup" element={<AdminBackup />} />
           <Route path="/admin/reminders" element={<AdminReminders />} />
           <Route path="/admin/tasks" element={<AdminTasks />} />
+          <Route path="/admin/tasks/settings" element={<AdminTaskSettings />} />
           <Route path="/admin/notes" element={<AdminNotes />} />
           <Route path="/admin/quotations" element={<AdminQuotations />} />
           <Route path="/admin/quotations/settings" element={<AdminQuotationSettings />} />

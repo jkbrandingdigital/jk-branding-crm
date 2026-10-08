@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { ArrowLeft, ChevronLeft, ChevronRight, Check, X, Eye, Download, Printer, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useChartTheme } from '../lib/chartTheme'
+import PerformanceView from './PerformanceView'
 import { istDate, addDays, addMonths, prettyDate, inr, inrCompact } from '../lib/format'
 import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../lib/targets'
 
@@ -430,6 +431,15 @@ export default function EmployeeReport({ userId, backTo }: { userId: string; bac
             </table>
           </div>
         </section>
+
+        {/* This person's own performance — daily, weekly, monthly, yearly */}
+        <div className="mt-8 border-t border-[#242424] pt-6">
+          <PerformanceView
+            userId={userId}
+            title="Performance"
+            subtitle={person ? `${person.name} · ${person.branch}` : undefined}
+          />
+        </div>
 
         {/* Year */}
         <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">

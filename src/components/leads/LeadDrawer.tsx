@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   X, Phone, MessageCircle, Star, Trash2, Send, AlertCircle, CheckCircle2, Clock,
-  RefreshCw, Tag, UserCog, TrendingUp, Pencil, CalendarPlus,
-  MoreVertical, ListTodo, CalendarClock, FileText, AlarmClock, StickyNote, Loader2,
+  RefreshCw, Tag, UserCog, TrendingUp, Pencil,
+  MoreVertical, ListTodo, CalendarClock, FileText, AlarmClock, StickyNote, Loader2, Users, ChevronDown,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
@@ -36,8 +36,11 @@ const ACT_LABEL: Record<string, string> = {
 
 type TabKey = 'details' | 'followup' | 'history'
 
+// Another enquiry from the same person — same number, different work
+type Sibling = { id: string; lead_no: number; name: string; stage_id: string | null; assigned_to: string | null; created_at: string; requirement: string | null }
+
 export default function LeadDrawer({
-  leadId, stages, staff, labels, can, myId, onClose, onChanged,
+  leadId, stages, staff, labels, can, myId, onClose, onChanged, onOpenLead,
 }: {
   leadId: string
   stages: Stage[]
@@ -47,6 +50,7 @@ export default function LeadDrawer({
   myId: string | null
   onClose: () => void
   onChanged: () => void
+  onOpenLead?: (id: string) => void
 }) {
   const navigate = useNavigate()
   const { role } = useAuth()
@@ -55,6 +59,8 @@ export default function LeadDrawer({
   const [tab, setTab] = useState<TabKey>('details')
   const [editMode, setEditMode] = useState(false)
   const [menu, setMenu] = useState<'stage' | 'assign' | 'label' | 'more' | null>(null)
+  const [siblings, setSiblings] = useState<Sibling[]>([])
+  const [sibOpen, setSibOpen] = useState(false)
 
   // What the 3-dot menu opens
   const [make, setMake] = useState<'task' | 'reminder' | 'note' | null>(null)
@@ -116,6 +122,22 @@ export default function LeadDrawer({
   }, [leadId])
 
   useEffect(() => { load() }, [load])
+
+  // The same number can sit on more than one lead — one customer, two jobs
+  useEffect(() => {
+    if (!lead?.phone) return setSiblings([])
+    let alive = true
+    supabase
+      .from('leads')
+      .select('id, lead_no, name, stage_id, assigned_to, created_at, requirement')
+      .eq('phone', lead.phone)
+      .neq('id', lead.id)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(10)
+      .then(({ data }) => alive && setSiblings((data ?? []) as Sibling[]))
+    return () => { alive = false }
+  }, [lead?.phone, lead?.id])
 
   useEffect(() => {
     supabase
@@ -254,6 +276,54 @@ export default function LeadDrawer({
           </button>
         </div>
 
+        {/* Same number, different enquiry */}
+        {siblings.length > 0 && (
+          <div className="border-b border-[#222] bg-[#1a1612] px-5 py-2.5">
+            <button
+              onClick={() => setSibOpen((o) => !o)}
+              aria-expanded={sibOpen}
+              className="flex w-full items-center gap-2 text-left text-xs text-amber-300/90 hover:text-amber-200"
+            >
+              <Users size={14} className="shrink-0" />
+              <span className="flex-1">
+                Same number on {siblings.length} other lead{siblings.length > 1 ? 's' : ''} — same customer, different work
+              </span>
+              <ChevronDown size={14} className={`shrink-0 transition-transform ${sibOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {sibOpen && (
+              <ul className="mt-2 space-y-1.5">
+                {siblings.map((sb) => {
+                  const st = stages.find((x) => x.id === sb.stage_id)
+                  return (
+                    <li key={sb.id}>
+                      <button
+                        onClick={() => onOpenLead?.(sb.id)}
+                        disabled={!onOpenLead}
+                        className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-[#2a2620] bg-[#151210] px-3 py-2 text-left text-xs transition-colors enabled:hover:border-amber-700/60 disabled:cursor-default"
+                      >
+                        <span className="text-gray-500">#{sb.lead_no}</span>
+                        <span className="font-medium text-gray-200">{sb.name}</span>
+                        {st && (
+                          <span className="rounded-full px-1.5 py-0.5 text-[10px] text-white" style={{ background: st.color }}>
+                            {st.name}
+                          </span>
+                        )}
+                        {sb.requirement && (
+                          <span className="min-w-0 flex-1 truncate text-gray-500">{sb.requirement}</span>
+                        )}
+                        <span className="ml-auto shrink-0 text-gray-500">
+                          {nameOf(sb.assigned_to)} · {fmtDT(sb.created_at)}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
         {/* Action row */}
         <div className="relative flex flex-wrap items-center gap-1 border-b border-[#222] px-4 py-2">
           {lead?.phone && (
@@ -273,7 +343,7 @@ export default function LeadDrawer({
           )}
           {editable && (
             <button onClick={() => { setActText(''); setActFollow(''); setFuOpen(true) }} className={iconBtn} title="Add follow-up">
-              <CalendarPlus size={17} />
+              <Send size={17} className="-rotate-12" />
             </button>
           )}
           {editable && (
@@ -501,7 +571,7 @@ export default function LeadDrawer({
                   onClick={() => { setActText(''); setActFollow(''); setFuOpen(true) }}
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#2f2f2f] py-3 text-sm text-gray-400 hover:border-orange-500/50 hover:text-white"
                 >
-                  <CalendarPlus size={16} /> Add follow-up
+                  <Send size={16} className="-rotate-12" /> Add follow-up
                 </button>
 
                 {followUps.length === 0 ? (
