@@ -8,6 +8,7 @@ import { inr, inrCompact } from '../../lib/format'
 import LeadDrawer from './LeadDrawer'
 import { DateField, DateTimeField } from '../DateField'
 import ImportLeads from './ImportLeads'
+import LeadSearchCard from './LeadSearchCard'
 import { LABEL_CLS, type Label } from './labels'
 import { SOURCES, sourceOf, loadSources, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadStaff, type Lead, type Source, type Stage, type Staff } from './leadUtils'
 
@@ -530,6 +531,16 @@ export default function LeadsBoard() {
     })
     setRows((r) => r.filter((l) => l.id !== id))
   }
+
+  // Searching for one customer? Show what 365 shows — every field and
+  // what is attached — instead of making them open the lead.
+  const found = useMemo(() => {
+    if (!q.trim()) return []
+    const seen = new Map<string, LeadL>()
+    for (const c of Object.values(cols)) for (const l of c.rows) seen.set(l.id, l)
+    for (const l of rows) seen.set(l.id, l)
+    return [...seen.values()].slice(0, 3)
+  }, [q, cols, rows])
 
   const owners = useMemo(() => [...staff].sort((a, b) => a.full_name.localeCompare(b.full_name)), [staff])
   const shown = summary.shown
@@ -1260,6 +1271,22 @@ export default function LeadsBoard() {
 
       {exporting && (
         <p className="mt-3 text-xs text-gray-400">{exporting}</p>
+      )}
+
+      {/* What the search turned up, 365 style */}
+      {q.trim() && shown > 0 && shown <= 3 && found.length > 0 && (
+        <div className="mt-4 space-y-4">
+          {found.map((l) => (
+            <LeadSearchCard
+              key={l.id}
+              lead={l}
+              stages={stages}
+              labels={labels}
+              staff={staff}
+              onOpen={(id) => setOpenId(id)}
+            />
+          ))}
+        </div>
       )}
 
       {/* Found somewhere else in the company */}

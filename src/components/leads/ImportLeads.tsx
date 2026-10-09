@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Download } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { SOURCES, type Stage, type Staff } from './leadUtils'
+import { SOURCES, type Stage, type Staff, loadSources } from './leadUtils'
 import { LABEL_CLS, type Label } from './labels'
 
 type Props = {
@@ -45,6 +45,10 @@ const same = (a: string, b: string) => tidy(a).toLowerCase() === tidy(b).toLower
  *   requirement_type?::customize_diary_design_&_printing
  * This reads them out.
  */
+// "Walk In" becomes "walk_in" — that key is what sits in leads.source
+const toSourceKey = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)
+
 // "A, B , C" in one cell is three labels, not one long name
 const splitLabels = (v: string) =>
   (v ?? '')
@@ -211,6 +215,7 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
     return `${ist.getFullYear()}-${pad(ist.getMonth() + 1)}-${pad(ist.getDate())}`
   })
   const [makeLabels, setMakeLabels] = useState(true)
+  const [makeSources, setMakeSources] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ added: number; skipped: number; failed: number; noDate: number; noName: number; dupCrm: number; dupFile: number; worst: string; notes: string[]; why: string[] } | null>(null)
@@ -293,6 +298,35 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
           } else {
             allLabels = [...allLabels, ...((data ?? []) as Label[])]
             notes.push(`Added ${missing.length} new label${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`)
+          }
+        }
+      }
+
+      // Sources the file uses that the CRM has never heard of
+      if (makeSources && map.lead_source) {
+        const wantedSrc = new Set<string>()
+        for (const r of rows) {
+          const v = tidy(r[map.lead_source] ?? '')
+          if (v) wantedSrc.add(v)
+        }
+        const missingSrc = [...wantedSrc].filter(
+          (n) => !SOURCES.some((x) => same(x.key, n) || same(x.label, n)) && toSourceKey(n) !== '',
+        )
+        if (missingSrc.length > 0) {
+          const srcColours = ['orange', 'blue', 'green', 'purple', 'pink', 'yellow']
+          const { error: sErr } = await supabase.from('lead_sources').insert(
+            missingSrc.map((name, i) => ({
+              key: toSourceKey(name),
+              name,
+              color: srcColours[i % srcColours.length],
+              sort_order: 200 + i,
+            })),
+          )
+          if (sErr) {
+            notes.push(`Could not add ${missingSrc.length} new source${missingSrc.length > 1 ? 's' : ''} — ${sErr.message}`)
+          } else {
+            await loadSources(true)
+            notes.push(`Added ${missingSrc.length} new source${missingSrc.length > 1 ? 's' : ''}: ${missingSrc.join(', ')}`)
           }
         }
       }
@@ -654,6 +688,12 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
                     <input type="checkbox" checked={makeLabels} onChange={(e) => setMakeLabels(e.target.checked)} className="h-4 w-4 accent-orange-500" />
                     Add labels from the file that the CRM does not have yet
                   </label>
+                  {map.lead_source && (
+                    <label className="mt-2 flex items-center gap-2 text-sm text-gray-300">
+                      <input type="checkbox" checked={makeSources} onChange={(e) => setMakeSources(e.target.checked)} className="h-4 w-4 accent-orange-500" />
+                      Add sources from the file that the CRM does not have yet
+                    </label>
+                  )}
 
                   {map.stage && stages.some((x) => (x as { requires_follow_up?: boolean }).requires_follow_up) && (
                     <label className="mt-3 block">
