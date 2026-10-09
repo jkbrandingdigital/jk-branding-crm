@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save } from 'lucide-react'
+import { Check, Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
@@ -9,9 +9,9 @@ import LeadDrawer from './LeadDrawer'
 import { DateField, DateTimeField } from '../DateField'
 import ImportLeads from './ImportLeads'
 import { LABEL_CLS, type Label } from './labels'
-import { SOURCES, sourceOf, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadStaff, type Lead, type Stage, type Staff } from './leadUtils'
+import { SOURCES, sourceOf, loadSources, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadStaff, type Lead, type Source, type Stage, type Staff } from './leadUtils'
 
-type LeadL = Lead & { label_id?: string | null }
+type LeadL = Lead & { label_id?: string | null; label_ids?: string[] | null }
 
 type LookupRow = {
   lead_no: number
@@ -139,8 +139,9 @@ function applyLeadFilters(query: LeadQuery, f: Filters, text: string, openStageI
   if (f.owner === 'none') qy = qy.is('assigned_to', null)
   else if (f.owner !== 'all') qy = qy.eq('assigned_to', f.owner)
   if (f.creator !== 'all') qy = qy.eq('created_by', f.creator)
+  // A lead carries several labels now, so "has this one" is a contains
   if (f.label === 'none') qy = qy.is('label_id', null)
-  else if (f.label !== 'all') qy = qy.eq('label_id', f.label)
+  else if (f.label !== 'all') qy = qy.contains('label_ids', [f.label])
 
   if (f.madeFrom) qy = qy.gte('created_at', f.madeFrom)
   if (f.madeTo) qy = qy.lt('created_at', nextDay(f.madeTo))
@@ -228,6 +229,7 @@ export default function LeadsBoard() {
   const [stages, setStages] = useState<Stage[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [labels, setLabels] = useState<Label[]>([])
+  const [sources, setSources] = useState<Source[]>(SOURCES)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -317,13 +319,14 @@ export default function LeadsBoard() {
   const loadMeta = useCallback(async () => {
     setLoading(true)
     try {
-      const [{ data: u }, st, sf, lb, cr, tot] = await Promise.all([
+      const [{ data: u }, st, sf, lb, cr, tot, src] = await Promise.all([
         supabase.auth.getUser(),
         supabase.from('lead_stages').select('*').eq('is_active', true).order('sort_order'),
         loadStaff(),
         supabase.from('lead_labels').select('*').eq('is_active', true).order('sort_order'),
         supabase.from('lead_cancel_reasons').select('id, name').eq('is_active', true).order('sort_order'),
         supabase.from('leads').select('id', { count: 'exact', head: true }).is('deleted_at', null),
+        loadSources(true),
       ])
       setMyId(u.user?.id ?? null)
       setStages((st.data ?? []) as Stage[])
@@ -331,6 +334,7 @@ export default function LeadsBoard() {
       setLabels((lb.data ?? []) as Label[])
       setReasons((cr.data ?? []) as { id: string; name: string }[])
       setTotalAll(tot.count ?? 0)
+      setSources([...src])
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -573,10 +577,13 @@ export default function LeadsBoard() {
   }
 
   // ---------- Quick actions ----------
-  async function setLabel(leadId: string, labelId: string | null) {
-    setMenu(null)
-    patchLead(leadId, { label_id: labelId })
-    const { error: e } = await supabase.from('leads').update({ label_id: labelId }).eq('id', leadId)
+  // Ticks one label on or off. The menu stays open so several can be set.
+  async function toggleLabel(l: LeadL, labelId: string | null) {
+    const now = l.label_ids ?? []
+    const next =
+      labelId === null ? [] : now.includes(labelId) ? now.filter((x) => x !== labelId) : [...now, labelId]
+    patchLead(l.id, { label_ids: next, label_id: next[0] ?? null })
+    const { error: e } = await supabase.from('leads').update({ label_ids: next }).eq('id', l.id)
     if (e) { setError(e.message); refresh() }
   }
 
@@ -722,7 +729,7 @@ export default function LeadsBoard() {
     }
 
     const stageName = (id: string | null) => stageOf(id)?.name ?? ''
-    const labelName = (id: string | null | undefined) => labelOf(id)?.name ?? ''
+    const labelName = (ids: string[] | null | undefined) => labelsOn(ids).map((x) => x.name).join(', ')
     const dt = (iso: string | null) =>
       iso ? new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }) : ''
 
@@ -733,7 +740,7 @@ export default function LeadsBoard() {
     ]
     const body = all.map((l) => [
       l.lead_no, l.name, l.phone ?? '', l.alt_phone ?? '', l.email ?? '', l.company ?? '', l.city ?? '',
-      (l.requirement ?? '').replace(/\s+/g, ' '), sourceOf(l.source).label, labelName(l.label_id),
+      (l.requirement ?? '').replace(/\s+/g, ' '), sourceOf(l.source).label, labelName(l.label_ids),
       stageName(l.stage_id), nameOf(l.assigned_to), nameOf(l.created_by),
       dt(l.created_at), dt(l.next_follow_up), l.rating, Number(l.estimated_amount) || 0,
     ])
@@ -799,11 +806,33 @@ export default function LeadsBoard() {
     'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none'
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager' || s.role === 'hr'))
 
-  const LabelChip = ({ id }: { id: string | null | undefined }) => {
-    const lb = labelOf(id)
-    if (!lb) return null
+  const labelsOn = (ids: string[] | null | undefined) =>
+    (ids ?? []).map((id) => labelOf(id)).filter(Boolean) as Label[]
+
+  // A lead can wear several labels. Three fit on a card; the rest become "+2".
+  const LabelChips = ({ ids, max = 3 }: { ids: string[] | null | undefined; max?: number }) => {
+    const list = labelsOn(ids)
+    if (list.length === 0) return null
     return (
-      <span className={`rounded-full border px-2 py-0.5 text-[10px] ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`}>{lb.name}</span>
+      <>
+        {list.slice(0, max).map((lb) => (
+          <span
+            key={lb.id}
+            title={lb.name}
+            className={`max-w-[140px] truncate rounded-full border px-2 py-0.5 text-[10px] ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`}
+          >
+            {lb.name}
+          </span>
+        ))}
+        {list.length > max && (
+          <span
+            title={list.slice(max).map((x) => x.name).join(', ')}
+            className="rounded-full bg-[#1f1f1f] px-2 py-0.5 text-[10px] text-gray-400"
+          >
+            +{list.length - max}
+          </span>
+        )}
+      </>
     )
   }
 
@@ -843,7 +872,7 @@ export default function LeadsBoard() {
         {(prefs.source || prefs.label || overdue) && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {prefs.source && <span className={`rounded-full px-2 py-0.5 text-[10px] ${sourceOf(l.source).cls}`}>{sourceOf(l.source).label}</span>}
-            {prefs.label && <LabelChip id={l.label_id} />}
+            {prefs.label && <LabelChips ids={l.label_ids} />}
             {overdue && <span className="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-semibold text-white">OVERDUE</span>}
           </div>
         )}
@@ -942,15 +971,23 @@ export default function LeadsBoard() {
                   })
                 ) : menu.kind === 'label' ? (
                   <>
-                    <button onClick={() => setLabel(l.id, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
-                      No label
+                    <button onClick={() => toggleLabel(l, null)} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                      Clear all labels
                     </button>
-                    {labels.map((lb) => (
-                      <button key={lb.id} onClick={() => setLabel(l.id, lb.id)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
-                        <span className={`h-2 w-2 rounded-full border ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`} />
-                        {lb.name}
-                      </button>
-                    ))}
+                    {labels.map((lb) => {
+                      const on = (l.label_ids ?? []).includes(lb.id)
+                      return (
+                        <button
+                          key={lb.id}
+                          onClick={() => toggleLabel(l, lb.id)}
+                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[#222] hover:text-white ${on ? 'text-white' : 'text-gray-300'}`}
+                        >
+                          <span className={`h-2 w-2 shrink-0 rounded-full border ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`} />
+                          <span className="min-w-0 flex-1 truncate">{lb.name}</span>
+                          {on && <Check size={13} className="shrink-0 text-orange-400" />}
+                        </button>
+                      )
+                    })}
                   </>
                 ) : (
                   <>
@@ -1101,7 +1138,7 @@ export default function LeadsBoard() {
                   <Field label="Lead platform">
                     <select value={f.source} onChange={(e) => set({ source: e.target.value })} className={panelSelect}>
                       <option value="all">All platform</option>
-                      {SOURCES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                      {sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
                   </Field>
 
@@ -1346,7 +1383,7 @@ export default function LeadsBoard() {
                       <td className="py-2.5 pr-4">
                         <span className={`rounded-full px-2 py-0.5 text-[11px] ${sourceOf(l.source).cls}`}>{sourceOf(l.source).label}</span>
                       </td>
-                      <td className="py-2.5 pr-4"><LabelChip id={l.label_id} /></td>
+                      <td className="py-2.5 pr-4"><span className="flex flex-wrap gap-1"><LabelChips ids={l.label_ids} max={2} /></span></td>
                       <td className="py-2.5 pr-4">
                         <span className="rounded-full px-2 py-0.5 text-[11px] text-white" style={{ background: st?.color ?? '#333' }}>{st?.name ?? '—'}</span>
                       </td>
@@ -1717,7 +1754,7 @@ export default function LeadsBoard() {
                 <label className="block">
                   <span className="mb-1 block text-xs text-gray-400">Source</span>
                   <select value={nl.source} onChange={(e) => setNl({ ...nl, source: e.target.value })} className={inputCls}>
-                    {SOURCES.map((s) => (
+                    {sources.map((s) => (
                       <option key={s.key} value={s.key}>{s.label}</option>
                     ))}
                   </select>

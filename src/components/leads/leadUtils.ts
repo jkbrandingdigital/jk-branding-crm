@@ -17,6 +17,7 @@ export type Lead = {
   campaign_name: string | null
   form_name: string | null
   stage_id: string | null
+  label_ids: string[]
   assigned_to: string | null
   assigned_by: string | null
   assigned_at: string | null
@@ -29,16 +30,70 @@ export type Lead = {
   created_at: string
 }
 
-export const SOURCES: { key: string; label: string; cls: string }[] = [
-  { key: 'facebook', label: 'Facebook', cls: 'bg-blue-950/60 text-blue-300' },
-  { key: 'old_client', label: 'Old Client', cls: 'bg-emerald-950/60 text-emerald-300' },
-  { key: 'by_call', label: 'By Call', cls: 'bg-amber-950/60 text-amber-300' },
-  { key: 'by_msg', label: 'By Msg', cls: 'bg-teal-950/60 text-teal-300' },
-  { key: 'pbn', label: 'PBN', cls: 'bg-purple-950/60 text-purple-300' },
-  { key: 'bni', label: 'BNI', cls: 'bg-rose-950/60 text-rose-300' },
-  { key: 'other', label: 'Other', cls: 'bg-[#1f1f1f] text-gray-400' },
+// ---------------------------------------------------------------------
+// Lead source
+//
+// These live in the `lead_sources` table now, so a super admin can add
+// one without a new build. SOURCES below is only what shows before the
+// database answers — loadSources() fills this same array in place, so
+// every screen that already reads SOURCES keeps working unchanged.
+// ---------------------------------------------------------------------
+export type Source = { key: string; label: string; cls: string }
+
+// /60 is the opacity theme.css knows how to turn light. Do not change it
+// to /50 — that one has no light-theme mapping and goes unreadable.
+// Same colour names as Lead Labels, so one dropdown reads like the other.
+export const SOURCE_CLS: Record<string, string> = {
+  orange: 'bg-orange-950/60 text-orange-300',
+  blue: 'bg-blue-950/60 text-blue-300',
+  green: 'bg-green-950/60 text-green-300',
+  purple: 'bg-purple-950/60 text-purple-300',
+  pink: 'bg-rose-950/60 text-rose-300',
+  yellow: 'bg-yellow-950/60 text-yellow-300',
+  gray: 'bg-[#1f1f1f] text-gray-400',
+}
+export const SOURCE_COLORS = Object.keys(SOURCE_CLS)
+
+export const SOURCES: Source[] = [
+  { key: 'facebook', label: 'Facebook', cls: SOURCE_CLS.blue },
+  { key: 'old_client', label: 'Old Client', cls: SOURCE_CLS.green },
+  { key: 'by_call', label: 'By Call', cls: SOURCE_CLS.yellow },
+  { key: 'by_msg', label: 'By Msg', cls: SOURCE_CLS.orange },
+  { key: 'pbn', label: 'PBN', cls: SOURCE_CLS.purple },
+  { key: 'bni', label: 'BNI', cls: SOURCE_CLS.pink },
+  { key: 'other', label: 'Other', cls: SOURCE_CLS.gray },
 ]
-export const sourceOf = (k: string) => SOURCES.find((s) => s.key === k) ?? SOURCES[SOURCES.length - 1]
+
+const titled = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+
+// A source the list does not know about still gets a readable chip
+export const sourceOf = (k: string): Source =>
+  SOURCES.find((s) => s.key === k) ?? { key: k, label: k ? titled(k) : '—', cls: SOURCE_CLS.gray }
+
+let sourcesRead = false
+
+/** Reads lead_sources and refills SOURCES in place. Call it before the
+ *  first paint of any screen that shows a source. */
+export async function loadSources(force = false): Promise<Source[]> {
+  if (sourcesRead && !force) return SOURCES
+  const { data } = await supabase
+    .from('lead_sources')
+    .select('key, name, color, sort_order')
+    .eq('is_active', true)
+    .order('sort_order')
+    .order('name')
+
+  const rows = (data ?? []) as { key: string; name: string; color: string }[]
+  if (rows.length > 0) {
+    SOURCES.splice(
+      0,
+      SOURCES.length,
+      ...rows.map((r) => ({ key: r.key, label: r.name, cls: SOURCE_CLS[r.color] ?? SOURCE_CLS.gray })),
+    )
+    sourcesRead = true
+  }
+  return SOURCES
+}
 
 // <input type="datetime-local"> works in local time (IST on your machines)
 export function toInputDT(iso: string | null) {
@@ -69,7 +124,9 @@ export async function loadStaff(): Promise<Staff[]> {
   return (data as Staff[]) ?? []
 }
 
-// Page through every lead the user can see
+// Page through every lead the user can see.
+// The board no longer uses this — it pages on the server. Kept for any
+// screen that genuinely needs the lot.
 export async function loadLeads(): Promise<Lead[]> {
   const out: Lead[] = []
   for (let start = 0; ; start += 1000) {

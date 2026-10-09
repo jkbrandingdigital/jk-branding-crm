@@ -45,6 +45,13 @@ const same = (a: string, b: string) => tidy(a).toLowerCase() === tidy(b).toLower
  *   requirement_type?::customize_diary_design_&_printing
  * This reads them out.
  */
+// "A, B , C" in one cell is three labels, not one long name
+const splitLabels = (v: string) =>
+  (v ?? '')
+    .split(',')
+    .map((x) => tidy(x))
+    .filter((x) => x.length > 0)
+
 function kvLines(text: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const line of (text ?? '').split(/\r?\n/)) {
@@ -195,11 +202,18 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
   const [source, setSource] = useState('other')
   const [labelId, setLabelId] = useState('')
   const [skipDup, setSkipDup] = useState(true)
-  const [fuFix, setFuFix] = useState<'lead_date' | 'first_stage'>('lead_date')
+  const [fuFix, setFuFix] = useState<'pick' | 'lead_date' | 'first_stage'>('pick')
+  // Default: start following up from today, so imported leads are not born red
+  const [fuDate, setFuDate] = useState(() => {
+    const n = new Date()
+    const ist = new Date(n.getTime() + (n.getTimezoneOffset() + 330) * 60000)
+    const pad = (x: number) => String(x).padStart(2, '0')
+    return `${ist.getFullYear()}-${pad(ist.getMonth() + 1)}-${pad(ist.getDate())}`
+  })
   const [makeLabels, setMakeLabels] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<{ added: number; skipped: number; failed: number; noDate: number; noName: number; dupCrm: number; dupFile: number; notes: string[]; why: string[] } | null>(null)
+  const [result, setResult] = useState<{ added: number; skipped: number; failed: number; noDate: number; noName: number; dupCrm: number; dupFile: number; worst: string; notes: string[]; why: string[] } | null>(null)
 
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager'))
 
@@ -259,7 +273,7 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
             tidy(map.lead_label ? (r[map.lead_label] ?? '') : '') ||
             kvLines(map.requirement ? (r[map.requirement] ?? '') : '').label ||
             ''
-          if (v) wanted.add(v)
+          for (const one of splitLabels(v)) wanted.add(one)
         }
         const missing = [...wanted].filter((n) => !allLabels.some((l) => same(l.name, n)))
         if (missing.length > 0) {
@@ -304,9 +318,13 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
           const src = srcName ? SOURCES.find((x) => same(x.key, srcName) || same(x.label, srcName)) : undefined
           if (srcName && !src) unknown.add(`Source "${srcName}"`)
 
-          const labName = take('lead_label') || kvLines(take('requirement')).label || ''
-          const lab = labName ? allLabels.find((x) => same(x.name, labName)) : undefined
-          if (labName && !lab) unknown.add(`Label "${labName}"`)
+          const labCell = take('lead_label') || kvLines(take('requirement')).label || ''
+          const labIds: string[] = []
+          for (const one of splitLabels(labCell)) {
+            const hit = allLabels.find((x) => same(x.name, one))
+            if (hit) labIds.push(hit.id)
+            else unknown.add(`Label "${one}"`)
+          }
 
           const owner = take('assigned')
           const person = owner ? staff.find((x) => same(x.full_name, owner)) : undefined
@@ -319,7 +337,8 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
           let stageId = stage?.id ?? null
           const needsFu = Boolean((stage as { requires_follow_up?: boolean } | undefined)?.requires_follow_up)
           if (stage && needsFu && !whenFinal) {
-            if (fuFix === 'lead_date') whenFinal = made ?? new Date().toISOString()
+            if (fuFix === 'pick') whenFinal = new Date(`${fuDate}T10:00:00+05:30`).toISOString()
+            else if (fuFix === 'lead_date') whenFinal = made ?? new Date().toISOString()
             else stageId = null
           }
 
@@ -348,7 +367,7 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
             made,
             stageId,
             source: src?.key ?? null,
-            labelId: lab?.id ?? null,
+            labelIds: labIds,
             ownerId: person?.id ?? null,
             rating: Math.min(Math.max(stars, 0), 5),
           }
@@ -384,6 +403,16 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
       dupFile = list.length - unique.length
       skipped += dupFile
 
+      // Which number turned up most — if one number is on hundreds of rows,
+      // the phone column is pointing at the wrong place
+      let worst = ''
+      if (dupFile > 0) {
+        const tally = new Map<string, number>()
+        for (const r of list) tally.set(r.phone, (tally.get(r.phone) ?? 0) + 1)
+        const top = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]
+        if (top && top[1] > 1) worst = `${top[0]} on ${top[1]} rows`
+      }
+
       const assigned_to = assign === 'auto' ? null : assign === 'me' ? myId : assign
       const rowOf = (r: (typeof unique)[number]) => {
         const row: Record<string, unknown> = {
@@ -396,7 +425,7 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
           source: r.source ?? source,
           estimated_amount: r.amount,
           next_follow_up: r.when,
-          label_id: r.labelId ?? (labelId || null),
+          label_ids: r.labelIds.length > 0 ? r.labelIds : labelId ? [labelId] : [],
           assigned_to: r.ownerId ?? assigned_to,
           rating: r.rating,
         }
@@ -433,7 +462,7 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
         }
       }
 
-      setResult({ added, skipped, failed, noDate, noName, dupCrm, dupFile, notes, why })
+      setResult({ added, skipped, failed, noDate, noName, dupCrm, dupFile, worst, notes, why })
       if (added > 0) onDone()
     } catch (e) {
       setError((e as Error).message || 'Something went wrong while importing.')
@@ -489,7 +518,12 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
                     <li>· {result.noName} had no name, or the phone was shorter than 10 digits</li>
                   )}
                   {result.dupCrm > 0 && <li>· {result.dupCrm} already on a lead in the CRM</li>}
-                  {result.dupFile > 0 && <li>· {result.dupFile} were the same number twice in this file</li>}
+                  {result.dupFile > 0 && (
+                    <li>
+                      · {result.dupFile} were the same number twice in this file
+                      {result.worst && <span className="text-amber-400"> — {result.worst}</span>}
+                    </li>
+                  )}
                 </ul>
               )}
               {result.noDate > 0 && (
@@ -627,9 +661,28 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
                         Some stages need a follow-up date. When the file has none…
                       </span>
                       <select value={fuFix} onChange={(e) => setFuFix(e.target.value as typeof fuFix)} className={inputCls}>
+                        <option value="pick">Start following up from a date I choose</option>
                         <option value="lead_date">Use the lead date, keep the stage</option>
                         <option value="first_stage">Leave the lead in the first stage</option>
                       </select>
+                      {fuFix === 'pick' && (
+                        <>
+                          <input
+                            type="date"
+                            value={fuDate}
+                            onChange={(e) => setFuDate(e.target.value)}
+                            className={`${inputCls} mt-2`}
+                          />
+                          <span className="mt-1 block text-xs text-gray-500">
+                            Follow-up goes to 10:00 am on this day. Today or later keeps the cards out of OVERDUE.
+                          </span>
+                        </>
+                      )}
+                      {fuFix === 'lead_date' && (
+                        <span className="mt-1 block text-xs text-amber-400">
+                          The lead date has already passed, so these leads will show as OVERDUE straight away.
+                        </span>
+                      )}
                     </label>
                   )}
                 </div>

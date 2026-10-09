@@ -21,6 +21,7 @@ import type { LeadLite } from '../reminders/reminderUtils'
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
 type LeadL = Lead & {
   label_id?: string | null
+  label_ids?: string[] | null
   meta_fields?: Record<string, string> | null
   cancel_reason?: string | null
   cancel_note?: string | null
@@ -237,7 +238,7 @@ export default function LeadDrawer({
     'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none disabled:opacity-60'
   const stage = stages.find((s) => s.id === lead?.stage_id)
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager' || s.role === 'hr'))
-  const leadLabel = labels.find((x) => x.id === lead?.label_id)
+  const leadLabels = (lead?.label_ids ?? []).map((id) => labels.find((x) => x.id === id)).filter(Boolean) as Label[]
   const formFields = lead?.meta_fields && typeof lead.meta_fields === 'object' ? Object.entries(lead.meta_fields) : []
   const followUps = acts.filter((a) => a.meta?.follow_up || a.type === 'follow_up')
   const iconBtn = 'rounded-lg p-2 text-gray-400 transition-colors hover:bg-[#1f1f1f] hover:text-white'
@@ -263,9 +264,9 @@ export default function LeadDrawer({
             {lead && (
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                 <span className={`rounded-full px-2 py-0.5 ${sourceOf(lead.source).cls}`}>{sourceOf(lead.source).label}</span>
-                {leadLabel && (
-                  <span className={`rounded-full border px-2 py-0.5 ${LABEL_CLS[leadLabel.color] ?? LABEL_CLS.gray}`}>{leadLabel.name}</span>
-                )}
+                {leadLabels.map((lb) => (
+                  <span key={lb.id} className={`rounded-full border px-2 py-0.5 ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`}>{lb.name}</span>
+                ))}
                 {stage && <span className="rounded-full px-2 py-0.5 text-white" style={{ background: stage.color }}>{stage.name}</span>}
                 {isOverdue(lead, stage) && <span className="rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">OVERDUE</span>}
               </div>
@@ -434,15 +435,26 @@ export default function LeadDrawer({
               )}
               {menu === 'label' && (
                 <>
-                  <button onClick={() => { setMenu(null); update({ label_id: null }, 'Label removed.') }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
-                    No label
+                  <button onClick={() => { setMenu(null); update({ label_ids: [] }, 'Labels cleared.') }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                    Clear all labels
                   </button>
-                  {labels.map((lb) => (
-                    <button key={lb.id} onClick={() => { setMenu(null); update({ label_id: lb.id }, 'Label updated.') }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
-                      <span className={`h-2 w-2 rounded-full border ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`} />
-                      {lb.name}
-                    </button>
-                  ))}
+                  {labels.map((lb) => {
+                    const on = (lead?.label_ids ?? []).includes(lb.id)
+                    const next = on
+                      ? (lead?.label_ids ?? []).filter((x) => x !== lb.id)
+                      : [...(lead?.label_ids ?? []), lb.id]
+                    return (
+                      <button
+                        key={lb.id}
+                        onClick={() => update({ label_ids: next }, on ? 'Label removed.' : 'Label added.')}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[#222] hover:text-white ${on ? 'text-white' : 'text-gray-300'}`}
+                      >
+                        <span className={`h-2 w-2 shrink-0 rounded-full border ${LABEL_CLS[lb.color] ?? LABEL_CLS.gray}`} />
+                        <span className="min-w-0 flex-1 truncate">{lb.name}</span>
+                        {on && <span className="shrink-0 text-orange-400">✓</span>}
+                      </button>
+                    )
+                  })}
                 </>
               )}
             </div>
@@ -513,7 +525,7 @@ export default function LeadDrawer({
                       />
                       <Row label="Stage" value={stage?.name ?? '—'} />
                       <Row label="Source" value={sourceOf(lead.source).label} />
-                      <Row label="Label" value={leadLabel?.name ?? 'No label'} />
+                      <Row label="Label" value={leadLabels.length ? leadLabels.map((x) => x.name).join(', ') : 'No label'} />
                       <Row label="Estimated amount" value={inr(Number(lead.estimated_amount) || 0)} />
 
                       <div>
