@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
+import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
@@ -9,10 +9,11 @@ import { istDate } from '../lib/format'
 
 export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
-type SalesNav = SalesPage | 'reminders' | 'tasks' | 'notes' | 'quotations' | 'quote-new'
+type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new'
 const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   reminders: '/sales/reminders',
   tasks: '/sales/tasks',
+  todos: '/sales/todos',
   notes: '/sales/notes',
   quotations: '/sales/quotations',
   'quote-new': '/sales/quotations/new',
@@ -23,19 +24,29 @@ type NavItem = { label: string; hint?: string; page?: SalesNav; icon: LucideIcon
 // These two open on a click; the rest stay in plain view
 const FOLDABLE = ['Productivity', 'Business']
 
+// A sales person's own work — their forms, their leads, their numbers —
+// carries no permission. It is their job; there is nothing to switch off.
+//
+// The mod_* keys below, and the ones missing from this list, all mean the
+// same thing now: may they see EVERYONE's, over in the admin area. So a
+// sub admin keeps their own screens whatever you tick for them.
+//
+// Still switched: Tasks, Reminders, Notes and Quotations are tools, not
+// everyone uses them.
 const NAV: { title: string; items: NavItem[] }[] = [
   {
     title: 'Today',
     items: [
-      { label: 'Evolution Form', hint: 'Morning', page: 'evolution', icon: Sunrise, perm: 'mod_evolution' },
-      { label: 'Daily Report', hint: 'Evening', page: 'report', icon: Moon, perm: 'mod_reports' },
+      { label: 'Evolution Form', hint: 'Morning', page: 'evolution', icon: Sunrise },
+      { label: 'Daily Report', hint: 'Evening', page: 'report', icon: Moon },
     ],
   },
-  { title: 'Leads', items: [{ label: 'My Leads', page: 'leads', icon: Filter, perm: 'mod_leads' }] },
+  { title: 'Leads', items: [{ label: 'My Leads', page: 'leads', icon: Filter }] },
   {
     title: 'Productivity',
     items: [
       { label: 'My Tasks', page: 'tasks', icon: ListTodo, perm: 'mod_tasks' },
+      { label: 'My To-Do', page: 'todos', icon: ListChecks, perm: 'mod_todos' },
       { label: 'My Reminders', page: 'reminders', icon: AlarmClock, perm: 'mod_reminders' },
       { label: 'My Notes', page: 'notes', icon: StickyNote, perm: 'mod_notes' },
     ],
@@ -47,7 +58,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: 'All Quotations', page: 'quotations', icon: FileText, perm: 'mod_quotations' },
     ],
   },
-  { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp, perm: 'mod_performance' }] },
+  { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp }] },
   { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
 ]
 

@@ -9,7 +9,7 @@ import LeadDrawer from './LeadDrawer'
 import { DateField, DateTimeField } from '../DateField'
 import ImportLeads from './ImportLeads'
 import { LABEL_CLS, type Label } from './labels'
-import { SOURCES, sourceOf, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadLeads, loadStaff, type Lead, type Stage, type Staff } from './leadUtils'
+import { SOURCES, sourceOf, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadStaff, type Lead, type Stage, type Staff } from './leadUtils'
 
 type LeadL = Lead & { label_id?: string | null }
 
@@ -26,6 +26,11 @@ type LookupRow = {
   created_at: string
   is_mine: boolean
 }
+
+// One row per stage, straight from lead_board_summary()
+type SummaryRow = { stage_id: string | null; cnt: number; amount: number; overdue: number }
+type Summary = { byStage: Record<string, { cnt: number; amount: number }>; shown: number; overdue: number }
+const NO_SUMMARY: Summary = { byStage: {}, shown: 0, overdue: 0 }
 
 type NewLead = {
   name: string
@@ -69,6 +74,13 @@ const PREF_LABEL: [keyof CardPrefs, string][] = [
   ['amount', 'Estimated amount'],
   ['actions', 'Quick action buttons'],
 ]
+
+// How much the board asks the database for at a time. Nothing else is
+// fetched, so the board opens at the same speed with 200 leads or 200,000.
+const CARDS_AT_A_TIME = 40   // per column on the board
+const LIST_PAGE = 200        // rows in list view
+const BULK_PAGE = 1000       // export and delete-all walk through in these steps
+
 const PREF_KEY = 'jk_leads_card_prefs'
 const STAGE_KEY = 'jk_leads_hidden_stages'
 const FILTER_KEY = 'jk_lead_filters'
@@ -96,6 +108,80 @@ const countOn = (f: Filters) =>
   (f.source !== 'all' ? 1 : 0) + (f.stage !== 'all' ? 1 : 0) + (f.owner !== 'all' ? 1 : 0) +
   (f.creator !== 'all' ? 1 : 0) + (f.label !== 'all' ? 1 : 0) +
   (f.madeFrom || f.madeTo ? 1 : 0) + (f.fuFrom || f.fuTo ? 1 : 0) + (f.overdueOnly ? 1 : 0)
+
+// ---------------------------------------------------------------------
+// Turning the Filter panel into a database query
+// ---------------------------------------------------------------------
+
+// The search text goes into the query as-is, so strip the few characters
+// that would confuse the filter syntax instead of searching for them.
+const cleanQ = (s: string) => s.replace(/[,()%*\\"']/g, ' ').replace(/\s+/g, ' ').trim()
+
+// "up to and including this date" means "before the next one"
+const nextDay = (d: string) => {
+  const t = new Date(`${d}T00:00:00Z`)
+  t.setUTCDate(t.getUTCDate() + 1)
+  return t.toISOString().slice(0, 10)
+}
+
+// A Supabase query builder. Typed loosely on purpose: the same helper has
+// to narrow a select('*'), a select('id') and a count query.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LeadQuery = any
+
+// Narrows a leads query exactly the way the Filter panel reads, so the
+// board, the list, the counts, the export and the bulk delete all agree.
+function applyLeadFilters(query: LeadQuery, f: Filters, text: string, openStageIds: string[]): LeadQuery {
+  let qy: LeadQuery = query.is('deleted_at', null)
+
+  if (f.source !== 'all') qy = qy.eq('source', f.source)
+  if (f.stage !== 'all') qy = qy.eq('stage_id', f.stage)
+  if (f.owner === 'none') qy = qy.is('assigned_to', null)
+  else if (f.owner !== 'all') qy = qy.eq('assigned_to', f.owner)
+  if (f.creator !== 'all') qy = qy.eq('created_by', f.creator)
+  if (f.label === 'none') qy = qy.is('label_id', null)
+  else if (f.label !== 'all') qy = qy.eq('label_id', f.label)
+
+  if (f.madeFrom) qy = qy.gte('created_at', f.madeFrom)
+  if (f.madeTo) qy = qy.lt('created_at', nextDay(f.madeTo))
+  if (f.fuFrom) qy = qy.gte('next_follow_up', f.fuFrom)
+  if (f.fuTo) qy = qy.lt('next_follow_up', nextDay(f.fuTo))
+
+  if (f.overdueOnly) {
+    qy = qy.lt('next_follow_up', new Date().toISOString())
+    if (openStageIds.length > 0) qy = qy.in('stage_id', openStageIds)
+  }
+
+  const t = cleanQ(text)
+  if (t) {
+    const parts = [
+      `name.ilike.*${t}*`,
+      `phone.ilike.*${t}*`,
+      `company.ilike.*${t}*`,
+      `city.ilike.*${t}*`,
+      `campaign_name.ilike.*${t}*`,
+    ]
+    if (/^\d+$/.test(t)) parts.push(`lead_no.eq.${t}`)
+    qy = qy.or(parts.join(','))
+  }
+  return qy
+}
+
+// The same filters, in the shape lead_board_summary() expects
+const summaryArgs = (f: Filters, text: string, openStageIds: string[]) => ({
+  p_q: cleanQ(text) || null,
+  p_source: f.source === 'all' ? null : f.source,
+  p_stage: f.stage === 'all' ? null : f.stage,
+  p_owner: f.owner === 'all' ? null : f.owner,
+  p_creator: f.creator === 'all' ? null : f.creator,
+  p_label: f.label === 'all' ? null : f.label,
+  p_made_from: f.madeFrom || null,
+  p_made_to: f.madeTo || null,
+  p_fu_from: f.fuFrom || null,
+  p_fu_to: f.fuTo || null,
+  p_overdue: f.overdueOnly,
+  p_open_stages: openStageIds,
+})
 
 function readSaved(): SavedFilter[] {
   try {
@@ -141,13 +227,13 @@ export default function LeadsBoard() {
   const [myId, setMyId] = useState<string | null>(null)
   const [stages, setStages] = useState<Stage[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
-  const [leads, setLeads] = useState<LeadL[]>([])
   const [labels, setLabels] = useState<Label[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [view, setView] = useState<'board' | 'list'>('board')
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState('')          // what the query uses
+  const [typed, setTyped] = useState('')  // what is in the box right now
 
   const [f, setF] = useState<Filters>(NO_FILTERS)
   const set = (patch: Partial<Filters>) => setF((x) => ({ ...x, ...patch }))
@@ -157,6 +243,17 @@ export default function LeadsBoard() {
   const [savingName, setSavingName] = useState('')
   const filterRef = useRef<HTMLDivElement>(null)
   const onCount = countOn(f)
+
+  // What the database says is there, without fetching any of it
+  const [summary, setSummary] = useState<Summary>(NO_SUMMARY)
+  const [totalAll, setTotalAll] = useState(0)
+
+  // Only the cards actually on screen live here
+  const [cols, setCols] = useState<Record<string, { rows: LeadL[]; loading: boolean }>>({})
+  const [colSize, setColSize] = useState<Record<string, number>>({})
+  const [rows, setRows] = useState<LeadL[]>([])
+  const [listRows, setListRows] = useState(LIST_PAGE)
+  const [listBusy, setListBusy] = useState(false)
 
   const [openId, setOpenId] = useState<string | null>(null)
   const [params, setParams] = useSearchParams()
@@ -200,30 +297,40 @@ export default function LeadsBoard() {
   const [wipeOpen, setWipeOpen] = useState(false)
   const [wipeWord, setWipeWord] = useState('')
   const [wiping, setWiping] = useState<string>('')
+  const [exporting, setExporting] = useState<string>('')
 
-  const load = useCallback(async () => {
+  // Stages where a lead can still be chased — overdue only counts in these
+  const openStageIds = useMemo(() => stages.filter((s) => !s.is_won && !s.is_lost).map((s) => s.id), [stages])
+
+  // Columns on screen. A stage filter shows that one column on its own.
+  const visibleStages = useMemo(
+    () => stages.filter((st) => !hiddenStages.includes(st.id) && (f.stage === 'all' || f.stage === st.id)),
+    [stages, hiddenStages, f.stage],
+  )
+
+  // Answers that arrive after the filters changed again are thrown away
+  const queryKey = useMemo(() => JSON.stringify([f, q]), [f, q])
+  const keyRef = useRef(queryKey)
+  keyRef.current = queryKey
+
+  // ---------- Stages, staff, labels: fetched once ----------
+  const loadMeta = useCallback(async () => {
     setLoading(true)
     try {
-      const [{ data: u }, st, sf, ls, lb, lm, cr, fc] = await Promise.all([
+      const [{ data: u }, st, sf, lb, cr, tot] = await Promise.all([
         supabase.auth.getUser(),
         supabase.from('lead_stages').select('*').eq('is_active', true).order('sort_order'),
         loadStaff(),
-        loadLeads(),
         supabase.from('lead_labels').select('*').eq('is_active', true).order('sort_order'),
-        supabase.from('leads').select('id, label_id'),
         supabase.from('lead_cancel_reasons').select('id, name').eq('is_active', true).order('sort_order'),
-        supabase.from('lead_followup_counts').select('lead_id, follow_ups'),
+        supabase.from('leads').select('id', { count: 'exact', head: true }).is('deleted_at', null),
       ])
-      const labelOf = new Map<string, string | null>(((lm.data ?? []) as { id: string; label_id: string | null }[]).map((r) => [r.id, r.label_id]))
       setMyId(u.user?.id ?? null)
       setStages((st.data ?? []) as Stage[])
       setStaff(sf)
-      setLeads((ls as LeadL[]).map((l) => ({ ...l, label_id: labelOf.get(l.id) ?? null })))
       setLabels((lb.data ?? []) as Label[])
       setReasons((cr.data ?? []) as { id: string; name: string }[])
-      const counts: Record<string, number> = {}
-      for (const r of (fc.data ?? []) as { lead_id: string; follow_ups: number }[]) counts[r.lead_id] = r.follow_ups
-      setFuCounts(counts)
+      setTotalAll(tot.count ?? 0)
       setError(null)
     } catch (e) {
       setError((e as Error).message)
@@ -232,8 +339,107 @@ export default function LeadsBoard() {
   }, [])
 
   useEffect(() => {
-    load()
-  }, [load])
+    void loadMeta()
+  }, [loadMeta])
+
+  // ---------- Follow-up counts, only for the cards on screen ----------
+  const loadFu = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100)
+      const { data } = await supabase.from('lead_followup_counts').select('lead_id, follow_ups').in('lead_id', chunk)
+      if (!data) continue
+      setFuCounts((m) => {
+        const next = { ...m }
+        for (const r of data as { lead_id: string; follow_ups: number }[]) next[r.lead_id] = r.follow_ups
+        return next
+      })
+    }
+  }, [])
+
+  // ---------- Column headings: counts, ₹ totals, overdue ----------
+  const loadSummary = useCallback(async () => {
+    if (stages.length === 0) return
+    const { data, error: e } = await supabase.rpc('lead_board_summary', summaryArgs(f, q, openStageIds))
+    if (keyRef.current !== JSON.stringify([f, q])) return
+    if (e) return setError(e.message)
+    const byStage: Record<string, { cnt: number; amount: number }> = {}
+    let shown = 0
+    let overdue = 0
+    for (const r of (data ?? []) as SummaryRow[]) {
+      byStage[r.stage_id ?? ''] = { cnt: Number(r.cnt) || 0, amount: Number(r.amount) || 0 }
+      shown += Number(r.cnt) || 0
+      overdue += Number(r.overdue) || 0
+    }
+    setSummary({ byStage, shown, overdue })
+  }, [f, q, openStageIds, stages.length])
+
+  useEffect(() => {
+    void loadSummary()
+  }, [loadSummary])
+
+  // ---------- One column's cards ----------
+  const fetchCol = useCallback(
+    async (stageId: string, size: number) => {
+      const mine = queryKey
+      setCols((c) => ({ ...c, [stageId]: { rows: c[stageId]?.rows ?? [], loading: true } }))
+      const qy = applyLeadFilters(supabase.from('leads').select('*').eq('stage_id', stageId), f, q, openStageIds)
+      const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
+      if (keyRef.current !== mine) return
+      if (e) {
+        setError(e.message)
+        setCols((c) => ({ ...c, [stageId]: { rows: c[stageId]?.rows ?? [], loading: false } }))
+        return
+      }
+      const got = (data ?? []) as LeadL[]
+      setCols((c) => ({ ...c, [stageId]: { rows: got, loading: false } }))
+      void loadFu(got.map((l) => l.id))
+    },
+    [f, q, openStageIds, queryKey, loadFu],
+  )
+
+  // ---------- List view page ----------
+  const fetchList = useCallback(
+    async (size: number) => {
+      const mine = queryKey
+      setListBusy(true)
+      const qy = applyLeadFilters(supabase.from('leads').select('*'), f, q, openStageIds)
+      const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
+      if (keyRef.current !== mine) return
+      setListBusy(false)
+      if (e) return setError(e.message)
+      const got = (data ?? []) as LeadL[]
+      setRows(got)
+      void loadFu(got.map((l) => l.id))
+    },
+    [f, q, openStageIds, queryKey, loadFu],
+  )
+
+  // Filters, search or stages changed: start the board over
+  useEffect(() => {
+    if (view !== 'board' || visibleStages.length === 0) return
+    setCols({})
+    setColSize({})
+    for (const st of visibleStages) void fetchCol(st.id, CARDS_AT_A_TIME)
+  }, [view, visibleStages, fetchCol])
+
+  useEffect(() => {
+    if (view !== 'list' || stages.length === 0) return
+    setListRows(LIST_PAGE)
+    void fetchList(LIST_PAGE)
+  }, [view, fetchList, stages.length])
+
+  // Re-ask for whatever is on screen right now, after a change
+  const refresh = useCallback(() => {
+    void loadSummary()
+    void supabase
+      .from('leads')
+      .select('id', { count: 'exact', head: true })
+      .is('deleted_at', null)
+      .then(({ count }) => setTotalAll(count ?? 0))
+    if (view === 'board') for (const st of visibleStages) void fetchCol(st.id, colSize[st.id] ?? CARDS_AT_A_TIME)
+    else void fetchList(listRows)
+  }, [loadSummary, view, visibleStages, fetchCol, fetchList, colSize, listRows])
 
   const savePrefs = (next: CardPrefs) => {
     setPrefs(next)
@@ -252,6 +458,12 @@ export default function LeadsBoard() {
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
   }, [menu])
+
+  // Wait for a pause in the typing before asking the database
+  useEffect(() => {
+    const t = setTimeout(() => setQ(typed), 350)
+    return () => clearTimeout(t)
+  }, [typed])
 
   // The filter panel closes when you click away from it
   useEffect(() => {
@@ -289,47 +501,40 @@ export default function LeadsBoard() {
   const stageOf = (id: string | null) => stages.find((s) => s.id === id)
   const labelOf = (id: string | null | undefined) => labels.find((x) => x.id === id)
 
-  const filtered = useMemo(() => {
-    const text = q.trim().toLowerCase()
-    return leads.filter((l) => {
-      if (f.source !== 'all' && l.source !== f.source) return false
-      if (f.stage !== 'all' && l.stage_id !== f.stage) return false
-      if (f.owner !== 'all' && (f.owner === 'none' ? l.assigned_to : l.assigned_to !== f.owner)) return false
-      if (f.creator !== 'all' && l.created_by !== f.creator) return false
-      if (f.label !== 'all' && (f.label === 'none' ? l.label_id : l.label_id !== f.label)) return false
-      if (f.overdueOnly && !isOverdue(l, stageOf(l.stage_id))) return false
+  // Every card the browser is holding, so a quick action can find its lead
+  const loadedLeads = useMemo(() => {
+    const m = new Map<string, LeadL>()
+    for (const c of Object.values(cols)) for (const l of c.rows) m.set(l.id, l)
+    for (const l of rows) m.set(l.id, l)
+    return m
+  }, [cols, rows])
 
-      const made = l.created_at.slice(0, 10)
-      if (f.madeFrom && made < f.madeFrom) return false
-      if (f.madeTo && made > f.madeTo) return false
-
-      if (f.fuFrom || f.fuTo) {
-        if (!l.next_follow_up) return false
-        const due = l.next_follow_up.slice(0, 10)
-        if (f.fuFrom && due < f.fuFrom) return false
-        if (f.fuTo && due > f.fuTo) return false
-      }
-
-      if (!text) return true
-      return `${l.lead_no} ${l.name} ${l.phone ?? ''} ${l.company ?? ''} ${l.city ?? ''} ${l.campaign_name ?? ''}`.toLowerCase().includes(text)
+  // Change one card where it sits, without re-fetching the page
+  const patchLead = (id: string, patch: Partial<LeadL>) => {
+    setCols((c) => {
+      const next: typeof c = {}
+      for (const [k, v] of Object.entries(c)) next[k] = { ...v, rows: v.rows.map((l) => (l.id === id ? { ...l, ...patch } : l)) }
+      return next
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leads, q, f, stages])
+    setRows((r) => r.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  }
+  const dropLead = (id: string) => {
+    setCols((c) => {
+      const next: typeof c = {}
+      for (const [k, v] of Object.entries(c)) next[k] = { ...v, rows: v.rows.filter((l) => l.id !== id) }
+      return next
+    })
+    setRows((r) => r.filter((l) => l.id !== id))
+  }
 
-  const owners = useMemo(() => {
-    const ids = new Set(leads.map((l) => l.assigned_to).filter(Boolean) as string[])
-    return staff.filter((s) => ids.has(s.id))
-  }, [leads, staff])
-  const creators = useMemo(() => {
-    const ids = new Set(leads.map((l) => l.created_by).filter(Boolean) as string[])
-    return staff.filter((s) => ids.has(s.id))
-  }, [leads, staff])
-  const overdueCount = leads.filter((l) => isOverdue(l, stageOf(l.stage_id))).length
+  const owners = useMemo(() => [...staff].sort((a, b) => a.full_name.localeCompare(b.full_name)), [staff])
+  const shown = summary.shown
+  const overdueCount = summary.overdue
 
   // Nothing found here? Ask the database whether this number exists anywhere.
   useEffect(() => {
     const text = q.trim()
-    if (text.length < 4 || filtered.length > 0) {
+    if (text.length < 4 || shown > 0) {
       setLookup([])
       return
     }
@@ -346,14 +551,12 @@ export default function LeadsBoard() {
       alive = false
       clearTimeout(timer)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, filtered.length])
-
+  }, [q, shown])
 
   // ---------- Stage change by drag ----------
   async function moveTo(leadId: string, stageId: string) {
     setMenu(null)
-    const lead = leads.find((l) => l.id === leadId)
+    const lead = loadedLeads.get(leadId)
     if (!lead || lead.stage_id === stageId || !can('lead_edit')) return
 
     const target = stages.find((x) => x.id === stageId)
@@ -363,34 +566,61 @@ export default function LeadsBoard() {
       setCancelFor({ leadId, stageId, name: target.name })
       return
     }
-    setLeads((all) => all.map((l) => (l.id === leadId ? { ...l, stage_id: stageId } : l)))
+    dropLead(leadId) // out of the column it is leaving, so the move looks instant
     const { error: e } = await supabase.from('leads').update({ stage_id: stageId }).eq('id', leadId)
-    if (e) {
-      setError(e.message)
-      load()
-    }
+    if (e) setError(e.message)
+    refresh()
   }
 
   // ---------- Quick actions ----------
   async function setLabel(leadId: string, labelId: string | null) {
     setMenu(null)
-    setLeads((all) => all.map((l) => (l.id === leadId ? { ...l, label_id: labelId } : l)))
+    patchLead(leadId, { label_id: labelId })
     const { error: e } = await supabase.from('leads').update({ label_id: labelId }).eq('id', leadId)
-    if (e) { setError(e.message); load() }
+    if (e) { setError(e.message); refresh() }
   }
 
   async function transfer(leadId: string, userId: string | null) {
     setMenu(null)
+    patchLead(leadId, { assigned_to: userId })
     const { error: e } = await supabase.from('leads').update({ assigned_to: userId }).eq('id', leadId)
-    if (e) return setError(e.message)
-    load()
+    if (e) setError(e.message)
+    refresh()
+  }
+
+  // Every lead the filters match right now, id only, in pages.
+  async function matchingIds(): Promise<string[] | null> {
+    const ids: string[] = []
+    for (let start = 0; ; start += BULK_PAGE) {
+      const qy = applyLeadFilters(supabase.from('leads').select('id'), f, q, openStageIds)
+      const { data, error: e } = await qy.order('created_at', { ascending: false }).range(start, start + BULK_PAGE - 1)
+      if (e) {
+        setError(e.message)
+        return null
+      }
+      const got = (data ?? []) as { id: string }[]
+      ids.push(...got.map((r) => r.id))
+      setWiping(`Finding leads… ${ids.length}`)
+      if (got.length < BULK_PAGE) break
+    }
+    return ids
   }
 
   // Takes out every lead the filters are showing right now.
   // They are marked deleted, not erased — the backup zip still carries them.
   async function deleteShown() {
-    const ids = filtered.map((l) => l.id)
-    if (ids.length === 0) return
+    setWiping('Finding leads…')
+    const ids = await matchingIds()
+    if (!ids) {
+      setWiping('')
+      setWipeOpen(false)
+      return
+    }
+    if (ids.length === 0) {
+      setWiping('')
+      setWipeOpen(false)
+      return
+    }
     const now = new Date().toISOString()
     let gone = 0
     for (let i = 0; i < ids.length; i += 200) {
@@ -409,15 +639,16 @@ export default function LeadsBoard() {
     setWipeWord('')
     setOpenId(null)
     setError(null)
-    await load()
+    refresh()
     window.alert(`${gone} leads deleted.`)
   }
 
   async function removeLead(l: LeadL) {
     if (!window.confirm(`Delete lead #${l.lead_no} ${l.name}? It will be hidden from everyone.`)) return
+    dropLead(l.id)
     const { error: e } = await supabase.from('leads').update({ deleted_at: new Date().toISOString() }).eq('id', l.id)
-    if (e) return setError(e.message)
-    load()
+    if (e) setError(e.message)
+    refresh()
   }
 
   // ---------- Follow-up ----------
@@ -450,7 +681,7 @@ export default function LeadsBoard() {
     setBusy(false)
     if (lErr) return setFuErr(lErr.message)
     setFu(null)
-    load()
+    refresh()
   }
 
   // ---------- Cancel with a reason ----------
@@ -470,11 +701,26 @@ export default function LeadsBoard() {
     setBusy(false)
     if (e) return setError(e.message)
     setCancelFor(null)
-    load()
+    refresh()
   }
 
   // ---------- Export ----------
-  function exportCsv() {
+  async function exportCsv() {
+    setExporting('Collecting leads…')
+    const all: LeadL[] = []
+    for (let start = 0; ; start += BULK_PAGE) {
+      const qy = applyLeadFilters(supabase.from('leads').select('*'), f, q, openStageIds)
+      const { data, error: e } = await qy.order('created_at', { ascending: false }).range(start, start + BULK_PAGE - 1)
+      if (e) {
+        setExporting('')
+        return setError(e.message)
+      }
+      const got = (data ?? []) as LeadL[]
+      all.push(...got)
+      setExporting(`Collecting leads… ${all.length}`)
+      if (got.length < BULK_PAGE) break
+    }
+
     const stageName = (id: string | null) => stageOf(id)?.name ?? ''
     const labelName = (id: string | null | undefined) => labelOf(id)?.name ?? ''
     const dt = (iso: string | null) =>
@@ -485,7 +731,7 @@ export default function LeadsBoard() {
       'Requirement', 'Source', 'Label', 'Stage', 'Assigned to', 'Created by',
       'Created at', 'Next follow-up', 'Rating', 'Estimated amount',
     ]
-    const rows = filtered.map((l) => [
+    const body = all.map((l) => [
       l.lead_no, l.name, l.phone ?? '', l.alt_phone ?? '', l.email ?? '', l.company ?? '', l.city ?? '',
       (l.requirement ?? '').replace(/\s+/g, ' '), sourceOf(l.source).label, labelName(l.label_id),
       stageName(l.stage_id), nameOf(l.assigned_to), nameOf(l.created_by),
@@ -496,16 +742,17 @@ export default function LeadsBoard() {
       const t = String(v ?? '')
       return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
     }
-    const csv = [head, ...rows].map((r) => r.map(cell).join(',')).join('\r\n')
+    const csv = [head, ...body].map((r) => r.map(cell).join(',')).join('\r\n')
 
     // The BOM makes Excel read Gujarati and ₹ correctly
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
+    setExporting('')
   }
 
   // ---------- Add lead ----------
@@ -543,7 +790,7 @@ export default function LeadsBoard() {
     setBusy(false)
     if (e) return setAddErr(e.message)
     setAdding(false)
-    load()
+    refresh()
   }
 
   const inputCls =
@@ -732,13 +979,18 @@ export default function LeadsBoard() {
         <div>
           <h1 className="text-2xl font-bold">Leads</h1>
           <p className="mt-1 text-sm text-gray-400">
-            {filtered.length} of {leads.length} leads
-            {overdueCount > 0 && <span className="ml-2 text-red-400">· {overdueCount} overdue</span>}
+            {shown.toLocaleString('en-IN')} of {totalAll.toLocaleString('en-IN')} leads
+            {overdueCount > 0 && <span className="ml-2 text-red-400">· {overdueCount.toLocaleString('en-IN')} overdue</span>}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={load} className="rounded-lg border border-[#2a2a2a] p-2 text-gray-400 hover:text-white" title="Refresh" aria-label="Refresh">
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          <button
+            onClick={() => { void loadMeta(); refresh() }}
+            className="rounded-lg border border-[#2a2a2a] p-2 text-gray-400 hover:text-white"
+            title="Refresh"
+            aria-label="Refresh"
+          >
+            <RefreshCw size={16} className={loading || listBusy ? 'animate-spin' : ''} />
           </button>
           <button
             onClick={() => setSettingsOpen(true)}
@@ -756,22 +1008,23 @@ export default function LeadsBoard() {
               <List size={16} />
             </button>
           </div>
-          {ready && can('lead_export') && filtered.length > 0 && (
+          {ready && can('lead_export') && shown > 0 && (
             <button
               onClick={exportCsv}
-              className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 hover:border-[#3a3a3a] hover:text-white"
-              title={`Export ${filtered.length} leads to Excel`}
+              disabled={!!exporting}
+              className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 hover:border-[#3a3a3a] hover:text-white disabled:opacity-50"
+              title={`Export ${shown} leads to Excel`}
             >
-              <Download size={16} /> Export
+              <Download size={16} /> {exporting ? 'Exporting…' : 'Export'}
             </button>
           )}
-          {role === 'super_admin' && filtered.length > 0 && (
+          {role === 'super_admin' && shown > 0 && (
             <button
               onClick={() => { setWipeWord(''); setWipeOpen(true) }}
               className="flex items-center gap-2 rounded-lg border border-red-900/60 px-3 py-2 text-sm text-red-400 hover:border-red-700 hover:text-red-300"
               title="Delete every lead shown right now"
             >
-              <Trash2 size={16} /> Delete {filtered.length}
+              <Trash2 size={16} /> Delete {shown.toLocaleString('en-IN')}
             </button>
           )}
           {ready && can('lead_create') && (
@@ -795,7 +1048,7 @@ export default function LeadsBoard() {
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <div className="relative min-w-[220px] flex-1">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone, company, city, #no" className={`${inputCls} pl-9`} />
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search name, phone, company, city, #no" className={`${inputCls} pl-9`} />
         </div>
 
         <div className="relative" ref={filterRef}>
@@ -862,7 +1115,7 @@ export default function LeadsBoard() {
                   <Field label="Created by">
                     <select value={f.creator} onChange={(e) => set({ creator: e.target.value })} className={panelSelect}>
                       <option value="all">All lead</option>
-                      {creators.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                      {owners.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
                     </select>
                   </Field>
 
@@ -968,6 +1221,10 @@ export default function LeadsBoard() {
         </div>
       )}
 
+      {exporting && (
+        <p className="mt-3 text-xs text-gray-400">{exporting}</p>
+      )}
+
       {/* Found somewhere else in the company */}
       {(looking || lookup.length > 0) && (
         <section className="mt-4 rounded-2xl border border-yellow-900/50 bg-yellow-950/10 p-4">
@@ -999,9 +1256,12 @@ export default function LeadsBoard() {
       {/* Board */}
       {view === 'board' ? (
         <div className="mt-5 flex gap-4 overflow-x-auto pb-4 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
-          {stages.filter((st) => !hiddenStages.includes(st.id)).map((st) => {
-            const items = filtered.filter((l) => l.stage_id === st.id)
-            const amount = items.reduce((s, l) => s + (Number(l.estimated_amount) || 0), 0)
+          {visibleStages.map((st) => {
+            const col = cols[st.id]
+            const items = col?.rows ?? []
+            const total = summary.byStage[st.id]?.cnt ?? 0
+            const amount = summary.byStage[st.id]?.amount ?? 0
+            const left = Math.max(0, total - items.length)
             return (
               <div
                 key={st.id}
@@ -1013,14 +1273,34 @@ export default function LeadsBoard() {
                   <span className="font-semibold text-white">{st.name}</span>
                   <span className="flex items-center gap-2 text-xs text-white/90">
                     <span className="rounded bg-black/20 px-1.5 py-0.5">{inrCompact(amount)}</span>
-                    <span className="rounded-full bg-black/30 px-2 py-0.5 font-semibold">{items.length}</span>
+                    <span className="rounded-full bg-black/30 px-2 py-0.5 font-semibold">{total.toLocaleString('en-IN')}</span>
                   </span>
                 </div>
                 <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto p-3 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
                   {items.length === 0 ? (
-                    <p className="py-6 text-center text-xs text-gray-600">No leads</p>
+                    <p className="py-6 text-center text-xs text-gray-600">{col?.loading ? 'Loading…' : 'No leads'}</p>
                   ) : (
-                    items.map((l) => <Card key={l.id} l={l} />)
+                    <>
+                      {items.map((l) => <Card key={l.id} l={l} />)}
+                      {left > 0 && (
+                        <button
+                          onClick={() => {
+                            const next = (colSize[st.id] ?? CARDS_AT_A_TIME) + CARDS_AT_A_TIME
+                            setColSize((p) => ({ ...p, [st.id]: next }))
+                            void fetchCol(st.id, next)
+                          }}
+                          disabled={col?.loading}
+                          className="rounded-lg border border-dashed border-[#2f2f2f] py-2 text-xs text-gray-400 hover:border-orange-500/50 hover:text-white disabled:opacity-50"
+                        >
+                          {col?.loading ? 'Loading…' : (
+                            <>
+                              Show {Math.min(CARDS_AT_A_TIME, left)} more
+                              <span className="text-gray-600"> · {left.toLocaleString('en-IN')} left</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1045,12 +1325,14 @@ export default function LeadsBoard() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-10 text-center text-gray-500">No leads match these filters.</td>
+                  <td colSpan={10} className="py-10 text-center text-gray-500">
+                    {listBusy ? 'Loading…' : 'No leads match these filters.'}
+                  </td>
                 </tr>
               ) : (
-                filtered.map((l) => {
+                rows.map((l) => {
                   const st = stageOf(l.stage_id)
                   const overdue = isOverdue(l, st)
                   return (
@@ -1078,6 +1360,19 @@ export default function LeadsBoard() {
               )}
             </tbody>
           </table>
+          {shown > rows.length && rows.length > 0 && (
+            <button
+              onClick={() => {
+                const next = listRows + LIST_PAGE
+                setListRows(next)
+                void fetchList(next)
+              }}
+              disabled={listBusy}
+              className="w-full border-t border-[#242424] py-3 text-sm text-orange-400 hover:bg-[#1a1a1a] disabled:opacity-50"
+            >
+              {listBusy ? 'Loading…' : `Show ${LIST_PAGE} more · ${(shown - rows.length).toLocaleString('en-IN')} left`}
+            </button>
+          )}
         </section>
       )}
 
@@ -1091,7 +1386,7 @@ export default function LeadsBoard() {
           can={can}
           myId={myId}
           onClose={closeDrawer}
-          onChanged={load}
+          onChanged={refresh}
           onOpenLead={(id) => setOpenId(id)}
         />
       )}
@@ -1169,7 +1464,7 @@ export default function LeadsBoard() {
           <div className="absolute inset-0 bg-black/60" />
           <div className="relative w-full max-w-lg rounded-2xl border border-red-900/50 bg-[#151515]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
-              <h2 className="font-semibold text-red-300">Delete {filtered.length} leads</h2>
+              <h2 className="font-semibold text-red-300">Delete {shown.toLocaleString('en-IN')} leads</h2>
               <button onClick={() => !wiping && setWipeOpen(false)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
                 <X size={18} />
               </button>
@@ -1177,8 +1472,8 @@ export default function LeadsBoard() {
 
             <div className="space-y-4 px-5 py-5 text-sm">
               <p className="text-gray-300">
-                Every lead the filters are showing right now will go — all {filtered.length} of them, out of {leads.length} in the CRM.
-                Their follow-ups go with them.
+                Every lead the filters are showing right now will go — all {shown.toLocaleString('en-IN')} of them,
+                out of {totalAll.toLocaleString('en-IN')} in the CRM. Their follow-ups go with them.
               </p>
               {onCount > 0 || q.trim() ? (
                 <p className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs text-gray-400">
@@ -1220,7 +1515,7 @@ export default function LeadsBoard() {
                 disabled={wipeWord.trim().toUpperCase() !== 'DELETE' || !!wiping}
                 className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
               >
-                {wiping ? 'Deleting…' : `Delete ${filtered.length}`}
+                {wiping ? 'Deleting…' : `Delete ${shown.toLocaleString('en-IN')}`}
               </button>
             </div>
           </div>
@@ -1236,7 +1531,7 @@ export default function LeadsBoard() {
           myId={myId}
           canAssign={can('lead_assign')}
           onClose={() => setImportOpen(false)}
-          onDone={load}
+          onDone={() => { void loadMeta(); refresh() }}
         />
       )}
 

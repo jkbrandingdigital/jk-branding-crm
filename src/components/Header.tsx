@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronDown, KeyRound, Loader2, LogOut, User, X } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { Briefcase, ChevronDown, KeyRound, Loader2, LogOut, ShieldCheck, User, X } from 'lucide-react'
 import { signOut } from '../lib/auth'
 import { supabase } from '../lib/supabase'
+import { usePermissions, ownHome } from '../lib/permissions'
 import ProfileModal from './ProfileModal'
 import NotificationBell from './NotificationBell'
 import AppearanceMenu from './AppearanceMenu'
@@ -39,6 +41,8 @@ const TASKS_PATH: Record<string, string> = {
 }
 
 export default function Header() {
+  const { pathname } = useLocation()
+  const { isSubAdmin, isSuper } = usePermissions()
   const [menu, setMenu] = useState(false)
   const [pwOpen, setPwOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -95,6 +99,27 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-3">
+      {/* A sub admin has two sides: their own daily work, and the parts of
+          the admin area that were switched on for them. */}
+      {isSubAdmin && !isSuper && role && (
+        pathname.startsWith('/admin') ? (
+          <Link
+            to={ownHome(role)}
+            className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 transition-colors hover:border-[#3a3a3a] hover:text-white"
+          >
+            <Briefcase size={15} />
+            <span className="hidden sm:inline">My work</span>
+          </Link>
+        ) : (
+          <Link
+            to="/admin"
+            className="flex items-center gap-2 rounded-lg border border-orange-500/50 bg-orange-500/10 px-3 py-2 text-sm text-orange-400 transition-colors hover:border-orange-500 hover:text-orange-300"
+          >
+            <ShieldCheck size={15} />
+            <span className="hidden sm:inline">Admin area</span>
+          </Link>
+        )
+      )}
       <AppearanceMenu />
       <NotificationBell remindersPath={REMINDERS_PATH[role] ?? '/'} leadsPath={LEADS_PATH[role] ?? '/'} tasksPath={TASKS_PATH[role] ?? '/'} />
       <div className="relative" ref={boxRef}>

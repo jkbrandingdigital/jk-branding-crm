@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, StickyNote, FileText, Plus, DatabaseBackup, Briefcase as BriefcaseIcon, type LucideIcon,
+  ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Briefcase as BriefcaseIcon, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
@@ -14,6 +14,9 @@ type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; 
 type NavGroup = { key: string; label: string; icon: LucideIcon; items: NavItem[] }
 
 // Departments grow here: add items to a group, add the route in App.tsx, set ready: true
+//
+// Every ready item needs a `perm`. Without one it would show to every sub
+// admin, which is how HR and Company settings used to leak.
 const GROUPS: NavGroup[] = [
   {
     key: 'sales',
@@ -21,11 +24,11 @@ const GROUPS: NavGroup[] = [
     icon: Briefcase,
     items: [
       { label: 'Leads', path: '/admin/leads', icon: Filter, ready: true, perm: 'mod_leads' },
-      { label: 'Lead Assignment', path: '/admin/lead-assignment', icon: Shuffle, ready: true },
+      { label: 'Lead Assignment', path: '/admin/lead-assignment', icon: Shuffle, ready: true, perm: 'mod_lead_assignment' },
       { label: 'Sales Performance', path: '/admin/performance', icon: TrendingUp, ready: true, perm: 'mod_performance' },
       { label: 'Daily Reports', path: '/admin/reports', icon: FileBarChart, ready: true, perm: 'mod_reports' },
       { label: 'Evolution Forms', path: '/admin/evolution', icon: ClipboardCheck, ready: true, perm: 'mod_evolution' },
-      { label: 'Evolution Questions', path: '/admin/questions', icon: ListChecks, ready: true },
+      { label: 'Evolution Questions', path: '/admin/questions', icon: ListChecks, ready: true, perm: 'mod_questions' },
       { label: 'Sales Targets', path: '/admin/targets', icon: Target, ready: true, perm: 'mod_targets' },
     ],
   },
@@ -46,6 +49,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: 'Tasks', path: '/admin/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
       { label: 'Task Settings', path: '/admin/tasks/settings', icon: Settings, ready: true, perm: 'task_settings' },
+      { label: 'To-Do', path: '/admin/todos', icon: TodoIcon, ready: true, perm: 'mod_todos' },
       { label: 'Reminders', path: '/admin/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
       { label: 'Notes', path: '/admin/notes', icon: StickyNote, ready: true, perm: 'mod_notes' },
     ],
@@ -71,15 +75,15 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: 'Branches', path: '/admin/branches', icon: Building2, ready: false },
       { label: 'Announcements', path: '/admin/announcements', icon: Megaphone, ready: false },
-      { label: 'General Settings', path: '/admin/settings', icon: Settings, ready: true },
-      { label: 'Backup', path: '/admin/backup', icon: DatabaseBackup, ready: true },
+      { label: 'General Settings', path: '/admin/settings', icon: Settings, ready: true, perm: 'mod_settings' },
+      { label: 'Backup', path: '/admin/backup', icon: DatabaseBackup, ready: true, perm: 'mod_backup' },
     ],
   },
 ]
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
-  const { can, ready: permsReady } = usePermissions()
+  const { can, ready: permsReady, isSuper } = usePermissions()
   const [drawer, setDrawer] = useState(false)
   const [userName, setUserName] = useState('')
 
@@ -117,17 +121,28 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       active ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]' : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
     }`
 
+  // What this person may see. Nothing is shown until the rights have
+  // arrived, so a sub admin never catches a glimpse of someone else's
+  // department. "Soon" placeholders are for the super admin only.
+  const visible = permsReady
+    ? GROUPS
+        .map((g) => ({ ...g, items: g.items.filter((i) => (i.ready ? i.perm && can(i.perm) : isSuper)) }))
+        .filter((g) => g.items.length > 0 || isSuper)
+    : []
+
   const sidebar = (
     <nav className="flex h-full flex-col">
       <div className="flex-1 space-y-1 overflow-y-auto px-3 py-5 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
-        {/* Dashboard */}
-        <Link to="/admin" className={linkCls(pathname === '/admin')}>
-          <LayoutDashboard size={18} />
-          Dashboard
-        </Link>
+        {/* Dashboard — company-wide numbers, so super admin only */}
+        {isSuper && (
+          <Link to="/admin" className={linkCls(pathname === '/admin')}>
+            <LayoutDashboard size={18} />
+            Dashboard
+          </Link>
+        )}
 
         {/* Department groups */}
-        {GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.perm || !permsReady || can(i.perm)) })).map((g) => {
+        {visible.map((g) => {
           const GIcon = g.icon
           const soon = g.items.length === 0
           const isOpen = open === g.key
@@ -183,8 +198,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       </div>
 
       <div className="border-t border-[#222] px-5 py-4">
-        <p className="truncate text-sm font-medium">{userName || 'Super Admin'}</p>
-        <p className="text-xs text-orange-400">Super Admin</p>
+        <p className="truncate text-sm font-medium">{userName || (isSuper ? 'Super Admin' : 'Sub Admin')}</p>
+        <p className="text-xs text-orange-400">{isSuper ? 'Super Admin' : 'Sub Admin'}</p>
       </div>
     </nav>
   )

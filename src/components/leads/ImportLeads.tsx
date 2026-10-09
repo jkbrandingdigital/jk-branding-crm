@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { X, Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Download } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { SOURCES, type Stage, type Staff } from './leadUtils'
-import { type Label } from './labels'
+import { LABEL_CLS, type Label } from './labels'
 
 type Props = {
   staff: Staff[]
@@ -164,20 +164,21 @@ function parseWhen(raw: string): string | null {
   return Number.isNaN(dt.getTime()) ? null : dt.toISOString()
 }
 
-/** Numbers already in the CRM. Returns null if it could not be checked. */
+/**
+ * Numbers that are on a lead which is still in the CRM.
+ * Deleted leads do not count, so a fresh import after a clear-out works.
+ * Returns null when it could not be checked at all.
+ */
 async function phonesTaken(phones: string[]): Promise<Set<string> | null> {
-  const rpc = await supabase.rpc('lead_phones_exist', { p_phones: phones })
-  if (!rpc.error) {
-    return new Set(((rpc.data ?? []) as { phone_digits: string }[]).map((x) => x.phone_digits))
-  }
-  // No such function? Ask the table itself.
+  // Older leads may be stored with the 91 in front, so ask for both ways
+  const want = [...new Set(phones.flatMap((p) => [p, `91${p}`]))]
   const found = new Set<string>()
-  for (let i = 0; i < phones.length; i += 200) {
+  for (let i = 0; i < want.length; i += 200) {
     const { data, error } = await supabase
       .from('leads')
       .select('phone')
-      .is('deleted_at', null)          // deleted ones do not block a fresh import
-      .in('phone', phones.slice(i, i + 200))
+      .is('deleted_at', null)
+      .in('phone', want.slice(i, i + 200))
     if (error) return null
     for (const r of (data ?? []) as { phone: string | null }[]) found.add(digits(r.phone ?? ''))
   }
@@ -194,9 +195,11 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
   const [source, setSource] = useState('other')
   const [labelId, setLabelId] = useState('')
   const [skipDup, setSkipDup] = useState(true)
+  const [fuFix, setFuFix] = useState<'lead_date' | 'first_stage'>('lead_date')
+  const [makeLabels, setMakeLabels] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<{ added: number; skipped: number; failed: number; noDate: number; why: string[] } | null>(null)
+  const [result, setResult] = useState<{ added: number; skipped: number; failed: number; noDate: number; noName: number; dupCrm: number; dupFile: number; notes: string[]; why: string[] } | null>(null)
 
   const assignable = staff.filter((s) => s.is_active && (s.role === 'sales' || s.role === 'branch_manager'))
 
@@ -223,6 +226,13 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
   }
 
   const preview = useMemo(() => rows.slice(0, 5), [rows])
+
+  // Excel turns a long number into 9.1934E+11 and the digits are gone for good
+  const looksBroken = (v: string) => /\d[.,]?\d*\s*e\s*[+-]?\d+/i.test(v ?? '')
+  const brokenPhones = useMemo(
+    () => (map.phone ? rows.filter((r) => looksBroken(r[map.phone] ?? '')).length : 0),
+    [rows, map.phone],
+  )
   // 365 keeps the city and the company inside the comment cell
   const kvOf = (r: Row) => kvLines(map.requirement ? (r[map.requirement] ?? '') : '')
   const ready = Boolean(map.name && map.phone && rows.length > 0)
@@ -235,6 +245,44 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
     try {
       let noDate = 0
       const unknown = new Set<string>()
+      let dupCrm = 0
+      let dupFile = 0
+      const why: string[] = []      // why a row would not go in
+      const notes: string[] = []    // anything worth knowing afterwards
+
+      // Labels the file uses that the CRM has never heard of
+      let allLabels = labels
+      if (makeLabels) {
+        const wanted = new Set<string>()
+        for (const r of rows) {
+          const v =
+            tidy(map.lead_label ? (r[map.lead_label] ?? '') : '') ||
+            kvLines(map.requirement ? (r[map.requirement] ?? '') : '').label ||
+            ''
+          if (v) wanted.add(v)
+        }
+        const missing = [...wanted].filter((n) => !allLabels.some((l) => same(l.name, n)))
+        if (missing.length > 0) {
+          const colours = Object.keys(LABEL_CLS).filter((c) => c !== 'gray')
+          const { data, error: lErr } = await supabase
+            .from('lead_labels')
+            .insert(
+              missing.map((name, i) => ({
+                name,
+                color: colours[i % colours.length] ?? 'gray',
+                sort_order: allLabels.length + i + 1,
+              })),
+            )
+            .select('*')
+          if (lErr) {
+            notes.push(`Could not add ${missing.length} new label${missing.length > 1 ? 's' : ''} — ${lErr.message}`)
+          } else {
+            allLabels = [...allLabels, ...((data ?? []) as Label[])]
+            notes.push(`Added ${missing.length} new label${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`)
+          }
+        }
+      }
+
       const cleaned = rows
         .map((r) => {
           const take = (k: string) => (map[k] ? (r[map[k]] ?? '').trim() : '')
@@ -257,12 +305,28 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
           if (srcName && !src) unknown.add(`Source "${srcName}"`)
 
           const labName = take('lead_label') || kvLines(take('requirement')).label || ''
-          const lab = labName ? labels.find((x) => same(x.name, labName)) : undefined
+          const lab = labName ? allLabels.find((x) => same(x.name, labName)) : undefined
           if (labName && !lab) unknown.add(`Label "${labName}"`)
 
           const owner = take('assigned')
           const person = owner ? staff.find((x) => same(x.full_name, owner)) : undefined
           if (owner && !person) unknown.add(`Person "${owner}"`)
+
+          // Some stages will not take a lead without a follow-up date.
+          // The file has none, so either the lead date stands in, or the
+          // lead waits in the first stage.
+          let whenFinal = when
+          let stageId = stage?.id ?? null
+          const needsFu = Boolean((stage as { requires_follow_up?: boolean } | undefined)?.requires_follow_up)
+          if (stage && needsFu && !whenFinal) {
+            if (fuFix === 'lead_date') whenFinal = made ?? new Date().toISOString()
+            else stageId = null
+          }
+
+          // A lead cannot sit in a cancelled stage without a reason
+          let reason = take('cancel_reason')
+          const isLost = Boolean((stage as { is_lost?: boolean } | undefined)?.is_lost)
+          if (stage && isLost && !reason) reason = 'No reason given in the file'
 
           const stars = Math.round(Number(take('rating')) || 0)
 
@@ -277,11 +341,12 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
             company: take('company') || kv.company_name || '',
             city: take('city') || kv.city || kv['city/state'] || '',
             requirement: readable(note),
-            cancelReason: take('cancel_reason'),
+            cancelReason: reason,
+            lost: isLost,
             amount: map.estimated_amount ? Number(take('estimated_amount').replace(/[^0-9.]/g, '')) || 0 : 0,
-            when,
+            when: whenFinal,
             made,
-            stageId: stage?.id ?? null,
+            stageId,
             source: src?.key ?? null,
             labelId: lab?.id ?? null,
             ownerId: person?.id ?? null,
@@ -295,27 +360,29 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
         return setError('No usable rows. Every lead needs a name and a 10 digit phone number.')
       }
 
-      const why: string[] = []
-      for (const u of [...unknown].slice(0, 5)) why.push(`${u} is not in the CRM — the choice below was used instead.`)
-      let skipped = rows.length - cleaned.length
+      for (const u of [...unknown].slice(0, 6)) notes.push(`${u} is not in the CRM — the choice below was used instead.`)
+      const noName = rows.length - cleaned.length
+      let skipped = noName
       let list = cleaned
 
       // Drop numbers that are already in the CRM
       if (skipDup) {
         const taken = await phonesTaken(cleaned.map((r) => r.phone))
         if (taken === null) {
-          why.push('Could not check for numbers already in the CRM, so nothing was skipped for that.')
+          notes.push('Could not check for numbers already in the CRM, so nothing was skipped for that.')
         } else {
           const before = list.length
           list = list.filter((r) => !taken.has(r.phone))
-          skipped += before - list.length
+          dupCrm = before - list.length
+          skipped += dupCrm
         }
       }
 
       // Also drop repeats inside the file itself
       const seen = new Set<string>()
       const unique = list.filter((r) => (seen.has(r.phone) ? false : (seen.add(r.phone), true)))
-      skipped += list.length - unique.length
+      dupFile = list.length - unique.length
+      skipped += dupFile
 
       const assigned_to = assign === 'auto' ? null : assign === 'me' ? myId : assign
       const rowOf = (r: (typeof unique)[number]) => {
@@ -337,6 +404,7 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
         if (r.stageId) row.stage_id = r.stageId
         if (r.made) row.created_at = r.made
         if (r.cancelReason) row.cancel_reason = r.cancelReason
+        if (r.lost) row.cancelled_at = r.made ?? new Date().toISOString()
         return row
       }
 
@@ -365,7 +433,7 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
         }
       }
 
-      setResult({ added, skipped, failed, noDate, why })
+      setResult({ added, skipped, failed, noDate, noName, dupCrm, dupFile, notes, why })
       if (added > 0) onDone()
     } catch (e) {
       setError((e as Error).message || 'Something went wrong while importing.')
@@ -412,9 +480,18 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
               <CheckCircle2 size={30} className="mx-auto text-green-400" />
               <p className="mt-3 text-lg font-semibold">{result.added} leads imported</p>
               <p className="mt-1 text-sm text-gray-400">
-                {result.skipped} skipped (already in the CRM, repeated, or missing a name or phone)
+                {result.skipped} skipped
                 {result.failed > 0 && <span className="text-red-400"> · {result.failed} failed</span>}
               </p>
+              {result.skipped > 0 && (
+                <ul className="mx-auto mt-3 w-fit space-y-1 text-left text-xs text-gray-400">
+                  {result.noName > 0 && (
+                    <li>· {result.noName} had no name, or the phone was shorter than 10 digits</li>
+                  )}
+                  {result.dupCrm > 0 && <li>· {result.dupCrm} already on a lead in the CRM</li>}
+                  {result.dupFile > 0 && <li>· {result.dupFile} were the same number twice in this file</li>}
+                </ul>
+              )}
               {result.noDate > 0 && (
                 <p className="mt-2 text-xs text-gray-500">
                   {result.noDate} follow-up date{result.noDate > 1 ? 's' : ''} could not be read, so those leads came in
@@ -422,9 +499,19 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
                 </p>
               )}
               {result.why.length > 0 && (
-                <ul className="mx-auto mt-3 max-w-md space-y-1 text-left text-xs text-red-300">
-                  {result.why.map((w, i) => (
-                    <li key={i} className="truncate" title={w}>· {w}</li>
+                <div className="mx-auto mt-4 max-w-lg rounded-lg border border-red-900/50 bg-red-950/20 p-3 text-left">
+                  <p className="mb-1.5 text-xs font-medium text-red-300">Why they would not go in</p>
+                  <ul className="space-y-1 text-xs text-red-200/90">
+                    {result.why.map((w, i) => (
+                      <li key={i} className="break-words">· {w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {result.notes.length > 0 && (
+                <ul className="mx-auto mt-3 max-w-lg space-y-1 text-left text-xs text-gray-500">
+                  {result.notes.map((w, i) => (
+                    <li key={i} className="break-words">· {w}</li>
                   ))}
                 </ul>
               )}
@@ -529,6 +616,39 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
                     <input type="checkbox" checked={skipDup} onChange={(e) => setSkipDup(e.target.checked)} className="h-4 w-4 accent-orange-500" />
                     Skip numbers that are already in the CRM
                   </label>
+                  <label className="mt-2 flex items-center gap-2 text-sm text-gray-300">
+                    <input type="checkbox" checked={makeLabels} onChange={(e) => setMakeLabels(e.target.checked)} className="h-4 w-4 accent-orange-500" />
+                    Add labels from the file that the CRM does not have yet
+                  </label>
+
+                  {map.stage && stages.some((x) => (x as { requires_follow_up?: boolean }).requires_follow_up) && (
+                    <label className="mt-3 block">
+                      <span className="mb-1 block text-xs text-gray-400">
+                        Some stages need a follow-up date. When the file has none…
+                      </span>
+                      <select value={fuFix} onChange={(e) => setFuFix(e.target.value as typeof fuFix)} className={inputCls}>
+                        <option value="lead_date">Use the lead date, keep the stage</option>
+                        <option value="first_stage">Leave the lead in the first stage</option>
+                      </select>
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {brokenPhones > 0 && (
+                <div className="rounded-lg border border-amber-700/60 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">
+                  <p className="font-medium">
+                    {brokenPhones} phone number{brokenPhones > 1 ? 's in this file have' : ' in this file has'} been
+                    damaged by Excel
+                  </p>
+                  <p className="mt-1 text-xs text-amber-200/80">
+                    They are written as 9.1934E+11, so most of the digits are gone and cannot be brought back.
+                    Download the file from 365 again and import it <span className="font-medium">without opening it in Excel</span>.
+                    To edit it first, use Excel&rsquo;s Data → From Text/CSV and set the mobile column to Text, or Google Sheets.
+                  </p>
+                  <p className="mt-1 text-xs text-amber-200/60">
+                    Carry on and those {brokenPhones} lead{brokenPhones > 1 ? 's' : ''} will be left out; the rest come in fine.
+                  </p>
                 </div>
               )}
 
@@ -550,7 +670,15 @@ export default function ImportLeads({ staff, labels, stages, myId, canAssign, on
                         {preview.map((r, i) => (
                           <tr key={i} className="border-b border-[#1c1c1c] last:border-0">
                             <td className="px-3 py-2 text-white">{r[map.name]}</td>
-                            <td className="px-3 py-2 text-gray-300">{digits(r[map.phone] ?? '')}</td>
+                            <td className="px-3 py-2">
+                              {looksBroken(r[map.phone] ?? '') ? (
+                                <span className="text-amber-400" title="Excel damaged this number">
+                                  {r[map.phone]} ⚠
+                                </span>
+                              ) : (
+                                <span className="text-gray-300">{digits(r[map.phone] ?? '')}</span>
+                              )}
+                            </td>
                             <td className="px-3 py-2 text-gray-400">
                               {(map.company ? r[map.company] : '') || kvOf(r).company_name || '—'}
                             </td>

@@ -48,12 +48,23 @@ const ROLE_CHIP: Record<string, string> = {
 }
 // Which modules are offered for each role
 const ROLE_MODULES: Record<string, string[]> = {
-  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_quotations', 'mod_invoices'],
-  hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks'],
-  branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks'],
-  sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks'],
-  design_team: ['mod_tasks', 'mod_reminders'],
+  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_invoices'],
+  hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks', 'mod_notes'],
+  branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations'],
+  sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks', 'mod_notes', 'mod_quotations'],
+  design_team: ['mod_tasks', 'mod_reminders', 'mod_notes'],
 }
+
+// Everything the admin area holds, grouped the way its sidebar groups it.
+// This is the list a sub admin is given — tick a department and they see
+// that department, nothing else.
+const ADMIN_GROUPS: { title: string; keys: string[] }[] = [
+  { title: 'Sales Department', keys: ['mod_leads', 'mod_lead_assignment', 'mod_performance', 'mod_reports', 'mod_evolution', 'mod_questions', 'mod_targets'] },
+  { title: 'HR Department', keys: ['mod_employees'] },
+  { title: 'Productivity', keys: ['mod_tasks', 'mod_reminders', 'mod_notes'] },
+  { title: 'Business', keys: ['mod_quotations'] },
+  { title: 'Company', keys: ['mod_settings', 'mod_backup'] },
+]
 
 // What a person may do inside the lead module
 const ACTION_LABEL: Record<string, string> = {
@@ -75,6 +86,15 @@ const TASK_ACTION_LABEL: Record<string, string> = {
   task_close: 'Complete or reject tasks',
   task_delete: 'Delete tasks',
   task_settings: 'Task settings (stages, labels)',
+}
+
+// What a person may do inside the quotation module
+const QUOTE_ACTION_LABEL: Record<string, string> = {
+  quote_create: 'Create quotations',
+  quote_edit: 'Edit quotations',
+  quote_view_all: 'See every quotation',
+  quote_delete: 'Delete quotations',
+  quote_settings: 'Quotation settings (company, products)',
 }
 
 const WORK_MODE: Record<string, string> = {
@@ -327,6 +347,18 @@ export default function StaffManager() {
       return copy
     })
   }
+  // Turn a whole department on or off in one go
+  function setMany(keys: string[], on: boolean) {
+    setPermDraft((d) => {
+      const copy = { ...d }
+      for (const k of keys) {
+        if (on === Boolean(roleDefaults[form.role]?.[k])) delete copy[k]
+        else copy[k] = on
+      }
+      return copy
+    })
+  }
+
   const PermToggle = ({ k, label }: { k: string; label: string }) => {
     const on = effective(k)
     return (
@@ -352,6 +384,8 @@ export default function StaffManager() {
   }
 
   const shownModules = modules.filter((m) => (ROLE_MODULES[form.role] ?? []).includes(m.key))
+  const moduleByKey = new Map(modules.map((m) => [m.key, m]))
+  const isSubAdmin = Boolean(permDraft.is_subadmin)
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -608,7 +642,7 @@ export default function StaffManager() {
                     <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
                       <input
                         type="checkbox"
-                        checked={Boolean(permDraft.is_subadmin)}
+                        checked={isSubAdmin}
                         onChange={(e) =>
                           setPermDraft((d) => {
                             const copy = { ...d }
@@ -619,37 +653,71 @@ export default function StaffManager() {
                         }
                         className="h-4 w-4 accent-orange-500"
                       />
-                      Sub admin (everything)
+                      Sub admin (admin area)
                     </label>
                   </div>
 
-                  {permDraft.is_subadmin ? (
-                    <p className="rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs text-orange-300">
-                      A sub admin can open everything, so these switches are not used.
-                    </p>
-                  ) : (
+                  {isSubAdmin ? (
                     <>
+                      <p className="rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs text-orange-300">
+                        They open the admin area with the sidebar, same as you. Tick only the departments they
+                        should find there — the rest will not appear at all.
+                      </p>
+
+                      {ADMIN_GROUPS.map((g) => {
+                        const items = g.keys.map((k) => moduleByKey.get(k)).filter(Boolean) as Module[]
+                        if (items.length === 0) return null
+                        const allOn = items.every((m) => effective(m.key))
+                        return (
+                          <div key={g.title} className="mt-5">
+                            <div className="mb-2.5 flex items-center gap-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{g.title}</p>
+                              <button
+                                type="button"
+                                onClick={() => setMany(items.map((m) => m.key), !allOn)}
+                                className="text-[11px] text-orange-400 hover:underline"
+                              >
+                                {allOn ? 'Turn all off' : 'Turn all on'}
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap gap-x-5 gap-y-4">
+                              {items.map((m) => <PermToggle key={m.key} k={m.key} label={m.label} />)}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </>
+                  ) : (
+                    <div className="flex flex-wrap gap-x-5 gap-y-4">
+                      {shownModules.map((m) => <PermToggle key={m.key} k={m.key} label={m.label} />)}
+                    </div>
+                  )}
+
+                  {/* What they may do inside a module they can open */}
+                  {effective('mod_leads') && (
+                    <>
+                      <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside leads</p>
                       <div className="flex flex-wrap gap-x-5 gap-y-4">
-                        {shownModules.map((m) => <PermToggle key={m.key} k={m.key} label={m.label} />)}
+                        {Object.entries(ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
                       </div>
+                    </>
+                  )}
 
-                      {effective('mod_leads') && (
-                        <>
-                          <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside leads</p>
-                          <div className="flex flex-wrap gap-x-5 gap-y-4">
-                            {Object.entries(ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
-                          </div>
-                        </>
-                      )}
+                  {effective('mod_tasks') && (
+                    <>
+                      <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside tasks</p>
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        {Object.entries(TASK_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
+                      </div>
+                    </>
+                  )}
 
-                      {effective('mod_tasks') && (
-                        <>
-                          <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside tasks</p>
-                          <div className="flex flex-wrap gap-x-5 gap-y-4">
-                            {Object.entries(TASK_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
-                          </div>
-                        </>
-                      )}
+                  {effective('mod_quotations') && (
+                    <>
+                      <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside quotations</p>
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        {Object.entries(QUOTE_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
+                      </div>
                     </>
                   )}
 

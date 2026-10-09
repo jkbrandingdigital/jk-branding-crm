@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
+  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
@@ -28,6 +28,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: 'Productivity',
     items: [
       { label: 'Tasks', path: '/manager/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
+      { label: 'To-Do', path: '/manager/todos', icon: ListChecks, ready: true, perm: 'mod_todos' },
       { label: 'Reminders', path: '/manager/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
       { label: 'Notes', path: '/manager/notes', icon: StickyNote, ready: true, perm: 'mod_notes' },
     ],
