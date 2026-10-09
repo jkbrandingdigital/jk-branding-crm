@@ -36,14 +36,29 @@ export default function LeadSearchCard({
   staff: Staff[]
   onOpen: (id: string) => void
 }) {
+  // The board only carries what a card draws, so read the rest here —
+  // it is three rows at most.
+  const [full, setFull] = useState<LeadL>(lead)
+  useEffect(() => {
+    setFull(lead)
+    let alive = true
+    supabase
+      .from('leads')
+      .select('*')
+      .eq('id', lead.id)
+      .maybeSingle()
+      .then(({ data }) => { if (alive && data) setFull({ ...lead, ...(data as LeadL) }) })
+    return () => { alive = false }
+  }, [lead])
+
   const [tab, setTab] = useState<TabKey>('lead')
   const [counts, setCounts] = useState<Counts>({ task: 0, reminder: 0, note: 0, quotation: 0 })
   const [rows, setRows] = useState<Row[]>([])
   const [busy, setBusy] = useState(false)
 
   const nameOf = (id: string | null) => (id ? staff.find((s) => s.id === id)?.full_name ?? '—' : 'Unassigned')
-  const stage = stages.find((s) => s.id === lead.stage_id)
-  const leadLabels = (lead.label_ids ?? []).map((id) => labels.find((x) => x.id === id)).filter(Boolean) as Label[]
+  const stage = stages.find((s) => s.id === full.stage_id)
+  const leadLabels = (full.label_ids ?? []).map((id) => labels.find((x) => x.id === id)).filter(Boolean) as Label[]
 
   // How much is attached to this lead
   useEffect(() => {
@@ -145,13 +160,13 @@ export default function LeadSearchCard({
       <div className="px-5 py-4">
         {tab === 'lead' ? (
           <div className="divide-y divide-[#1c1c1c]">
-            <Line label="Customer Name">{lead.name}</Line>
-            <Line label="Company Name">{lead.company || '—'}</Line>
-            <Line label="Mobile No">{lead.phone || '—'}</Line>
-            <Line label="Email">{lead.email || '—'}</Line>
+            <Line label="Customer Name">{full.name}</Line>
+            <Line label="Company Name">{full.company || '—'}</Line>
+            <Line label="Mobile No">{full.phone || '—'}</Line>
+            <Line label="Email">{full.email || '—'}</Line>
             <Line label="Source">
-              <span className={`rounded-full px-2 py-0.5 text-xs ${sourceOf(lead.source).cls}`}>
-                {sourceOf(lead.source).label}
+              <span className={`rounded-full px-2 py-0.5 text-xs ${sourceOf(full.source).cls}`}>
+                {sourceOf(full.source).label}
               </span>
             </Line>
             <Line label="Status">
@@ -179,13 +194,13 @@ export default function LeadSearchCard({
                 </span>
               )}
             </Line>
-            <Line label="Date">{fmtDT(lead.created_at)}</Line>
-            <Line label="Next follow-up">{lead.next_follow_up ? fmtDT(lead.next_follow_up) : '—'}</Line>
-            <Line label="Created By">{nameOf(lead.created_by)}</Line>
-            <Line label="Assign To">{nameOf(lead.assigned_to)}</Line>
-            <Line label="Address">{lead.city || '—'}</Line>
-            <Line label="Estimated">{inr(Number(lead.estimated_amount) || 0)}</Line>
-            <Line label="Comment">{lead.requirement || '—'}</Line>
+            <Line label="Date">{fmtDT(full.created_at)}</Line>
+            <Line label="Next follow-up">{full.next_follow_up ? fmtDT(full.next_follow_up) : '—'}</Line>
+            <Line label="Created By">{nameOf(full.created_by)}</Line>
+            <Line label="Assign To">{nameOf(full.assigned_to)}</Line>
+            <Line label="Address">{full.city || '—'}</Line>
+            <Line label="Estimated">{inr(Number(full.estimated_amount) || 0)}</Line>
+            <Line label="Comment">{full.requirement || '—'}</Line>
           </div>
         ) : busy ? (
           <p className="py-6 text-center text-sm text-gray-500">

@@ -35,8 +35,28 @@ const when = (iso: string | null) =>
     ? new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
     : '—'
 
-function PageAvatar({ url, name }: { url: string | null; name: string | null }) {
-  if (url) return <img src={url} alt="" className="h-9 w-9 shrink-0 rounded-full border border-[#2a2a2a] object-cover" />
+function PageAvatar({ pageId, url, name }: { pageId: string; url: string | null; name: string | null }) {
+  // Facebook's own CDN links (scontent…fbcdn.net) go stale in a few days and
+  // the picture turns into an empty circle. This one is worked out from the
+  // page id every time, so it never goes stale.
+  const live = `https://graph.facebook.com/${pageId}/picture?type=square&width=72&height=72`
+
+  // live → the link saved at connect time → the first letter
+  const [src, setSrc] = useState<string | null>(live)
+  useEffect(() => setSrc(live), [live])
+
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setSrc(src === live && url ? url : null)}
+        className="h-9 w-9 shrink-0 rounded-full border border-[#2a2a2a] bg-[#1a1a1a] object-cover"
+      />
+    )
+  }
   return (
     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#2a2a2a] bg-[#1a1a1a] text-sm text-gray-300">
       {(name ?? '?').charAt(0).toUpperCase()}
@@ -227,7 +247,7 @@ export default function IntegrationsTab() {
                         onChange={() => toggle(p.page_id)}
                         className="h-4 w-4 accent-orange-500"
                       />
-                      <PageAvatar url={p.picture_url} name={p.page_name} />
+                      <PageAvatar pageId={p.page_id} url={p.picture_url} name={p.page_name} />
                       <span className="flex-1 text-sm text-white">{p.page_name ?? p.page_id}</span>
                       {p.connected && <span className="text-xs text-green-400">Already connected</span>}
                     </label>
@@ -266,7 +286,7 @@ export default function IntegrationsTab() {
             <ul className="divide-y divide-[#242424]">
               {pages.map((p) => (
                 <li key={p.page_id} className="flex flex-wrap items-center gap-3 py-3">
-                  <PageAvatar url={p.picture_url} name={p.page_name} />
+                  <PageAvatar pageId={p.page_id} url={p.picture_url} name={p.page_name} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm text-white">{p.page_name ?? p.page_id}</div>
                     <div className="text-xs text-gray-400">

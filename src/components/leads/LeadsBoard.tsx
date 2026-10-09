@@ -82,6 +82,11 @@ const CARDS_AT_A_TIME = 40   // per column on the board
 const LIST_PAGE = 200        // rows in list view
 const BULK_PAGE = 1000       // export and delete-all walk through in these steps
 
+// The board draws these and nothing else. Asking for * drags `requirement`
+// along — the long 365 comment — and that is most of the weight on the wire.
+const CARD_COLS =
+  'id, lead_no, name, phone, company, city, source, stage_id, assigned_to, created_by, created_at, next_follow_up, rating, estimated_amount, label_id, label_ids'
+
 const PREF_KEY = 'jk_leads_card_prefs'
 const STAGE_KEY = 'jk_leads_hidden_stages'
 const FILTER_KEY = 'jk_lead_filters'
@@ -295,6 +300,8 @@ export default function LeadsBoard() {
   const [cancelPick, setCancelPick] = useState('')
   const [cancelNote, setCancelNote] = useState('')
   const [fuErr, setFuErr] = useState<string | null>(null)
+  // Which leads already have their follow-up count, so it is asked once
+  const fuKnown = useRef<Set<string>>(new Set())
   const [lookup, setLookup] = useState<LookupRow[]>([])
   const [looking, setLooking] = useState(false)
   const [wipeOpen, setWipeOpen] = useState(false)
@@ -347,21 +354,6 @@ export default function LeadsBoard() {
     void loadMeta()
   }, [loadMeta])
 
-  // ---------- Follow-up counts, only for the cards on screen ----------
-  const loadFu = useCallback(async (ids: string[]) => {
-    if (ids.length === 0) return
-    for (let i = 0; i < ids.length; i += 100) {
-      const chunk = ids.slice(i, i + 100)
-      const { data } = await supabase.from('lead_followup_counts').select('lead_id, follow_ups').in('lead_id', chunk)
-      if (!data) continue
-      setFuCounts((m) => {
-        const next = { ...m }
-        for (const r of data as { lead_id: string; follow_ups: number }[]) next[r.lead_id] = r.follow_ups
-        return next
-      })
-    }
-  }, [])
-
   // ---------- Column headings: counts, ₹ totals, overdue ----------
   const loadSummary = useCallback(async () => {
     if (stages.length === 0) return
@@ -388,7 +380,7 @@ export default function LeadsBoard() {
     async (stageId: string, size: number) => {
       const mine = queryKey
       setCols((c) => ({ ...c, [stageId]: { rows: c[stageId]?.rows ?? [], loading: true } }))
-      const qy = applyLeadFilters(supabase.from('leads').select('*').eq('stage_id', stageId), f, q, openStageIds)
+      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS).eq('stage_id', stageId), f, q, openStageIds)
       const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
       if (keyRef.current !== mine) return
       if (e) {
@@ -398,9 +390,8 @@ export default function LeadsBoard() {
       }
       const got = (data ?? []) as LeadL[]
       setCols((c) => ({ ...c, [stageId]: { rows: got, loading: false } }))
-      void loadFu(got.map((l) => l.id))
     },
-    [f, q, openStageIds, queryKey, loadFu],
+    [f, q, openStageIds, queryKey],
   )
 
   // ---------- List view page ----------
@@ -408,16 +399,15 @@ export default function LeadsBoard() {
     async (size: number) => {
       const mine = queryKey
       setListBusy(true)
-      const qy = applyLeadFilters(supabase.from('leads').select('*'), f, q, openStageIds)
+      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS), f, q, openStageIds)
       const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
       if (keyRef.current !== mine) return
       setListBusy(false)
       if (e) return setError(e.message)
       const got = (data ?? []) as LeadL[]
       setRows(got)
-      void loadFu(got.map((l) => l.id))
     },
-    [f, q, openStageIds, queryKey, loadFu],
+    [f, q, openStageIds, queryKey],
   )
 
   // Filters, search or stages changed: start the board over
@@ -436,6 +426,7 @@ export default function LeadsBoard() {
 
   // Re-ask for whatever is on screen right now, after a change
   const refresh = useCallback(() => {
+    fuKnown.current.clear()
     void loadSummary()
     void supabase
       .from('leads')
@@ -513,6 +504,27 @@ export default function LeadsBoard() {
     for (const l of rows) m.set(l.id, l)
     return m
   }, [cols, rows])
+
+  // Follow-up counts for everything on screen, in one go
+  useEffect(() => {
+    const need = [...loadedLeads.keys()].filter((id) => !fuKnown.current.has(id))
+    if (need.length === 0) return
+    let alive = true
+    ;(async () => {
+      for (let i = 0; i < need.length; i += 200) {
+        const chunk = need.slice(i, i + 200)
+        for (const id of chunk) fuKnown.current.add(id)
+        const { data } = await supabase.from('lead_followup_counts').select('lead_id, follow_ups').in('lead_id', chunk)
+        if (!alive || !data) continue
+        setFuCounts((m) => {
+          const next = { ...m }
+          for (const r of data as { lead_id: string; follow_ups: number }[]) next[r.lead_id] = r.follow_ups
+          return next
+        })
+      }
+    })()
+    return () => { alive = false }
+  }, [loadedLeads])
 
   // Change one card where it sits, without re-fetching the page
   const patchLead = (id: string, patch: Partial<LeadL>) => {
