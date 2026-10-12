@@ -25,6 +25,7 @@ export type Lead = {
   estimated_amount: number
   tags: string[]
   next_follow_up: string | null
+  follow_up_count: number
   last_activity_at: string | null
   created_by: string | null
   created_at: string

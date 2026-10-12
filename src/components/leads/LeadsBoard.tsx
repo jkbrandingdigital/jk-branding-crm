@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Check, Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
 import LeadDrawer from './LeadDrawer'
@@ -85,7 +84,7 @@ const BULK_PAGE = 1000       // export and delete-all walk through in these step
 // The board draws these and nothing else. Asking for * drags `requirement`
 // along — the long 365 comment — and that is most of the weight on the wire.
 const CARD_COLS =
-  'id, lead_no, name, phone, company, city, source, stage_id, assigned_to, created_by, created_at, next_follow_up, rating, estimated_amount, label_id, label_ids'
+  'id, lead_no, name, phone, company, city, source, stage_id, assigned_to, created_by, created_at, next_follow_up, follow_up_count, rating, estimated_amount, label_id, label_ids'
 
 const PREF_KEY = 'jk_leads_card_prefs'
 const STAGE_KEY = 'jk_leads_hidden_stages'
@@ -230,7 +229,6 @@ const emptyNew = (): NewLead => ({
 
 export default function LeadsBoard() {
   const { can, ready } = usePermissions()
-  const { role } = useAuth()
   const [myId, setMyId] = useState<string | null>(null)
   const [stages, setStages] = useState<Stage[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
@@ -296,17 +294,11 @@ export default function LeadsBoard() {
   const [fu, setFu] = useState<{ lead: LeadL; when: string; text: string } | null>(null)
   const [cancelFor, setCancelFor] = useState<{ leadId: string; stageId: string; name: string } | null>(null)
   const [reasons, setReasons] = useState<{ id: string; name: string }[]>([])
-  const [fuCounts, setFuCounts] = useState<Record<string, number>>({})
   const [cancelPick, setCancelPick] = useState('')
   const [cancelNote, setCancelNote] = useState('')
   const [fuErr, setFuErr] = useState<string | null>(null)
-  // Which leads already have their follow-up count, so it is asked once
-  const fuKnown = useRef<Set<string>>(new Set())
   const [lookup, setLookup] = useState<LookupRow[]>([])
   const [looking, setLooking] = useState(false)
-  const [wipeOpen, setWipeOpen] = useState(false)
-  const [wipeWord, setWipeWord] = useState('')
-  const [wiping, setWiping] = useState<string>('')
   const [exporting, setExporting] = useState<string>('')
 
   // Stages where a lead can still be chased — overdue only counts in these
@@ -426,7 +418,6 @@ export default function LeadsBoard() {
 
   // Re-ask for whatever is on screen right now, after a change
   const refresh = useCallback(() => {
-    fuKnown.current.clear()
     void loadSummary()
     void supabase
       .from('leads')
@@ -504,27 +495,6 @@ export default function LeadsBoard() {
     for (const l of rows) m.set(l.id, l)
     return m
   }, [cols, rows])
-
-  // Follow-up counts for everything on screen, in one go
-  useEffect(() => {
-    const need = [...loadedLeads.keys()].filter((id) => !fuKnown.current.has(id))
-    if (need.length === 0) return
-    let alive = true
-    ;(async () => {
-      for (let i = 0; i < need.length; i += 200) {
-        const chunk = need.slice(i, i + 200)
-        for (const id of chunk) fuKnown.current.add(id)
-        const { data } = await supabase.from('lead_followup_counts').select('lead_id, follow_ups').in('lead_id', chunk)
-        if (!alive || !data) continue
-        setFuCounts((m) => {
-          const next = { ...m }
-          for (const r of data as { lead_id: string; follow_ups: number }[]) next[r.lead_id] = r.follow_ups
-          return next
-        })
-      }
-    })()
-    return () => { alive = false }
-  }, [loadedLeads])
 
   // Change one card where it sits, without re-fetching the page
   const patchLead = (id: string, patch: Partial<LeadL>) => {
@@ -616,61 +586,6 @@ export default function LeadsBoard() {
     const { error: e } = await supabase.from('leads').update({ assigned_to: userId }).eq('id', leadId)
     if (e) setError(e.message)
     refresh()
-  }
-
-  // Every lead the filters match right now, id only, in pages.
-  async function matchingIds(): Promise<string[] | null> {
-    const ids: string[] = []
-    for (let start = 0; ; start += BULK_PAGE) {
-      const qy = applyLeadFilters(supabase.from('leads').select('id'), f, q, openStageIds)
-      const { data, error: e } = await qy.order('created_at', { ascending: false }).range(start, start + BULK_PAGE - 1)
-      if (e) {
-        setError(e.message)
-        return null
-      }
-      const got = (data ?? []) as { id: string }[]
-      ids.push(...got.map((r) => r.id))
-      setWiping(`Finding leads… ${ids.length}`)
-      if (got.length < BULK_PAGE) break
-    }
-    return ids
-  }
-
-  // Takes out every lead the filters are showing right now.
-  // They are marked deleted, not erased — the backup zip still carries them.
-  async function deleteShown() {
-    setWiping('Finding leads…')
-    const ids = await matchingIds()
-    if (!ids) {
-      setWiping('')
-      setWipeOpen(false)
-      return
-    }
-    if (ids.length === 0) {
-      setWiping('')
-      setWipeOpen(false)
-      return
-    }
-    const now = new Date().toISOString()
-    let gone = 0
-    for (let i = 0; i < ids.length; i += 200) {
-      const chunk = ids.slice(i, i + 200)
-      setWiping(`Deleting ${Math.min(i + chunk.length, ids.length)} of ${ids.length}…`)
-      const { error: e } = await supabase.from('leads').update({ deleted_at: now }).in('id', chunk)
-      if (e) {
-        setWiping('')
-        setWipeOpen(false)
-        return setError(e.message)
-      }
-      gone += chunk.length
-    }
-    setWiping('')
-    setWipeOpen(false)
-    setWipeWord('')
-    setOpenId(null)
-    setError(null)
-    refresh()
-    window.alert(`${gone} leads deleted.`)
   }
 
   async function removeLead(l: LeadL) {
@@ -948,12 +863,12 @@ export default function LeadsBoard() {
               <button
                 onClick={() => { setFuErr(null); setFu({ lead: l, when: toInputDT(l.next_follow_up), text: '' }) }}
                 className={`${iconBtn} relative`}
-                title={fuCounts[l.id] ? `${fuCounts[l.id]} follow-ups so far` : 'Add follow-up'}
+                title={l.follow_up_count ? `${l.follow_up_count} follow-up${l.follow_up_count > 1 ? 's' : ''} so far` : 'Add follow-up'}
               >
                 <Send size={14} className="-rotate-12" />
-                {fuCounts[l.id] > 0 && (
+                {l.follow_up_count > 0 && (
                   <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-semibold leading-none text-white">
-                    {fuCounts[l.id] > 99 ? '99+' : fuCounts[l.id]}
+                    {l.follow_up_count > 99 ? '99+' : l.follow_up_count}
                   </span>
                 )}
               </button>
@@ -1076,15 +991,6 @@ export default function LeadsBoard() {
               title={`Export ${shown} leads to Excel`}
             >
               <Download size={16} /> {exporting ? 'Exporting…' : 'Export'}
-            </button>
-          )}
-          {role === 'super_admin' && shown > 0 && (
-            <button
-              onClick={() => { setWipeWord(''); setWipeOpen(true) }}
-              className="flex items-center gap-2 rounded-lg border border-red-900/60 px-3 py-2 text-sm text-red-400 hover:border-red-700 hover:text-red-300"
-              title="Delete every lead shown right now"
-            >
-              <Trash2 size={16} /> Delete {shown.toLocaleString('en-IN')}
             </button>
           )}
           {ready && can('lead_create') && (
@@ -1528,70 +1434,6 @@ export default function LeadsBoard() {
                 className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
               >
                 {busy ? 'Saving…' : 'Cancel lead'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete everything on screen */}
-      {wipeOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => !wiping && setWipeOpen(false)}>
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative w-full max-w-lg rounded-2xl border border-red-900/50 bg-[#151515]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
-              <h2 className="font-semibold text-red-300">Delete {shown.toLocaleString('en-IN')} leads</h2>
-              <button onClick={() => !wiping && setWipeOpen(false)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-4 px-5 py-5 text-sm">
-              <p className="text-gray-300">
-                Every lead the filters are showing right now will go — all {shown.toLocaleString('en-IN')} of them,
-                out of {totalAll.toLocaleString('en-IN')} in the CRM. Their follow-ups go with them.
-              </p>
-              {onCount > 0 || q.trim() ? (
-                <p className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs text-gray-400">
-                  {q.trim() && <>A search is on. </>}
-                  {onCount > 0 && <>{onCount} filter{onCount > 1 ? 's are' : ' is'} on. </>}
-                  This is only part of the CRM.
-                </p>
-              ) : (
-                <p className="rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-2 text-xs text-red-300">
-                  No filters are on. This is every lead in the CRM.
-                </p>
-              )}
-              <p className="text-xs text-gray-500">
-                They are marked deleted, not wiped from the database, so a backup taken earlier still has them.
-                Take one from Company → Backup first if you have not.
-              </p>
-
-              <label className="block">
-                <span className="mb-1.5 block text-xs text-gray-400">
-                  Type <span className="font-semibold text-red-300">DELETE</span> to go ahead
-                </span>
-                <input
-                  autoFocus
-                  value={wipeWord}
-                  onChange={(e) => setWipeWord(e.target.value)}
-                  disabled={!!wiping}
-                  className={inputCls}
-                />
-              </label>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 border-t border-[#242424] px-5 py-4">
-              {wiping && <span className="mr-auto text-xs text-gray-400">{wiping}</span>}
-              <button onClick={() => setWipeOpen(false)} disabled={!!wiping} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white disabled:opacity-40">
-                Keep them
-              </button>
-              <button
-                onClick={deleteShown}
-                disabled={wipeWord.trim().toUpperCase() !== 'DELETE' || !!wiping}
-                className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
-              >
-                {wiping ? 'Deleting…' : `Delete ${shown.toLocaleString('en-IN')}`}
               </button>
             </div>
           </div>

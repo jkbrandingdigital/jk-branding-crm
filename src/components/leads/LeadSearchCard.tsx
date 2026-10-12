@@ -104,10 +104,12 @@ export default function LeadSearchCard({
     { key: 'quotation', label: 'Quotation', count: counts.quotation },
   ]
 
-  const Line = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="flex gap-2 py-1 text-sm">
-      <span className="w-32 shrink-0 font-medium text-gray-400">{label}</span>
-      <span className="min-w-0 flex-1 break-words text-gray-200">{children}</span>
+  // Label above, value below. Spacing does the separating — a rule every
+  // two lines turns into a black grid the moment the light theme is on.
+  const Field = ({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) => (
+    <div className={wide ? 'sm:col-span-2' : ''}>
+      <p className="text-[11px] uppercase tracking-wide text-gray-500">{label}</p>
+      <div className="mt-1 break-words text-sm text-gray-200">{children}</div>
     </div>
   )
 
@@ -159,26 +161,32 @@ export default function LeadSearchCard({
 
       <div className="px-5 py-4">
         {tab === 'lead' ? (
-          <div className="divide-y divide-[#1c1c1c]">
-            <Line label="Customer Name">{full.name}</Line>
-            <Line label="Company Name">{full.company || '—'}</Line>
-            <Line label="Mobile No">{full.phone || '—'}</Line>
-            <Line label="Email">{full.email || '—'}</Line>
-            <Line label="Source">
+          <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
+            <Field label="Customer name">
+              <span className="font-medium">{full.name}</span>
+              <span className="ml-2 text-xs text-gray-500">#{full.lead_no}</span>
+            </Field>
+            <Field label="Mobile no">{full.phone || '—'}</Field>
+
+            <Field label="Company name">{full.company || '—'}</Field>
+            <Field label="Email">{full.email || '—'}</Field>
+
+            <Field label="Source">
               <span className={`rounded-full px-2 py-0.5 text-xs ${sourceOf(full.source).cls}`}>
                 {sourceOf(full.source).label}
               </span>
-            </Line>
-            <Line label="Status">
+            </Field>
+            <Field label="Status">
               {stage ? (
-                <span className="rounded-full px-2 py-0.5 text-xs text-white" style={{ background: stage.color }}>
+                <span className="rounded-full px-2.5 py-0.5 text-xs font-medium text-white" style={{ background: stage.color }}>
                   {stage.name}
                 </span>
               ) : (
                 '—'
               )}
-            </Line>
-            <Line label="Label">
+            </Field>
+
+            <Field label="Label" wide>
               {leadLabels.length === 0 ? (
                 '—'
               ) : (
@@ -193,14 +201,27 @@ export default function LeadSearchCard({
                   ))}
                 </span>
               )}
-            </Line>
-            <Line label="Date">{fmtDT(full.created_at)}</Line>
-            <Line label="Next follow-up">{full.next_follow_up ? fmtDT(full.next_follow_up) : '—'}</Line>
-            <Line label="Created By">{nameOf(full.created_by)}</Line>
-            <Line label="Assign To">{nameOf(full.assigned_to)}</Line>
-            <Line label="Address">{full.city || '—'}</Line>
-            <Line label="Estimated">{inr(Number(full.estimated_amount) || 0)}</Line>
-            <Line label="Comment">{full.requirement || '—'}</Line>
+            </Field>
+
+            <Field label="Created on">{fmtDT(full.created_at)}</Field>
+            <Field label="Next follow-up">
+              {full.next_follow_up ? fmtDT(full.next_follow_up) : '—'}
+              {full.follow_up_count > 0 && (
+                <span className="ml-2 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                  {full.follow_up_count} done
+                </span>
+              )}
+            </Field>
+
+            <Field label="Created by">{nameOf(full.created_by)}</Field>
+            <Field label="Assigned to">{nameOf(full.assigned_to)}</Field>
+
+            <Field label="City">{full.city || '—'}</Field>
+            <Field label="Estimated amount">{inr(Number(full.estimated_amount) || 0)}</Field>
+
+            <Field label="Comment" wide>
+              <span className="whitespace-pre-wrap">{full.requirement || '—'}</span>
+            </Field>
           </div>
         ) : busy ? (
           <p className="py-6 text-center text-sm text-gray-500">
@@ -209,7 +230,7 @@ export default function LeadSearchCard({
         ) : rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-gray-500">Nothing on this lead yet.</p>
         ) : (
-          <ul className="divide-y divide-[#1c1c1c]">
+          <ul className="divide-y divide-[#1f1f1f]">
             {rows.map((r, i) => (
               <li key={str(r.id) || i} className="flex items-start gap-3 py-2.5">
                 <span className="min-w-0 flex-1">
