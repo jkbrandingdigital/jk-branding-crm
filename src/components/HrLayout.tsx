@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, type LucideIcon } from 'lucide-react'
 import Header from './Header'
+import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
 
 type Item = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
@@ -117,6 +118,7 @@ export default function HrLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#0f0f0f] text-white">
       <Header />
+      <WorkTimerBar />
       <div className="flex">
         <aside className="hidden w-64 shrink-0 border-r border-[#1f1f1f] bg-[#121212] lg:block">
           <div className="sticky top-0 h-screen">{sidebar}</div>

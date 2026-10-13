@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Menu, X, type LucideIcon } from 'lucide-react'
+import { Activity, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Menu, X, type LucideIcon } from 'lucide-react'
 import Header from './Header'
+import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
@@ -16,6 +17,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: 'To-Do', path: '/design/todos', icon: ListChecks, perm: 'mod_todos' },
       { label: 'Reminders', path: '/design/reminders', icon: AlarmClock, perm: 'mod_reminders' },
       { label: 'Notes', path: '/design/notes', icon: StickyNote, perm: 'mod_notes' },
+      { label: 'Team activity', path: '/design/activity', icon: Activity, perm: 'timer_view_all' },
     ],
   },
   { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
@@ -103,6 +105,7 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#0f0f0f] text-white">
       <Header />
+      <WorkTimerBar />
       <div className="flex">
         <aside className="hidden w-60 shrink-0 border-r border-[#1f1f1f] bg-[#121212] lg:block">
           <div className="sticky top-0 h-screen">{sidebar}</div>

@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
+  Activity, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
+import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
@@ -28,6 +29,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: 'Productivity',
     items: [
       { label: 'Tasks', path: '/manager/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
+      { label: 'Team activity', path: '/manager/activity', icon: Activity, ready: true, perm: 'timer_view_all' },
       { label: 'To-Do', path: '/manager/todos', icon: ListChecks, ready: true, perm: 'mod_todos' },
       { label: 'Reminders', path: '/manager/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
       { label: 'Notes', path: '/manager/notes', icon: StickyNote, ready: true, perm: 'mod_notes' },
@@ -166,6 +168,7 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-[#0f0f0f] text-white">
       <Header />
+      <WorkTimerBar />
       <div className="flex">
         <aside className="hidden w-60 shrink-0 border-r border-[#1f1f1f] bg-[#121212] lg:block">
           <div className="sticky top-0 h-screen">{sidebar}</div>

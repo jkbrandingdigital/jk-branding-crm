@@ -5,8 +5,10 @@ import { useAuth } from '../../contexts/AuthContext'
 import { fmtDT, type Staff } from '../leads/leadUtils'
 import { RichHtml } from '../RichText'
 import { currentAssignees, fmtTaskDT, priorityOf, type Task, type TaskLabel, type TaskStage } from './taskUtils'
+import { hhmm, TaskTimerButton } from './WorkTimer'
 
 type Tab = 'details' | 'comments' | 'files' | 'history'
+type TimeRow = { user_id: string; full_name: string | null; secs: number; sessions: number }
 type Comment = { id: string; user_id: string; body: string; created_at: string }
 type FileRow = { id: string; file_path: string; file_name: string; file_size: number | null; uploaded_by: string; created_at: string }
 type Activity = { id: string; user_id: string | null; kind: string; detail: string | null; created_at: string }
@@ -47,7 +49,17 @@ export default function TaskDetail({
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState('')   // id of the file being downloaded
+  const [time, setTime] = useState<TimeRow[]>([])
   const [error, setError] = useState('')
+
+  const loadTime = useCallback(async () => {
+    const { data } = await supabase.rpc('task_time', { p_task_id: task.id })
+    setTime((data ?? []) as TimeRow[])
+  }, [task.id])
+
+  useEffect(() => {
+    void loadTime()
+  }, [loadTime])
   const fileRef = useRef<HTMLInputElement>(null)
 
   const stage = stages.find((s) => s.id === task.stage_id)
@@ -182,7 +194,8 @@ export default function TaskDetail({
             <h2 id="task-detail-title" className="truncate font-semibold text-white">{task.subject}</h2>
             <p className="mt-0.5 text-xs text-gray-500">#{task.task_no} · {nameOf(task.created_by)}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-2">
+            {!locked && <TaskTimerButton taskId={task.id} size="md" onChanged={loadTime} />}
             {canEdit && (
               <button onClick={onEdit} aria-label="Edit task" title="Edit" className="rounded-md p-1.5 text-gray-400 hover:bg-[#222] hover:text-white">
                 <Pencil size={16} />
@@ -240,6 +253,20 @@ export default function TaskDetail({
               {row('Assigned to', currentAssignees(task).map(nameOf).join(', ') || '—')}
               {row('Start', fmtTaskDT(task.start_at))}
               {row('Due', fmtTaskDT(task.due_at))}
+              {/* Hours actually spent, not days elapsed. A job can sit for a
+                  week and still have taken two hours. */}
+              {time.length > 0 &&
+                row(
+                  'Time on this',
+                  <span className="space-y-0.5">
+                    {time.map((r) => (
+                      <span key={r.user_id} className="block">
+                        {r.full_name ?? '—'} · <span className="text-white">{hhmm(r.secs)}</span>
+                        <span className="text-gray-500"> · {r.sessions} sitting{r.sessions === 1 ? '' : 's'}</span>
+                      </span>
+                    ))}
+                  </span>,
+                )}
               {task.completed_at && row('Finished', fmtTaskDT(task.completed_at))}
               {row('Customer', task.customer_name || '—')}
               {row('Customer mobile', task.customer_phone || '—')}

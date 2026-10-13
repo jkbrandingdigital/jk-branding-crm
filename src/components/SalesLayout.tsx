@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
 import Header from './Header'
+import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
@@ -198,6 +199,7 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
   return (
     <div className="min-h-screen bg-[#0f0f0f] text-white">
       <Header />
+      <WorkTimerBar />
       <div className="flex">
         <aside className="hidden w-60 shrink-0 border-r border-[#1f1f1f] bg-[#121212] lg:block">
           <div className="sticky top-0 h-screen">{sidebar}</div>

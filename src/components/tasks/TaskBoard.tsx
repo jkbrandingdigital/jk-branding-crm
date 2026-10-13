@@ -11,6 +11,7 @@ import { DateField } from '../DateField'
 import { plainText } from '../RichText'
 import TaskModal from './TaskModal'
 import TaskDetail from './TaskDetail'
+import { TaskTimerButton } from './WorkTimer'
 import {
   currentAssignees, fmtTaskDT, isTaskOverdue, loadTaskCounts, loadTaskLabels, loadTaskStages, loadTasks,
   PRIORITIES, priorityOf, setAssignees, type Task, type TaskLabel, type TaskStage,
@@ -347,6 +348,14 @@ export default function TaskBoard() {
           <span className={`rounded px-1.5 py-0.5 text-[11px] ${p.cls}`}>{p.label}</span>
           {label && <span className="rounded bg-[#232323] px-1.5 py-0.5 text-[11px] text-gray-300">{label.name}</span>}
           {late && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[11px] text-red-400">Overdue</span>}
+
+          {/* The timer belongs to whoever is doing the task, so it only shows
+              on your own open ones. Clicking it must not open the card. */}
+          {currentAssignees(t).includes(me) && !isClosed(t) && (
+            <span className="ml-auto" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+              <TaskTimerButton taskId={t.id} />
+            </span>
+          )}
         </div>
 
         <dl className="mt-2.5 space-y-1 text-xs text-gray-400">
