@@ -35,6 +35,7 @@ export default function NotificationBell({
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<Notif[]>([])
   const [toasts, setToasts] = useState<Notif[]>([])
+  const [showRead, setShowRead] = useState(false)   // the bell holds what is still unread
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -53,14 +54,19 @@ export default function NotificationBell({
 
   const loadItems = useCallback(async () => {
     if (!uid) return
-    const { data } = await supabase
+    let qy = supabase
       .from('notifications')
       .select('id, title, body, created_at, read_at, kind, lead_id, task_id, link')
       .eq('user_id', uid)
-      .order('created_at', { ascending: false })
-      .limit(20)
+    if (!showRead) qy = qy.is('read_at', null)
+    const { data } = await qy.order('created_at', { ascending: false }).limit(30)
     setItems((data ?? []) as Notif[])
-  }, [uid])
+  }, [uid, showRead])
+
+  // Switching between "unread" and "everything" re-asks, but only while open
+  useEffect(() => {
+    if (open) void loadItems()
+  }, [open, loadItems])
 
   // Live: new reminder arrives → badge + popup
   useEffect(() => {
@@ -105,17 +111,18 @@ export default function NotificationBell({
   }, [open])
 
   function toggle() {
-    if (!open) {
-      loadItems()
-      if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
-    }
+    if (!open && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     setOpen((o) => !o)
   }
 
+  // Ticking one clears it off the bell. It is kept, not deleted — "Read"
+  // at the top of the list brings the old ones back.
   async function markRead(n: Notif) {
     if (n.read_at) return
     const now = new Date().toISOString()
-    setItems((list) => list.map((x) => (x.id === n.id ? { ...x, read_at: now } : x)))
+    setItems((list) =>
+      showRead ? list.map((x) => (x.id === n.id ? { ...x, read_at: now } : x)) : list.filter((x) => x.id !== n.id),
+    )
     setCount((c) => Math.max(0, c - 1))
     await supabase.from('notifications').update({ read_at: now }).eq('id', n.id)
   }
@@ -123,7 +130,7 @@ export default function NotificationBell({
   async function markAll() {
     if (!uid) return
     const now = new Date().toISOString()
-    setItems((list) => list.map((x) => (x.read_at ? x : { ...x, read_at: now })))
+    setItems((list) => (showRead ? list.map((x) => (x.read_at ? x : { ...x, read_at: now })) : []))
     setCount(0)
     await supabase.from('notifications').update({ read_at: now }).eq('user_id', uid).is('read_at', null)
   }
@@ -166,7 +173,15 @@ export default function NotificationBell({
         {open && (
           <div className="absolute right-0 z-30 mt-2 w-80 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#161616] shadow-lg sm:w-96">
             <div className="flex items-center justify-between border-b border-[#2a2a2a] px-4 py-2.5">
-              <p className="text-sm font-medium text-white">Notifications</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium text-white">{showRead ? 'All notifications' : 'Notifications'}</p>
+                <button
+                  onClick={() => setShowRead((s) => !s)}
+                  className="rounded-md border border-[#2a2a2a] px-2 py-0.5 text-[11px] text-gray-400 hover:border-orange-500/60 hover:text-orange-400"
+                >
+                  {showRead ? 'Unread only' : 'Show read'}
+                </button>
+              </div>
               {count > 0 && (
                 <button onClick={markAll} className="flex items-center gap-1 text-xs text-gray-400 hover:text-white">
                   <CheckCheck className="h-3.5 w-3.5" /> Mark all read
@@ -174,7 +189,11 @@ export default function NotificationBell({
               )}
             </div>
             <ul className="max-h-96 overflow-y-auto">
-              {items.length === 0 && <li className="px-4 py-8 text-center text-sm text-gray-500">Nothing here yet.</li>}
+              {items.length === 0 && (
+                <li className="px-4 py-8 text-center text-sm text-gray-500">
+                  {showRead ? 'Nothing here yet.' : 'All caught up.'}
+                </li>
+              )}
               {items.map((n) => (
                 <li key={n.id} className="flex items-start border-b border-[#222] last:border-0 hover:bg-[#1f1f1f]">
                   <button onClick={() => openItem(n)} className="flex min-w-0 flex-1 gap-3 py-3 pl-4 text-left">

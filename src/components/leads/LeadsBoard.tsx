@@ -78,6 +78,7 @@ const PREF_LABEL: [keyof CardPrefs, string][] = [
 // How much the board asks the database for at a time. Nothing else is
 // fetched, so the board opens at the same speed with 200 leads or 200,000.
 const CARDS_AT_A_TIME = 40   // per column on the board
+const SEARCH_CARDS = 300     // while searching: this many across every column, in one query
 const LIST_PAGE = 200        // rows in list view
 const BULK_PAGE = 1000       // export and delete-all walk through in these steps
 
@@ -121,6 +122,13 @@ const countOn = (f: Filters) =>
 // The search text goes into the query as-is, so strip the few characters
 // that would confuse the filter syntax instead of searching for them.
 const cleanQ = (s: string) => s.replace(/[,()%*\\"']/g, ' ').replace(/\s+/g, ' ').trim()
+
+// A timeout is the database saying "too much to look through", not a fault.
+// Say that in words the person can act on.
+const friendly = (m: string) =>
+  /statement timeout|canceling statement/i.test(m)
+    ? 'That search is taking the database too long. Type more of the name or number, or narrow it down with a filter.'
+    : m
 
 // "up to and including this date" means "before the next one"
 const nextDay = (d: string) => {
@@ -240,6 +248,7 @@ export default function LeadsBoard() {
   const [view, setView] = useState<'board' | 'list'>('board')
   const [q, setQ] = useState('')          // what the query uses
   const [typed, setTyped] = useState('')  // what is in the box right now
+  const [searchSize, setSearchSize] = useState(SEARCH_CARDS)  // one size for the whole board while searching
 
   const [f, setF] = useState<Filters>(NO_FILTERS)
   const set = (patch: Partial<Filters>) => setF((x) => ({ ...x, ...patch }))
@@ -351,7 +360,7 @@ export default function LeadsBoard() {
     if (stages.length === 0) return
     const { data, error: e } = await supabase.rpc('lead_board_summary', summaryArgs(f, q, openStageIds))
     if (keyRef.current !== JSON.stringify([f, q])) return
-    if (e) return setError(e.message)
+    if (e) return setError(friendly(e.message))
     const byStage: Record<string, { cnt: number; amount: number }> = {}
     let shown = 0
     let overdue = 0
@@ -376,7 +385,7 @@ export default function LeadsBoard() {
       const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
       if (keyRef.current !== mine) return
       if (e) {
-        setError(e.message)
+        setError(friendly(e.message))
         setCols((c) => ({ ...c, [stageId]: { rows: c[stageId]?.rows ?? [], loading: false } }))
         return
       }
@@ -384,6 +393,49 @@ export default function LeadsBoard() {
       setCols((c) => ({ ...c, [stageId]: { rows: got, loading: false } }))
     },
     [f, q, openStageIds, queryKey],
+  )
+
+  // ---------- Every column at once, while searching ----------
+  //
+  // Searching cannot use the stage index, so each column's query has to look
+  // through the whole table. Firing one of those per column meant eight or
+  // nine heavy queries landing on the database together, and they timed each
+  // other out. One query for the whole board instead, split into columns here.
+  const fetchAllCols = useCallback(
+    async (size: number) => {
+      const mine = queryKey
+      const ids = visibleStages.map((s) => s.id)
+      setCols((c) => {
+        const next: Record<string, { rows: LeadL[]; loading: boolean }> = {}
+        for (const id of ids) next[id] = { rows: c[id]?.rows ?? [], loading: true }
+        return next
+      })
+
+      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS), f, q, openStageIds)
+      const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
+      if (keyRef.current !== mine) return
+
+      if (e) {
+        setError(friendly(e.message))
+        setCols((c) => {
+          const next: Record<string, { rows: LeadL[]; loading: boolean }> = {}
+          for (const id of ids) next[id] = { rows: c[id]?.rows ?? [], loading: false }
+          return next
+        })
+        return
+      }
+
+      const byStage: Record<string, LeadL[]> = {}
+      for (const l of (data ?? []) as LeadL[]) {
+        if (!l.stage_id) continue   // no stage, so no column to sit in
+        const bucket = byStage[l.stage_id] ?? (byStage[l.stage_id] = [])
+        bucket.push(l)
+      }
+      const next: Record<string, { rows: LeadL[]; loading: boolean }> = {}
+      for (const id of ids) next[id] = { rows: byStage[id] ?? [], loading: false }
+      setCols(next)
+    },
+    [f, q, openStageIds, queryKey, visibleStages],
   )
 
   // ---------- List view page ----------
@@ -395,20 +447,24 @@ export default function LeadsBoard() {
       const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
       if (keyRef.current !== mine) return
       setListBusy(false)
-      if (e) return setError(e.message)
+      if (e) return setError(friendly(e.message))
       const got = (data ?? []) as LeadL[]
       setRows(got)
     },
     [f, q, openStageIds, queryKey],
   )
 
+  const searching = cleanQ(q) !== ''
+
   // Filters, search or stages changed: start the board over
   useEffect(() => {
     if (view !== 'board' || visibleStages.length === 0) return
     setCols({})
     setColSize({})
-    for (const st of visibleStages) void fetchCol(st.id, CARDS_AT_A_TIME)
-  }, [view, visibleStages, fetchCol])
+    setSearchSize(SEARCH_CARDS)
+    if (searching) void fetchAllCols(SEARCH_CARDS)
+    else for (const st of visibleStages) void fetchCol(st.id, CARDS_AT_A_TIME)
+  }, [view, visibleStages, searching, fetchCol, fetchAllCols])
 
   useEffect(() => {
     if (view !== 'list' || stages.length === 0) return
@@ -424,9 +480,10 @@ export default function LeadsBoard() {
       .select('id', { count: 'exact', head: true })
       .is('deleted_at', null)
       .then(({ count }) => setTotalAll(count ?? 0))
-    if (view === 'board') for (const st of visibleStages) void fetchCol(st.id, colSize[st.id] ?? CARDS_AT_A_TIME)
-    else void fetchList(listRows)
-  }, [loadSummary, view, visibleStages, fetchCol, fetchList, colSize, listRows])
+    if (view !== 'board') return void fetchList(listRows)
+    if (searching) void fetchAllCols(searchSize)
+    else for (const st of visibleStages) void fetchCol(st.id, colSize[st.id] ?? CARDS_AT_A_TIME)
+  }, [loadSummary, view, visibleStages, searching, fetchCol, fetchAllCols, fetchList, colSize, listRows, searchSize])
 
   const savePrefs = (next: CardPrefs) => {
     setPrefs(next)
@@ -1267,6 +1324,12 @@ export default function LeadsBoard() {
                       {left > 0 && (
                         <button
                           onClick={() => {
+                            if (searching) {
+                              const next = searchSize + SEARCH_CARDS
+                              setSearchSize(next)
+                              void fetchAllCols(next)
+                              return
+                            }
                             const next = (colSize[st.id] ?? CARDS_AT_A_TIME) + CARDS_AT_A_TIME
                             setColSize((p) => ({ ...p, [st.id]: next }))
                             void fetchCol(st.id, next)
