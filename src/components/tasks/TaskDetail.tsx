@@ -46,6 +46,7 @@ export default function TaskDetail({
   const [history, setHistory] = useState<Activity[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState('')   // id of the file being downloaded
   const [error, setError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -122,10 +123,27 @@ export default function TaskDetail({
     onChanged()
   }
 
-  async function openFile(row: FileRow) {
-    const { data, error: e } = await supabase.storage.from('task-files').createSignedUrl(row.file_path, 60)
-    if (e || !data) return setError(e?.message ?? 'Could not open the file.')
-    window.open(data.signedUrl, '_blank', 'noopener')
+  // Pulls the file down first, then saves it from the browser's own memory.
+  //
+  // A signed URL points at Storage, so the browser decides what to do with it
+  // and shows a PDF or an image in a new tab instead of saving it. A blob URL
+  // is this page's own, so the `download` attribute is always obeyed and every
+  // file type is saved the same way, with the task still open behind it.
+  async function saveFile(row: FileRow) {
+    setError('')
+    setSaving(row.id)
+    const { data, error: e } = await supabase.storage.from('task-files').download(row.file_path)
+    setSaving('')
+    if (e || !data) return setError(e?.message ?? 'Could not download the file.')
+
+    const url = URL.createObjectURL(data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = row.file_name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 
   async function removeFile(row: FileRow) {
@@ -285,8 +303,14 @@ export default function TaskDetail({
                         {f.file_size ? ` · ${Math.max(1, Math.round(f.file_size / 1024))} KB` : ''}
                       </span>
                     </span>
-                    <button onClick={() => openFile(f)} aria-label="Open file" className="rounded-md p-1.5 text-gray-400 hover:bg-[#222] hover:text-white">
-                      <Download size={15} />
+                    <button
+                      onClick={() => saveFile(f)}
+                      disabled={saving === f.id}
+                      aria-label="Download file"
+                      title="Download"
+                      className="rounded-md p-1.5 text-gray-400 hover:bg-[#222] hover:text-white disabled:opacity-50"
+                    >
+                      {saving === f.id ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
                     </button>
                     {(f.uploaded_by === me || canEdit) && (
                       <button onClick={() => removeFile(f)} aria-label="Delete file" className="rounded-md p-1.5 text-gray-400 hover:bg-[#222] hover:text-red-400">
