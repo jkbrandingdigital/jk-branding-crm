@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, type LucideIcon } from 'lucide-react'
+import { TrendingUp, LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
@@ -30,6 +30,7 @@ const GROUPS: Group[] = [
     title: 'People',
     items: [
       { label: 'Employees', path: '/hr/employees', icon: Users, ready: true, perm: 'mod_employees' },
+      { label: 'Design performance', path: '/hr/design-performance', icon: TrendingUp, ready: true, perm: 'design_perf' },
       { label: 'Attendance', path: '/hr/attendance', icon: CalendarCheck, ready: false },
       { label: 'Leave Requests', path: '/hr/leaves', icon: CalendarOff, ready: false },
     ],

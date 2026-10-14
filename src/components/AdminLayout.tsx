@@ -50,6 +50,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: 'Tasks', path: '/admin/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
       { label: 'Team activity', path: '/admin/activity', icon: Activity, ready: true, perm: 'timer_view_all' },
+      { label: 'Design performance', path: '/admin/design-performance', icon: Palette, ready: true, perm: 'design_perf' },
       { label: 'Task Settings', path: '/admin/tasks/settings', icon: Settings, ready: true, perm: 'task_settings' },
       { label: 'To-Do', path: '/admin/todos', icon: TodoIcon, ready: true, perm: 'mod_todos' },
       { label: 'Reminders', path: '/admin/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },

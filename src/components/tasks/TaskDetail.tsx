@@ -1,23 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, Loader2, Paperclip, Pencil, Send, Trash2, X } from 'lucide-react'
+import { Clock, Download, Loader2, Paperclip, Pencil, Plus, Send, Trash2, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
+import { useChartTheme } from '../../lib/chartTheme'
 import { fmtDT, type Staff } from '../leads/leadUtils'
 import { RichHtml } from '../RichText'
-import { currentAssignees, fmtTaskDT, priorityOf, type Task, type TaskLabel, type TaskStage } from './taskUtils'
+import { CHANGE_SOURCES, currentAssignees, fmtTaskDT, mins, priorityOf, type Task, type TaskLabel, type TaskStage, type TimeStatus } from './taskUtils'
 import { hhmm, TaskTimerButton } from './WorkTimer'
 
 type Tab = 'details' | 'comments' | 'files' | 'history'
 type TimeRow = { user_id: string; full_name: string | null; secs: number; sessions: number }
+type Sitting = { id: string; user_id: string; started_at: string; ended_at: string | null; end_reason: string | null }
 type Comment = { id: string; user_id: string; body: string; created_at: string }
 type FileRow = { id: string; file_path: string; file_name: string; file_size: number | null; uploaded_by: string; created_at: string }
 type Activity = { id: string; user_id: string | null; kind: string; detail: string | null; created_at: string }
+
+const REASON_LABEL: Record<string, string> = {
+  switched: 'moved to another task',
+  urgent: 'urgent work came in',
+  waiting: 'waiting on content',
+  break: 'break',
+  done: 'finished',
+  day_end: 'end of day',
+  auto: 'left running, closed automatically',
+}
 
 const KIND_LABEL: Record<string, string> = {
   created: 'Created',
   assign: 'Assigned to',
   unassign: 'Removed',
   stage: 'Stage',
+  units: 'Quantity',
+  change: 'Changes',
   priority: 'Priority',
   due: 'Due date',
   label: 'Label',
@@ -50,12 +64,51 @@ export default function TaskDetail({
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState('')   // id of the file being downloaded
   const [time, setTime] = useState<TimeRow[]>([])
+  const [status, setStatus] = useState<TimeStatus | null>(null)
+  const [sittings, setSittings] = useState<Sitting[]>([])
+  const [adding, setAdding] = useState(false)
+  const [changeOpen, setChangeOpen] = useState(false)
+  const [changeNote, setChangeNote] = useState('')
+  const { dark } = useChartTheme()   // pale-on-cream cannot be read, so the tones swap
   const [error, setError] = useState('')
 
   const loadTime = useCallback(async () => {
-    const { data } = await supabase.rpc('task_time', { p_task_id: task.id })
-    setTime((data ?? []) as TimeRow[])
+    const [t, st] = await Promise.all([
+      supabase.rpc('task_time', { p_task_id: task.id }),
+      supabase.from('task_time_status').select('*').eq('task_id', task.id).maybeSingle(),
+    ])
+    setTime((t.data ?? []) as TimeRow[])
+    setStatus((st.data ?? null) as TimeStatus | null)
   }, [task.id])
+
+  // Records that the job came back. A client's change buys more allowed
+  // time; our own mistake does not. The name of whoever records it goes
+  // into the history, which is the only guard this needs.
+  async function addChange(source: string) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_add_change', {
+      p_task: task.id,
+      p_source: source,
+      p_note: changeNote.trim() || null,
+    })
+    setAdding(false)
+    setChangeOpen(false)
+    setChangeNote('')
+    if (e) return setError(e.message)
+    await loadTime()
+    onChanged()
+  }
+
+  // Adds one option, or one brochure page. The database works out the
+  // new allowed time and writes it into the history.
+  async function addUnit() {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_add_unit', { p_task: task.id, p_by: 1 })
+    setAdding(false)
+    if (e) return setError(e.message)
+    await loadTime()
+    onChanged()
+  }
 
   useEffect(() => {
     void loadTime()
@@ -76,8 +129,15 @@ export default function TaskDetail({
       const { data } = await supabase.from('task_attachments').select('*').eq('task_id', task.id).order('created_at', { ascending: false })
       setFiles((data ?? []) as FileRow[])
     } else if (tab === 'history') {
-      const { data } = await supabase.from('task_activities').select('*').eq('task_id', task.id).order('created_at', { ascending: false })
-      setHistory((data ?? []) as Activity[])
+      // Everything that happened to this task, in one list: the changes and
+      // the sittings. Looking at them apart hides how the time went.
+      const [a, s2] = await Promise.all([
+        supabase.from('task_activities').select('*').eq('task_id', task.id).order('created_at', { ascending: false }),
+        supabase.from('task_sessions').select('id, user_id, started_at, ended_at, end_reason')
+          .eq('task_id', task.id).order('started_at', { ascending: false }),
+      ])
+      setHistory((a.data ?? []) as Activity[])
+      setSittings((s2.data ?? []) as Sitting[])
     }
   }, [tab, task.id])
 
@@ -173,6 +233,28 @@ export default function TaskDetail({
     { key: 'history', label: 'History' },
   ]
 
+  // The changes and the sittings, woven into one list. Kept apart they hide
+  // how the time actually went.
+  type Line =
+    | { row: 'change'; id: string; at: string; user_id: string | null; kind: string; detail: string | null }
+    | { row: 'sitting'; id: string; at: string; user_id: string; secs: number; reason: string | null; running: boolean }
+
+  const timeline: Line[] = [
+    ...history.map((h): Line => ({ row: 'change', id: h.id, at: h.created_at, user_id: h.user_id, kind: h.kind, detail: h.detail })),
+    ...sittings.map((v): Line => ({
+      row: 'sitting',
+      id: v.id,
+      at: v.started_at,
+      user_id: v.user_id,
+      secs: (new Date(v.ended_at ?? Date.now()).getTime() - new Date(v.started_at).getTime()) / 1000,
+      reason: v.end_reason,
+      running: v.ended_at === null,
+    })),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+
+  const spentMins = Math.round((status?.actual_secs ?? 0) / 60)
+  const over = (status?.allowed_mins ?? 0) > 0 && spentMins > (status?.allowed_mins ?? 0)
+
   const row = (k: string, v: React.ReactNode) => (
     <div className="flex gap-3 border-b border-[#1f1f1f] py-2.5 text-sm last:border-0">
       <span className="w-36 shrink-0 text-gray-500">{k}</span>
@@ -191,8 +273,46 @@ export default function TaskDetail({
       >
         <div className="flex items-start justify-between gap-3 border-b border-[#242424] bg-[#171717] px-5 py-3.5">
           <div className="min-w-0">
-            <h2 id="task-detail-title" className="truncate font-semibold text-white">{task.subject}</h2>
-            <p className="mt-0.5 text-xs text-gray-500">#{task.task_no} · {nameOf(task.created_by)}</p>
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 id="task-detail-title" className="truncate font-semibold text-white">{task.subject}</h2>
+              {/* One more logo option, or one more brochure page. The allowed
+                  time goes up by itself — that is the whole point of it. */}
+              {status?.per_unit && !locked && (
+                <button
+                  onClick={addUnit}
+                  disabled={adding}
+                  aria-label={`Add one ${status.unit}`}
+                  title={`Add one ${status.unit} · +${mins(Math.round((status.allowed_mins ?? 0) / Math.max(status.work_qty, 1)))}`}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#2a2a2a] text-gray-400 hover:border-orange-500/60 hover:text-orange-400 disabled:opacity-50"
+                >
+                  {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+                </button>
+              )}
+            </div>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-gray-500">
+              <span>#{task.task_no} · {nameOf(task.created_by)}</span>
+              {status?.in_changes && (
+                <span
+                  className="rounded px-1.5 py-0.5 text-[11px] font-medium"
+                  style={dark
+                    ? { background: 'rgba(217,119,6,0.18)', color: '#fcd34d' }
+                    : { background: 'rgba(217,119,6,0.14)', color: '#92400e' }}
+                >
+                  Changes{status.change_rounds > 1 ? ` ×${status.change_rounds}` : ''}
+                </span>
+              )}
+              {status?.work_type && (
+                <span className="text-gray-400">
+                  · {status.work_type}
+                  {status.per_unit && <> · {status.work_qty} {status.unit}{status.work_qty === 1 ? '' : 's'}</>}
+                  {' · '}
+                  <span style={{ color: over ? (dark ? '#fca5a5' : '#991b1b') : (dark ? '#6ee7b7' : '#065f46') }}>
+                    {mins(spentMins)} of {mins(status.allowed_mins ?? 0)}
+                    {over && <> · over by {mins(spentMins - (status.allowed_mins ?? 0))}</>}
+                  </span>
+                </span>
+              )}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {!locked && <TaskTimerButton taskId={task.id} size="md" onChanged={loadTime} />}
@@ -251,6 +371,57 @@ export default function TaskDetail({
               {row('Priority', <span className={`rounded px-1.5 py-0.5 text-xs ${p.cls}`}>{p.label}</span>)}
               {row('Label', label ? <span className="rounded bg-[#232323] px-1.5 py-0.5 text-xs text-gray-300">{label.name}</span> : 'No label')}
               {row('Assigned to', currentAssignees(task).map(nameOf).join(', ') || '—')}
+              {/* The job came back. Saying who asked for it is the whole
+                  point — a client's change is not the designer's fault, and
+                  our own mistake does not earn extra time. */}
+              {status?.work_type && !locked &&
+                row(
+                  'Changes',
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-gray-300">
+                        {status.change_rounds === 0
+                          ? 'None yet'
+                          : `${status.change_rounds} round${status.change_rounds === 1 ? '' : 's'} · ${status.client_changes} from the client, ${status.our_changes} ours`}
+                      </span>
+                      <button
+                        onClick={() => setChangeOpen((o) => !o)}
+                        className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-amber-500/60 hover:text-amber-300"
+                      >
+                        {changeOpen ? 'Cancel' : 'Changes came in'}
+                      </button>
+                    </div>
+
+                    {changeOpen && (
+                      <div className="space-y-2 rounded-lg border border-[#2a2a2a] bg-[#171717] p-3">
+                        <input
+                          value={changeNote}
+                          onChange={(e) => setChangeNote(e.target.value)}
+                          placeholder="What has to change? (optional)"
+                          className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {CHANGE_SOURCES.map((c) => (
+                            <button
+                              key={c.key}
+                              onClick={() => addChange(c.key)}
+                              disabled={adding}
+                              className="flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white disabled:opacity-50"
+                            >
+                              {adding && <Loader2 className="h-3 w-3 animate-spin" />}
+                              {c.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-xs text-gray-600">
+                          A client's change adds time to what this job is allowed. Our own mistake
+                          adds none — redoing our own work is not new work. Either way your name goes
+                          on the record.
+                        </p>
+                      </div>
+                    )}
+                  </div>,
+                )}
               {row('Start', fmtTaskDT(task.start_at))}
               {row('Due', fmtTaskDT(task.due_at))}
               {/* Hours actually spent, not days elapsed. A job can sit for a
@@ -372,17 +543,33 @@ export default function TaskDetail({
 
           {tab === 'history' && (
             <ul className="space-y-3">
-              {history.map((h) => (
-                <li key={h.id} className="flex gap-3 text-sm">
-                  <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-orange-500/70" />
-                  <span className="min-w-0 flex-1">
-                    <span className="text-gray-200">{KIND_LABEL[h.kind] ?? h.kind}</span>
-                    {h.detail && <span className="text-gray-400"> · {h.detail}</span>}
-                    <span className="block text-xs text-gray-600">{nameOf(h.user_id)} · {fmtDT(h.created_at)}</span>
-                  </span>
-                </li>
-              ))}
-              {history.length === 0 && <li className="py-8 text-center text-sm text-gray-500">Nothing recorded yet.</li>}
+              {timeline.map((h) =>
+                h.row === 'change' ? (
+                  <li key={`a${h.id}`} className="flex gap-3 text-sm">
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-orange-500/70" />
+                    <span className="min-w-0 flex-1">
+                      <span className="text-gray-200">{KIND_LABEL[h.kind] ?? h.kind}</span>
+                      {h.detail && <span className="text-gray-400"> · {h.detail}</span>}
+                      <span className="block text-xs text-gray-600">{nameOf(h.user_id)} · {fmtDT(h.at)}</span>
+                    </span>
+                  </li>
+                ) : (
+                  <li key={`s${h.id}`} className="flex gap-3 text-sm">
+                    <Clock size={13} className="mt-1 shrink-0 text-sky-400/80" />
+                    <span className="min-w-0 flex-1">
+                      <span className="text-gray-200">
+                        Worked {mins(h.secs / 60)}
+                        {h.running && <span className="text-orange-400"> · still running</span>}
+                      </span>
+                      {!h.running && h.reason && (
+                        <span className="text-gray-400"> · stopped: {REASON_LABEL[h.reason] ?? h.reason}</span>
+                      )}
+                      <span className="block text-xs text-gray-600">{nameOf(h.user_id)} · {fmtDT(h.at)}</span>
+                    </span>
+                  </li>
+                ),
+              )}
+              {timeline.length === 0 && <li className="py-8 text-center text-sm text-gray-500">Nothing recorded yet.</li>}
             </ul>
           )}
         </div>

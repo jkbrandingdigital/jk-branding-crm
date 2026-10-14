@@ -13,6 +13,21 @@ export type TaskStage = {
 
 export type TaskLabel = { id: string; name: string; color: string; sort_order: number; is_active: boolean }
 
+// A kind of design job and the time it is meant to take.
+// `per_unit` ones grow: a logo is 2 hours per option, brochure inner
+// pages are 30 minutes per page.
+export type WorkType = {
+  id: string
+  name: string
+  minutes: number
+  change_minutes: number | null
+  per_unit: boolean
+  unit: string | null
+  note: string | null
+  sort_order: number
+  is_active: boolean
+}
+
 export type TaskAssignee = { user_id: string; assigned_by: string | null; assigned_at: string; is_current: boolean }
 
 export type Task = {
@@ -34,8 +49,33 @@ export type Task = {
   created_by: string
   created_at: string
   updated_at: string
+  work_type_id: string | null
+  work_qty: number
+  in_changes: boolean
   task_assignees: TaskAssignee[]
 }
+
+// What a task was allowed and what it has actually taken
+export type TimeStatus = {
+  task_id: string
+  work_type: string | null
+  per_unit: boolean | null
+  unit: string | null
+  work_qty: number
+  in_changes: boolean
+  change_rounds: number
+  client_changes: number
+  our_changes: number
+  allowed_mins: number | null
+  actual_secs: number
+}
+
+// Why a job came back. Only a client's change buys more time; our own
+// mistake does not, because redoing our own work is not new work.
+export const CHANGE_SOURCES = [
+  { key: 'client', label: 'Client asked for changes', adds: true },
+  { key: 'internal', label: 'Our own mistake', adds: false },
+] as const
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent'
 
@@ -73,6 +113,30 @@ export async function loadTaskStages(): Promise<TaskStage[]> {
   const { data } = await supabase.from('task_stages').select('*').eq('is_active', true).order('sort_order')
   return (data ?? []) as TaskStage[]
 }
+
+export async function loadWorkTypes(): Promise<WorkType[]> {
+  const { data } = await supabase.from('work_types').select('*').eq('is_active', true).order('sort_order')
+  return (data ?? []) as WorkType[]
+}
+
+// Allowed vs actual for every task, in one query — the board needs it per card
+export async function loadTimeStatus(): Promise<Record<string, TimeStatus>> {
+  const { data } = await supabase.from('task_time_status').select('*')
+  const out: Record<string, TimeStatus> = {}
+  for (const r of (data ?? []) as TimeStatus[]) out[r.task_id] = r
+  return out
+}
+
+// "2h", "45m", "2h 30m"
+export const mins = (n: number) => {
+  const m = Math.max(0, Math.round(n))
+  const h = Math.floor(m / 60)
+  return h > 0 ? (m % 60 ? `${h}h ${m % 60}m` : `${h}h`) : `${m}m`
+}
+
+// What this task is allowed, once quantity is taken into account
+export const allowedOf = (w: WorkType | undefined, qty: number) =>
+  w ? w.minutes * (w.per_unit ? Math.max(qty, 1) : 1) : 0
 
 export async function loadTaskLabels(): Promise<TaskLabel[]> {
   const { data } = await supabase.from('task_labels').select('*').eq('is_active', true).order('sort_order')

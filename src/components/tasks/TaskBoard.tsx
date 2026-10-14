@@ -6,6 +6,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
+import { useChartTheme } from '../../lib/chartTheme'
 import { loadStaff, type Staff } from '../leads/leadUtils'
 import { DateField } from '../DateField'
 import { plainText } from '../RichText'
@@ -15,6 +16,7 @@ import { TaskTimerButton } from './WorkTimer'
 import {
   currentAssignees, fmtTaskDT, isTaskOverdue, loadTaskCounts, loadTaskLabels, loadTaskStages, loadTasks,
   PRIORITIES, priorityOf, setAssignees, type Task, type TaskLabel, type TaskStage,
+  loadTimeStatus, mins, type TimeStatus,
 } from './taskUtils'
 
 type View = 'board' | 'list'
@@ -100,6 +102,9 @@ export default function TaskBoard() {
   const [opened, setOpened] = useState<Task | null>(null)
   const [openTab, setOpenTab] = useState<'details' | 'comments' | 'files'>('details')
   const [dragId, setDragId] = useState<string | null>(null)
+  const [timeOf, setTimeOf] = useState<Record<string, TimeStatus>>({})
+  const [bumping, setBumping] = useState('')
+  const { dark } = useChartTheme()   // the colours below have to follow the Light/Dark switch
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'stage' | 'assign' } | null>(null)
   const [uploadFor, setUploadFor] = useState<Task | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -112,16 +117,29 @@ export default function TaskBoard() {
   const load = useCallback(async () => {
     setError('')
     try {
-      const [t, s, l, st, c] = await Promise.all([loadTasks(), loadTaskStages(), loadTaskLabels(), loadStaff(), loadTaskCounts()])
+      const [t, s, l, st, c, ts] = await Promise.all([
+        loadTasks(), loadTaskStages(), loadTaskLabels(), loadStaff(), loadTaskCounts(), loadTimeStatus(),
+      ])
       setTasks(t)
       setStages(s)
       setLabels(l)
       setStaff(st)
       setCounts(c)
+      setTimeOf(ts)
     } catch (e) {
       setError((e as Error).message)
     }
     setLoading(false)
+  }, [])
+
+  // One more option (or brochure page) straight from the card. The allowed
+  // time goes up by itself, and the change is written into the task history.
+  const addUnit = useCallback(async (taskId: string) => {
+    setBumping(taskId)
+    const { error: e } = await supabase.rpc('task_add_unit', { p_task: taskId, p_by: 1 })
+    if (e) setError(e.message)
+    setTimeOf(await loadTimeStatus())
+    setBumping('')
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -324,8 +342,43 @@ export default function TaskBoard() {
     const nc = counts.comments[t.id] ?? 0
     const nf = counts.files[t.id] ?? 0
 
+    // Allowed time against time actually spent. Only design work has an
+    // allowed time, so every other task looks exactly as it always did.
+    const ts = timeOf[t.id]
+    const allowed = ts?.allowed_mins ?? 0
+    const spent = Math.round((ts?.actual_secs ?? 0) / 60)
+    const timed = allowed > 0
+    const over = timed && spent > allowed
+
+    // Inline colours on purpose: theme.css does not map every opacity, so a
+    // Tailwind tint turns black on cream. Written out for both themes
+    // instead — on cream the fill is lighter and the text much darker,
+    // because pale-on-pale cannot be read.
+    const tint = !timed
+      ? undefined
+      : over
+        ? dark
+          ? { borderColor: 'rgba(220,38,38,0.55)', background: 'rgba(220,38,38,0.08)' }
+          : { borderColor: 'rgba(185,28,28,0.40)', background: 'rgba(220,38,38,0.05)' }
+        : dark
+          ? { borderColor: 'rgba(5,150,105,0.45)', background: 'rgba(5,150,105,0.07)' }
+          : { borderColor: 'rgba(4,120,87,0.35)',  background: 'rgba(5,150,105,0.05)' }
+
+    const timeChip = over
+      ? dark
+        ? { background: 'rgba(220,38,38,0.15)', color: '#fca5a5' }
+        : { background: 'rgba(220,38,38,0.12)', color: '#991b1b' }
+      : dark
+        ? { background: 'rgba(5,150,105,0.15)', color: '#6ee7b7' }
+        : { background: 'rgba(5,150,105,0.12)', color: '#065f46' }
+
+    const changeChip = dark
+      ? { background: 'rgba(217,119,6,0.18)', color: '#fcd34d' }
+      : { background: 'rgba(217,119,6,0.14)', color: '#92400e' }
+
     return (
       <div
+        style={tint}
         draggable={mayEdit && (canClose || !isClosed(t))}
         onDragStart={() => setDragId(t.id)}
         onDragEnd={() => setDragId(null)}
@@ -342,12 +395,54 @@ export default function TaskBoard() {
           late ? 'border-red-500/40' : 'border-[#242424]'
         } ${dragId === t.id ? 'opacity-50' : ''}`}
       >
-        <p className="text-sm font-medium text-white">{t.subject}</p>
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-sm font-medium text-white">{t.subject}</p>
+          {/* One more option. Only on design work, and only while the task is
+              still open — a finished job's allowed time must not move. */}
+          {ts?.per_unit && !isClosed(t) && mayEdit && (
+            <button
+              onClick={(e) => { e.stopPropagation(); addUnit(t.id) }}
+              onMouseDown={(e) => e.stopPropagation()}
+              disabled={bumping === t.id}
+              aria-label={`Add one ${ts.unit ?? 'option'}`}
+              title={`Add one ${ts.unit ?? 'option'} · now ${ts.work_qty}`}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#2a2a2a] text-gray-400 hover:border-orange-500/60 hover:text-orange-400 disabled:opacity-50"
+            >
+              {bumping === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className={`rounded px-1.5 py-0.5 text-[11px] ${p.cls}`}>{p.label}</span>
           {label && <span className="rounded bg-[#232323] px-1.5 py-0.5 text-[11px] text-gray-300">{label.name}</span>}
           {late && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[11px] text-red-400">Overdue</span>}
+
+          {/* A job that has come back. Set from the task itself, so nobody has
+              to remember to put a label on it. */}
+          {ts?.in_changes && (
+            <span
+              className="rounded px-1.5 py-0.5 text-[11px] font-medium"
+              style={changeChip}
+              title={`${ts.client_changes} from the client, ${ts.our_changes} ours`}
+            >
+              Changes{ts.change_rounds > 1 ? ` ×${ts.change_rounds}` : ''}
+            </span>
+          )}
+
+          {/* Allowed vs spent, in words, because the colour alone does not say
+              by how much. */}
+          {timed && (
+            <span
+              className="rounded px-1.5 py-0.5 text-[11px] font-medium"
+              style={timeChip}
+              title={`${ts?.work_type ?? ''}${ts?.per_unit ? ` · ${ts.work_qty} ${ts.unit}${ts.work_qty === 1 ? '' : 's'}` : ''}`}
+            >
+              {ts?.per_unit && ts.work_qty > 1 && <>{ts.work_qty} {ts.unit}s · </>}
+              {mins(spent)} / {mins(allowed)}
+              {over && <> · over {mins(spent - allowed)}</>}
+            </span>
+          )}
 
           {/* The timer belongs to whoever is doing the task, so it only shows
               on your own open ones. Clicking it must not open the card. */}

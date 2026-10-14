@@ -54,6 +54,10 @@ import DesignTodos from './pages/design/Todos'
 import AdminTeamActivity from './pages/admin/TeamActivity'
 import ManagerTeamActivity from './pages/manager/TeamActivity'
 import DesignTeamActivity from './pages/design/TeamActivity'
+import DesignPerformancePage from './pages/design/Performance'
+import AdminDesignPerformance from './pages/admin/DesignPerformance'
+import HrDesignPerformance from './pages/hr/DesignPerformance'
+import AdminWorkTypes from './pages/admin/WorkTypes'
 import ManagerQuotations from './pages/manager/Quotations'
 import ManagerQuotationEdit from './pages/manager/QuotationEdit'
 import ManagerQuotationView from './pages/manager/QuotationView'
@@ -147,6 +151,8 @@ function AppRoutes() {
           <Route path="/admin/notes" element={<Guard ok={may('mod_notes')}><AdminNotes /></Guard>} />
           <Route path="/admin/todos" element={<Guard ok={may('mod_todos')}><AdminTodos /></Guard>} />
           <Route path="/admin/activity" element={<Guard ok={may('timer_view_all')}><AdminTeamActivity /></Guard>} />
+          <Route path="/admin/design-performance" element={<Guard ok={may('design_perf')}><AdminDesignPerformance /></Guard>} />
+          <Route path="/admin/work-types" element={<Guard ok={may('work_types_edit')}><AdminWorkTypes /></Guard>} />
           <Route path="/admin/quotations" element={<Guard ok={may('mod_quotations')}><AdminQuotations /></Guard>} />
           <Route path="/admin/quotations/settings" element={<Guard ok={may('quote_settings')}><AdminQuotationSettings /></Guard>} />
           <Route path="/admin/quotations/new" element={<Guard ok={may('quote_create')}><AdminQuotationEdit /></Guard>} />
@@ -198,6 +204,7 @@ function AppRoutes() {
           <Route path="/hr/tasks" element={<HrTasks />} />
           <Route path="/hr/notes" element={<HrNotes />} />
           <Route path="/hr/todos" element={<HrTodos />} />
+          <Route path="/hr/design-performance" element={<HrDesignPerformance />} />
           <Route path="/hr/*" element={<HRDashboard />} />
         </>
       )}
@@ -208,6 +215,7 @@ function AppRoutes() {
           <Route path="/design/notes" element={<DesignNotes />} />
           <Route path="/design/todos" element={<DesignTodos />} />
           <Route path="/design/activity" element={<DesignTeamActivity />} />
+          <Route path="/design/performance" element={<DesignPerformancePage />} />
           <Route path="/design/*" element={<DesignDashboard />} />
         </>
       )}

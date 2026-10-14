@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, Paperclip, Search, X } from 'lucide-react'
+import { Check, Loader2, Paperclip, Search, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { usePermissions } from '../../lib/permissions'
 import { fromInputDT, toInputDT, type Staff } from '../leads/leadUtils'
 import { DateTimeField } from '../DateField'
-import { RichText, plainText } from '../RichText'
-import PeoplePicker from '../PeoplePicker'
 import { searchLeads, type LeadLite } from '../reminders/reminderUtils'
 import {
   PRIORITIES, REPEATS, currentAssignees,
   type Priority, type Task, type TaskLabel, type TaskStage,
+  allowedOf, loadWorkTypes, mins, type WorkType,
 } from './taskUtils'
 
 type Props = {
@@ -18,7 +17,6 @@ type Props = {
   stages: TaskStage[]
   labels: TaskLabel[]
   staff: Staff[]
-  lead?: LeadLite | null // opened from a lead: the customer comes pre-filled
   onClose: () => void
   onSaved: () => void
 }
@@ -34,7 +32,7 @@ function tomorrow() {
   return toInputDT(d.toISOString())
 }
 
-export default function TaskModal({ task, stages, labels, staff, lead: fromLead = null, onClose, onSaved }: Props) {
+export default function TaskModal({ task, stages, labels, staff, onClose, onSaved }: Props) {
   const { user } = useAuth()
   const { can } = usePermissions()
   const me = user?.id ?? ''
@@ -48,12 +46,16 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   const [start, setStart] = useState(toInputDT(task?.start_at ?? new Date().toISOString()))
   const [due, setDue] = useState(task?.due_at ? toInputDT(task.due_at) : tomorrow())
   const [repeat, setRepeat] = useState(task?.repeat_every ?? 'none')
-  const [lead, setLead] = useState<LeadLite | null>(fromLead)
-  const [customer, setCustomer] = useState(task?.customer_name ?? fromLead?.name ?? '')
-  const [phone, setPhone] = useState(task?.customer_phone ?? fromLead?.phone ?? '')
+  const [lead, setLead] = useState<LeadLite | null>(null)
+  const [customer, setCustomer] = useState(task?.customer_name ?? '')
+  const [phone, setPhone] = useState(task?.customer_phone ?? '')
   const [to, setTo] = useState<Set<string>>(new Set(task ? currentAssignees(task) : []))
   const [leadQ, setLeadQ] = useState('')
   const [leadHits, setLeadHits] = useState<LeadLite[]>([])
+  const [staffQ, setStaffQ] = useState('')
+  const [workTypes, setWorkTypes] = useState<WorkType[]>([])
+  const [workTypeId, setWorkTypeId] = useState(task?.work_type_id ?? '')
+  const [workQty, setWorkQty] = useState(task?.work_qty ?? 1)
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -67,6 +69,7 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
         .sort((a, b) => (a.id === me ? -1 : b.id === me ? 1 : a.full_name.localeCompare(b.full_name))),
     [staff, me, to],
   )
+  const shown = options.filter((s) => s.full_name.toLowerCase().includes(staffQ.trim().toLowerCase()))
 
   useEffect(() => {
     if (lead) return
@@ -87,6 +90,27 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
     if (l.phone) setPhone(l.phone)
   }
 
+  const toggleTo = (id: string) =>
+    setTo((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+
+  useEffect(() => {
+    void loadWorkTypes().then(setWorkTypes)
+  }, [])
+
+  // The time rules are a design-team thing. A task given to sales or HR
+  // gets no work type, no allowed time and no timer.
+  const forDesign = useMemo(
+    () => staff.some((p) => to.has(p.id) && p.role === 'design_team'),
+    [staff, to],
+  )
+  const chosen = workTypes.find((w) => w.id === workTypeId)
+  const allowed = allowedOf(chosen, workQty)
+
   async function save() {
     setError('')
     if (!subject.trim()) return setError('Write what the task is.')
@@ -96,7 +120,7 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
 
     const payload = {
       subject: subject.trim(),
-      description: plainText(description) ? description : null,
+      description: description.trim() || null,
       priority,
       stage_id: stageId || null,
       label_id: labelId || null,
@@ -106,6 +130,8 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
       start_at: fromInputDT(start) ?? new Date().toISOString(),
       due_at: fromInputDT(due),
       repeat_every: repeat,
+      work_type_id: forDesign ? workTypeId || null : null,
+      work_qty: forDesign && chosen?.per_unit ? Math.max(1, Math.min(99, workQty)) : 1,
     }
 
     setBusy(true)
@@ -197,6 +223,65 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
             </div>
           </div>
 
+          {/* Design work: which kind of job, and how much of it.
+              Only when the task is going to a designer — a task for sales or
+              HR carries no time rule at all. */}
+          {forDesign && (
+            <div className="rounded-lg border border-[#242424] bg-[#151515] p-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={label} htmlFor="task-work-type">Design work</label>
+                  <select
+                    id="task-work-type"
+                    value={workTypeId}
+                    onChange={(e) => { setWorkTypeId(e.target.value); setWorkQty(1) }}
+                    className={input}
+                  >
+                    <option value="">Not set</option>
+                    {workTypes.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name} · {mins(w.minutes)}{w.per_unit ? ` per ${w.unit}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {chosen?.per_unit && (
+                  <div>
+                    <label className={label} htmlFor="task-work-qty">
+                      How many {chosen.unit}s to start with
+                    </label>
+                    <input
+                      id="task-work-qty"
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={workQty}
+                      onChange={(e) => setWorkQty(Math.max(1, Math.min(99, Number(e.target.value) || 1)))}
+                      className={input}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {chosen && (
+                <div className="mt-3 text-sm text-gray-400">
+                  Allowed time <span className="font-semibold text-white">{mins(allowed)}</span>
+                  {chosen.per_unit && (
+                    <> · {workQty} {chosen.unit}{workQty === 1 ? '' : 's'} × {mins(chosen.minutes)}</>
+                  )}
+                  {chosen.note && <span className="text-gray-600"> · {chosen.note}</span>}
+                  {chosen.per_unit && (
+                    <span className="mt-1 block text-xs text-gray-600">
+                      The designer can add more {chosen.unit}s later with + on the task, and the
+                      allowed time goes up on its own.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
               <label className={label} htmlFor="task-start">Start</label>
@@ -264,20 +349,47 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
             {!canAssign && task && !task.task_assignees.some((a) => a.user_id === me) && (
               <p className="mb-2 text-xs text-gray-500">Only a coordinator can hand this to someone else.</p>
             )}
-            <PeoplePicker
-              id="task-to"
-              people={options}
-              value={[...to]}
-              onChange={(ids) => setTo(new Set(ids))}
-              me={me}
-              placeholder="Select who should do this"
-            />
+            <div className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a]">
+              <div className="relative border-b border-[#242424]">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  value={staffQ}
+                  onChange={(e) => setStaffQ(e.target.value)}
+                  placeholder="Search people"
+                  className="w-full bg-transparent py-2 pl-9 pr-3 text-sm text-white placeholder:text-gray-600 focus:outline-none"
+                />
+              </div>
+              <ul className="max-h-44 overflow-y-auto py-1">
+                {shown.map((s) => {
+                  const on = to.has(s.id)
+                  return (
+                    <li key={s.id}>
+                      <button
+                        onClick={() => toggleTo(s.id)}
+                        aria-pressed={on}
+                        className="flex w-full items-center gap-3 px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-[#202020]"
+                      >
+                        <span className={`flex h-4 w-4 items-center justify-center rounded border ${on ? 'border-orange-500 bg-orange-500' : 'border-[#3a3a3a]'}`}>
+                          {on && <Check size={12} className="text-white" />}
+                        </span>
+                        <span className="flex-1">
+                          {s.full_name}
+                          {s.id === me && <span className="ml-1 text-gray-500">(me)</span>}
+                        </span>
+                        {s.role && <span className="text-xs text-gray-600">{s.role.replace('_', ' ')}</span>}
+                      </button>
+                    </li>
+                  )
+                })}
+                {shown.length === 0 && <li className="px-3 py-2 text-sm text-gray-500">No one matches.</li>}
+              </ul>
+            </div>
             <p className="mt-1 text-xs text-gray-500">{to.size} selected</p>
           </div>
 
           <div>
             <label className={label} htmlFor="task-desc">Description</label>
-            <RichText id="task-desc" value={description} onChange={setDescription} placeholder="What has to be done, in detail…" />
+            <textarea id="task-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} className={`${input} resize-y`} />
           </div>
 
           {/* Attachments */}

@@ -166,6 +166,10 @@ export default function TeamActivity({ tasksPath }: { tasksPath: string }) {
   useEffect(() => {
     if (!mayView) return
     void loadStaff().then(setStaff)
+    // Tells the coordinator, HR and Super Admin about any designer with no
+    // open task. It only speaks once per person per day, so opening this
+    // screen often costs nothing.
+    void supabase.rpc('notify_free_designers')
   }, [mayView])
 
   if (ready && !mayView) {

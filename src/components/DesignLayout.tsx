@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Menu, X, type LucideIcon } from 'lucide-react'
+import { Activity, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Menu, X, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
@@ -18,6 +18,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: 'Reminders', path: '/design/reminders', icon: AlarmClock, perm: 'mod_reminders' },
       { label: 'Notes', path: '/design/notes', icon: StickyNote, perm: 'mod_notes' },
       { label: 'Team activity', path: '/design/activity', icon: Activity, perm: 'timer_view_all' },
+      { label: 'My performance', path: '/design/performance', icon: TrendingUp, perm: 'design_perf' },
     ],
   },
   { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
