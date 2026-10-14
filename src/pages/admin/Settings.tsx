@@ -1,18 +1,16 @@
 import { useSearchParams } from 'react-router-dom'
-import { Plug, Tag, Radio, Timer, Trash2 } from 'lucide-react'
+import { Plug, Tag, Radio, Trash2 } from 'lucide-react'
 import AdminLayout from '../../components/AdminLayout'
 import IntegrationsTab from '../../components/settings/IntegrationsTab'
 import LeadLabels from '../../components/leads/LeadLabels'
 import LeadSources from '../../components/leads/LeadSources'
 import LeadBulkDelete from '../../components/leads/LeadBulkDelete'
-import WorkTypesTab from '../../components/tasks/WorkTypesTab'
 
 // Add more tabs here later (General, Notifications…)
 const TABS = [
   { key: 'integrations', label: 'Integrations', icon: Plug },
   { key: 'labels', label: 'Lead Labels', icon: Tag },
   { key: 'sources', label: 'Lead Sources', icon: Radio },
-  { key: 'worktypes', label: 'Design Work Types', icon: Timer },
   { key: 'delete', label: 'Delete Leads', icon: Trash2 },
 ]
 
@@ -57,7 +55,6 @@ export default function AdminSettings() {
           {tab === 'integrations' && <IntegrationsTab />}
           {tab === 'labels' && <LeadLabels />}
           {tab === 'sources' && <LeadSources />}
-          {tab === 'worktypes' && <WorkTypesTab />}
           {tab === 'delete' && <LeadBulkDelete />}
         </div>
       </div>

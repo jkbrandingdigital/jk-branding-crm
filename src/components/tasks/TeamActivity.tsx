@@ -360,7 +360,7 @@ export default function TeamActivity({ tasksPath }: { tasksPath: string }) {
       {tab === 'task' && (
         <section className="overflow-hidden rounded-lg border border-[#242424] bg-[#151515]">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="w-full min-w-[760px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-[#242424] text-left text-xs text-gray-500">
                   <th className="px-4 py-2.5 font-medium">#</th>
@@ -423,7 +423,7 @@ export default function TeamActivity({ tasksPath }: { tasksPath: string }) {
       {tab === 'log' && (
         <section className="overflow-hidden rounded-lg border border-[#242424] bg-[#151515]">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[720px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-[#242424] text-left text-xs text-gray-500">
                   <th className="px-4 py-2.5 font-medium">Day</th>

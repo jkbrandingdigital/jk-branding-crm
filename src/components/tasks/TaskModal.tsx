@@ -6,6 +6,7 @@ import { usePermissions } from '../../lib/permissions'
 import { fromInputDT, toInputDT, type Staff } from '../leads/leadUtils'
 import { DateTimeField } from '../DateField'
 import { searchLeads, type LeadLite } from '../reminders/reminderUtils'
+import { RichText, isEmptyHtml, toHtml } from '../RichText'
 import {
   PRIORITIES, REPEATS, currentAssignees,
   type Priority, type Task, type TaskLabel, type TaskStage,
@@ -39,7 +40,7 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
   const canAssign = can('task_assign')
 
   const [subject, setSubject] = useState(task?.subject ?? '')
-  const [description, setDescription] = useState(task?.description ?? '')
+  const [description, setDescription] = useState(toHtml(task?.description ?? ''))
   const [priority, setPriority] = useState<Priority>(task?.priority ?? 'low')
   const [stageId, setStageId] = useState(task?.stage_id ?? stages.find((s) => s.is_default)?.id ?? stages[0]?.id ?? '')
   const [labelId, setLabelId] = useState(task?.label_id ?? '')
@@ -120,7 +121,7 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
 
     const payload = {
       subject: subject.trim(),
-      description: description.trim() || null,
+      description: isEmptyHtml(description) ? null : description,
       priority,
       stage_id: stageId || null,
       label_id: labelId || null,
@@ -389,7 +390,15 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
 
           <div>
             <label className={label} htmlFor="task-desc">Description</label>
-            <textarea id="task-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} className={`${input} resize-y`} />
+            {/* The same editor Notes uses. A plain textarea showed the stored
+                markup as text, so anyone editing an old task saw raw <div>s. */}
+            <RichText
+              id="task-desc"
+              value={description}
+              onChange={setDescription}
+              placeholder="What has to be done?"
+              minHeight={160}
+            />
           </div>
 
           {/* Attachments */}

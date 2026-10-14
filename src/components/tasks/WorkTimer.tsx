@@ -43,12 +43,14 @@ const tellEveryone = () => watchers.forEach((w) => w())
 
 export function useRunningTask() {
   const [running, setRunning] = useState<RunningTask | null>(null)
+  const [readAt, setReadAt] = useState(Date.now())
   const [ready, setReady] = useState(false)
 
   const read = useCallback(async () => {
     const { data } = await supabase.rpc('my_timer')
     const row = (data ?? [])[0] as RunningTask | undefined
     setRunning(row ?? null)
+    setReadAt(Date.now())
     setReady(true)
   }, [])
 
@@ -66,13 +68,27 @@ export function useRunningTask() {
     }
   }, [read])
 
-  return { running, ready, refresh: read }
+  return { running, readAt, ready, refresh: read }
 }
 
 export const since = (iso: string) => {
   const mins = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000))
   const h = Math.floor(mins / 60)
   return h > 0 ? `${h}h ${mins % 60}m` : `${mins}m`
+}
+
+// The same thing with seconds, for the strip at the top. The small buttons
+// on the cards stay on minutes on purpose: a board full of them redrawing
+// every second would cost far more than it is worth.
+export const sinceExact = (iso: string) => {
+  const all = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000))
+  const h = Math.floor(all / 3600)
+  const m = Math.floor((all % 3600) / 60)
+  const sec = all % 60
+  const ss = String(sec).padStart(2, '0')
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m ${ss}s`
+  if (m > 0) return `${m}m ${ss}s`
+  return `${sec}s`
 }
 
 export const hhmm = (secs: number) => {
@@ -102,9 +118,16 @@ export async function stopTask(reason = 'break') {
 // =====================================================================
 export function WorkTimerBar() {
   const { can, ready: permsReady } = usePermissions()
-  const { running } = useRunningTask()
+  const { running, readAt } = useRunningTask()
   const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [, tick] = useState(0)
+
+  // One second, and only here. Nothing else on the page redraws with it.
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
 
   if (permsReady && !can('mod_work_timer')) return null
   if (!running) return null
@@ -127,8 +150,12 @@ export function WorkTimerBar() {
         <span className="min-w-0 flex-1 truncate font-medium text-white">
           #{running.task_no} · {running.subject}
         </span>
-        <span className="tabular-nums text-orange-300">{since(running.started_at)}</span>
-        <span className="hidden text-xs text-gray-400 sm:inline">today {hhmm(running.today_secs)}</span>
+        <span className="tabular-nums text-orange-300">{sinceExact(running.started_at)}</span>
+        {/* The day's total was read a moment ago, so the time since that read
+            is added on — otherwise it would sit still while the clock runs. */}
+        <span className="hidden text-xs text-gray-400 sm:inline">
+          today {hhmm(running.today_secs + (Date.now() - readAt) / 1000)}
+        </span>
         <button
           onClick={() => setAsking((a) => !a)}
           disabled={busy}
@@ -176,11 +203,21 @@ export function TaskTimerButton({
   const { running } = useRunningTask()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-
-  if (permsReady && !can('mod_work_timer')) return null
+  const [, tick] = useState(0)
 
   const isThisOne = running?.task_id === taskId
   const somethingElse = !!running && !isThisOne
+
+  // Only the card that is actually running keeps a one-second clock, and only
+  // one task can run at a time — so at most one card on the board redraws per
+  // second, however many cards are on screen.
+  useEffect(() => {
+    if (!isThisOne) return
+    const t = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [isThisOne])
+
+  if (permsReady && !can('mod_work_timer')) return null
 
   async function click(e: React.MouseEvent) {
     e.stopPropagation()
@@ -207,7 +244,7 @@ export function TaskTimerButton({
       onClick={click}
       disabled={busy}
       title={err || (isThisOne ? 'Pause this task' : somethingElse ? 'Start this and pause the other one' : 'Start working on this')}
-      className={`flex shrink-0 items-center gap-1.5 rounded-lg border font-medium transition-colors disabled:opacity-50 ${pad} ${
+      className={`flex shrink-0 items-center gap-1.5 rounded-lg border font-medium tabular-nums transition-colors disabled:opacity-50 ${pad} ${
         isThisOne
           ? 'border-orange-500/50 bg-orange-500/15 text-orange-300 hover:bg-orange-500/25'
           : 'border-[#2a2a2a] text-gray-400 hover:border-green-600/50 hover:text-green-400'
@@ -220,7 +257,7 @@ export function TaskTimerButton({
       ) : (
         <Play className={icon} />
       )}
-      {isThisOne ? since(running.started_at) : 'Start'}
+      {isThisOne ? sinceExact(running.started_at) : 'Start'}
     </button>
   )
 }

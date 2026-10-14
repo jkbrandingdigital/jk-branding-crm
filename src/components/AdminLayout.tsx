@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Briefcase as BriefcaseIcon, type LucideIcon,
+  Activity, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Briefcase as BriefcaseIcon, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -49,8 +49,6 @@ const GROUPS: NavGroup[] = [
     icon: CalendarClock,
     items: [
       { label: 'Tasks', path: '/admin/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
-      { label: 'Team activity', path: '/admin/activity', icon: Activity, ready: true, perm: 'timer_view_all' },
-      { label: 'Design performance', path: '/admin/design-performance', icon: Palette, ready: true, perm: 'design_perf' },
       { label: 'Task Settings', path: '/admin/tasks/settings', icon: Settings, ready: true, perm: 'task_settings' },
       { label: 'To-Do', path: '/admin/todos', icon: TodoIcon, ready: true, perm: 'mod_todos' },
       { label: 'Reminders', path: '/admin/reminders', icon: AlarmClock, ready: true, perm: 'mod_reminders' },
@@ -69,7 +67,16 @@ const GROUPS: NavGroup[] = [
   },
   { key: 'digital', label: 'Digital Department', icon: MonitorSmartphone, items: [] },
   { key: 'dispatch', label: 'Dispatch Zone', icon: Truck, items: [] },
-  { key: 'designing', label: 'Designing Department', icon: Palette, items: [] },
+  {
+    key: 'designing',
+    label: 'Designing Department',
+    icon: Palette,
+    items: [
+      { label: 'Team activity', path: '/admin/activity', icon: Activity, ready: true, perm: 'timer_view_all' },
+      { label: 'Design performance', path: '/admin/design-performance', icon: TrendingUp, ready: true, perm: 'design_perf' },
+      { label: 'Work Types', path: '/admin/work-types', icon: Timer, ready: true, perm: 'work_types_edit' },
+    ],
+  },
   { key: 'finance', label: 'Finance Department', icon: Wallet, items: [] },
   {
     key: 'company',

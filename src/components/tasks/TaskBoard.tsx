@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bookmark, Check, Clock, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Pencil, Plus,
   Save, Search, SlidersHorizontal, Tag, Trash2, TrendingUp, User, UserCog, X,
@@ -106,8 +106,6 @@ export default function TaskBoard() {
   const [bumping, setBumping] = useState('')
   const { dark } = useChartTheme()   // the colours below have to follow the Light/Dark switch
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'stage' | 'assign' } | null>(null)
-  const [uploadFor, setUploadFor] = useState<Task | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const canCreate = can('task_create')
   const canDelete = can('task_delete')
@@ -297,20 +295,6 @@ export default function TaskBoard() {
   function openAt(t: Task, tab: 'details' | 'comments' | 'files') {
     setOpenTab(tab)
     setOpened(t)
-  }
-
-  // Paperclip on the card: pick a file and it goes straight up
-  async function uploadToTask(t: Task, f: File) {
-    if (f.size > 25 * 1024 * 1024) return setError('Files must be under 25 MB.')
-    const safe = f.name.replace(/[^\w.\- ]/g, '_')
-    const path = `${t.id}/${Date.now()}-${safe}`
-    const { error: upErr } = await supabase.storage.from('task-files').upload(path, f)
-    if (upErr) return setError(upErr.message)
-    const { error: e } = await supabase
-      .from('task_attachments')
-      .insert({ task_id: t.id, file_path: path, file_name: f.name, file_size: f.size })
-    if (e) return setError(e.message)
-    load()
   }
 
   async function moveTo(taskId: string, stageId: string) {
@@ -510,8 +494,8 @@ export default function TaskBoard() {
           </button>
 
           <button
-            onClick={() => { setUploadFor(t); fileRef.current?.click() }}
-            aria-label="Add a file" title="Add a file"
+            onClick={() => openAt(t, 'files')}
+            aria-label="Files" title="Files"
             className={`${iconBtn} relative`}
           >
             <Paperclip size={14} />
@@ -797,18 +781,6 @@ export default function TaskBoard() {
           onSaved={() => { setEditing(null); load() }}
         />
       )}
-
-      <input
-        ref={fileRef}
-        type="file"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          if (f && uploadFor) uploadToTask(uploadFor, f)
-          e.target.value = ''
-          setUploadFor(null)
-        }}
-      />
 
       {opened && !editing && (
         <TaskDetail
