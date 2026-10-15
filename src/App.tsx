@@ -58,6 +58,8 @@ import DesignPerformancePage from './pages/design/Performance'
 import AdminDesignPerformance from './pages/admin/DesignPerformance'
 import HrDesignPerformance from './pages/hr/DesignPerformance'
 import AdminWorkTypes from './pages/admin/WorkTypes'
+import AdminPrintRegister from './pages/admin/PrintRegister'
+import DesignPrintRegister from './pages/design/PrintRegister'
 import ManagerQuotations from './pages/manager/Quotations'
 import ManagerQuotationEdit from './pages/manager/QuotationEdit'
 import ManagerQuotationView from './pages/manager/QuotationView'
@@ -153,6 +155,7 @@ function AppRoutes() {
           <Route path="/admin/activity" element={<Guard ok={may('timer_view_all')}><AdminTeamActivity /></Guard>} />
           <Route path="/admin/design-performance" element={<Guard ok={may('design_perf')}><AdminDesignPerformance /></Guard>} />
           <Route path="/admin/work-types" element={<Guard ok={may('work_types_edit')}><AdminWorkTypes /></Guard>} />
+          <Route path="/admin/print" element={<Guard ok={may('mod_print_jobs')}><AdminPrintRegister /></Guard>} />
           <Route path="/admin/quotations" element={<Guard ok={may('mod_quotations')}><AdminQuotations /></Guard>} />
           <Route path="/admin/quotations/settings" element={<Guard ok={may('quote_settings')}><AdminQuotationSettings /></Guard>} />
           <Route path="/admin/quotations/new" element={<Guard ok={may('quote_create')}><AdminQuotationEdit /></Guard>} />
@@ -216,6 +219,7 @@ function AppRoutes() {
           <Route path="/design/todos" element={<DesignTodos />} />
           <Route path="/design/activity" element={<DesignTeamActivity />} />
           <Route path="/design/performance" element={<DesignPerformancePage />} />
+          <Route path="/design/print" element={<DesignPrintRegister />} />
           <Route path="/design/*" element={<DesignDashboard />} />
         </>
       )}

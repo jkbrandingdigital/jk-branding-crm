@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Menu, X, type LucideIcon } from 'lucide-react'
+import { Activity, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Menu, X, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
@@ -13,13 +13,15 @@ const NAV: { title: string; items: NavItem[] }[] = [
   {
     title: 'Work',
     items: [
-      { label: 'Projects', path: '/design/projects', icon: FolderKanban, perm: 'mod_projects' },
+      // Projects is on hold until the model is settled — no route for it yet.
       { label: 'Tasks', path: '/design/tasks', icon: ListTodo, perm: 'mod_tasks' },
       { label: 'To-Do', path: '/design/todos', icon: ListChecks, perm: 'mod_todos' },
       { label: 'Reminders', path: '/design/reminders', icon: AlarmClock, perm: 'mod_reminders' },
       { label: 'Notes', path: '/design/notes', icon: StickyNote, perm: 'mod_notes' },
       { label: 'Team activity', path: '/design/activity', icon: Activity, perm: 'timer_view_all' },
       { label: 'My performance', path: '/design/performance', icon: TrendingUp, perm: 'design_perf' },
+      // Only the designer who handles printing has this switched on.
+      { label: 'Print register', path: '/design/print', icon: Printer, perm: 'mod_print_jobs' },
     ],
   },
   { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },

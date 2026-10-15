@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Briefcase as BriefcaseIcon, type LucideIcon,
+  Activity, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Briefcase as BriefcaseIcon, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -72,9 +72,11 @@ const GROUPS: NavGroup[] = [
     label: 'Designing Department',
     icon: Palette,
     items: [
+      // Projects is on hold until the model is settled — no route for it yet.
       { label: 'Team activity', path: '/admin/activity', icon: Activity, ready: true, perm: 'timer_view_all' },
       { label: 'Design performance', path: '/admin/design-performance', icon: TrendingUp, ready: true, perm: 'design_perf' },
       { label: 'Work Types', path: '/admin/work-types', icon: Timer, ready: true, perm: 'work_types_edit' },
+      { label: 'Print Register', path: '/admin/print', icon: Printer, ready: true, perm: 'mod_print_jobs' },
     ],
   },
   { key: 'finance', label: 'Finance Department', icon: Wallet, items: [] },
