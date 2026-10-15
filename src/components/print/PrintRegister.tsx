@@ -14,7 +14,7 @@ import {
 } from './printUtils'
 
 /*
-  The print register.
+  Printing Media — the print register.
 
   One line per job sent to a printer: who it was for, what it was, which
   printer it went to, and whether the mail has gone out.
@@ -185,7 +185,7 @@ export default function PrintRegister() {
   if (ready && !can('mod_print_jobs')) {
     return (
       <div className="rounded-lg border border-[#242424] bg-[#151515] p-8 text-center text-gray-400">
-        The print register is not switched on for you.
+        Printing Media is not switched on for you.
       </div>
     )
   }
@@ -200,7 +200,7 @@ export default function PrintRegister() {
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-white">
             <Printer size={22} className="text-orange-400" />
-            Print register
+            Printing Media
           </h1>
           <p className="mt-1 text-sm text-gray-400">
             What went to which printer, and whether the mail has gone out.

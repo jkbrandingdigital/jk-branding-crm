@@ -69,12 +69,14 @@ type ReportRow = {
   in_changes: boolean
   client_changes: number
   our_changes: number
-  allowed_mins: number
+  // null when the task has no work type: there is no allowed time to
+  // compare against, so these three have no answer — not a zero.
+  allowed_mins: number | null
   base_mins: number
   change_mins: number
   actual_mins: number
-  over_mins: number
-  on_time: boolean
+  over_mins: number | null
+  on_time: boolean | null
   sittings: number
   breaks: number
   started_on: string | null
@@ -249,8 +251,8 @@ export default function DesignPerformance() {
     const body = ((data ?? []) as ReportRow[]).map((r) => [
       r.task_no, r.subject, r.work_type, r.qty, r.unit, r.designer, r.stage,
       r.is_done ? 'Yes' : 'No', r.in_changes ? 'Yes' : 'No', r.client_changes, r.our_changes,
-      r.allowed_mins, r.base_mins, r.change_mins, r.actual_mins, r.over_mins,
-      r.on_time ? 'Yes' : 'No', r.sittings, r.breaks,
+      r.allowed_mins ?? '', r.base_mins, r.change_mins, r.actual_mins, r.over_mins ?? '',
+      r.on_time === null ? '' : r.on_time ? 'Yes' : 'No', r.sittings, r.breaks,
       day(r.started_on), day(r.completed_on), day(r.due_at),
     ])
     const csv = [head, ...body].map((r) => r.map(cell).join(',')).join('\n')
@@ -301,9 +303,9 @@ export default function DesignPerformance() {
       if (!r.is_done || !r.work_type) continue
       const t = m.get(r.work_type) ?? { n: 0, onTime: 0, actual: 0, allowed: 0 }
       t.n += 1
-      if (r.on_time) t.onTime += 1
+      if (r.on_time === true) t.onTime += 1
       t.actual += r.actual_mins
-      t.allowed += r.allowed_mins
+      t.allowed += r.allowed_mins ?? 0
       m.set(r.work_type, t)
     }
     return [...m.entries()]
@@ -641,14 +643,21 @@ export default function DesignPerformance() {
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-gray-400">
-                      {r.work_type ?? '—'}
+                      {r.work_type ?? <span style={{ color: warn }}>No work type</span>}
                       {r.qty > 1 && <span className="text-gray-600"> · {r.qty} {r.unit}s</span>}
                     </td>
                     {!who && <td className="max-w-[120px] truncate px-4 py-2.5 text-gray-400">{r.designer ?? '—'}</td>}
-                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">{mins(r.allowed_mins)}</td>
+                    {/* No work type means no allowed time. It shows as a
+                        dash, not a zero — a zero would read as "nothing
+                        allowed", which would paint the row red. */}
+                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">
+                      {r.allowed_mins === null
+                        ? <span title="No work type set on this task">—</span>
+                        : mins(r.allowed_mins)}
+                    </td>
                     <td
                       className="px-4 py-2.5 text-right font-medium tabular-nums"
-                      style={{ color: r.base_mins > r.allowed_mins ? bad : good }}
+                      style={{ color: r.allowed_mins === null ? plain : r.base_mins > r.allowed_mins ? bad : good }}
                     >
                       {mins(r.base_mins)}
                       {r.change_mins > 0 && (
@@ -684,25 +693,31 @@ export default function DesignPerformance() {
           </div>
           <ul className={`max-h-[420px] overflow-auto ${scroll}`}>
             {open.slice(0, 12).map((r, i) => {
-              const pct = r.allowed_mins > 0 ? Math.min(999, Math.round((r.actual_mins / r.allowed_mins) * 100)) : 0
-              const over = pct > 100
+              const pct = r.allowed_mins && r.allowed_mins > 0
+                ? Math.min(999, Math.round((r.actual_mins / r.allowed_mins) * 100))
+                : null
+              const over = (pct ?? 0) > 100
               return (
                 <li key={r.task_no} style={i === 0 ? undefined : rule} className="px-4 py-3">
                   <div className="flex items-start justify-between gap-3">
                     <span className="min-w-0">
                       <span className="block truncate text-sm text-gray-200" title={r.subject}>{r.subject}</span>
-                      <span className="block text-xs text-gray-500">{r.work_type ?? '—'}</span>
+                      <span className="block text-xs text-gray-500">
+                        {r.work_type ?? <span style={{ color: warn }}>No work type</span>}
+                      </span>
                     </span>
-                    <span className="shrink-0 text-xs tabular-nums" style={{ color: over ? bad : plain }}>{pct}%</span>
+                    <span className="shrink-0 text-xs tabular-nums" style={{ color: over ? bad : plain }}>
+                      {pct === null ? '—' : `${pct}%`}
+                    </span>
                   </div>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full" style={{ background: rail }}>
                     <div
                       className="h-full rounded-full"
-                      style={{ width: `${Math.min(pct, 100)}%`, background: over ? bad : chart.series[0] }}
+                      style={{ width: `${Math.min(pct ?? 0, 100)}%`, background: over ? bad : chart.series[0] }}
                     />
                   </div>
                   <p className="mt-1.5 text-[11px] text-gray-500">
-                    {mins(r.actual_mins)} of {mins(r.allowed_mins)}
+                    {mins(r.actual_mins)}{r.allowed_mins === null ? ' · no allowed time set' : ` of ${mins(r.allowed_mins)}`}
                     {r.in_changes && <span style={{ color: warn }}> · in changes</span>}
                   </p>
                 </li>

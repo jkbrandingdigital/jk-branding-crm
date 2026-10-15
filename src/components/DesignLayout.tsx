@@ -21,7 +21,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: 'Team activity', path: '/design/activity', icon: Activity, perm: 'timer_view_all' },
       { label: 'My performance', path: '/design/performance', icon: TrendingUp, perm: 'design_perf' },
       // Only the designer who handles printing has this switched on.
-      { label: 'Print register', path: '/design/print', icon: Printer, perm: 'mod_print_jobs' },
+      { label: 'Printing Media', path: '/design/print', icon: Printer, perm: 'mod_print_jobs' },
     ],
   },
   { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },

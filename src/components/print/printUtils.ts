@@ -1,7 +1,7 @@
 import { supabase } from '../../lib/supabase'
 
 /*
-  Print register — the shared types and the small things every screen in
+  Printing Media — the shared types and the small things every screen in
   this folder needs.
 */
 

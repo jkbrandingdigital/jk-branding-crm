@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck } from 'lucide-react'
+import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck, Printer } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { DateField } from './DateField'
 
@@ -39,6 +39,14 @@ const ROLE_LABEL: Record<string, string> = {
   sales: 'Sales',
   design_team: 'Design Team',
 }
+// The order the count tiles appear in; any role in ROLE_LABEL left out of
+// this list still gets a tile, at the end.
+const ROLE_TILE_ORDER = ['sales', 'design_team', 'branch_manager', 'hr', 'super_admin']
+const ROLE_TILES = [
+  ...ROLE_TILE_ORDER.filter((r) => r in ROLE_LABEL),
+  ...Object.keys(ROLE_LABEL).filter((r) => !ROLE_TILE_ORDER.includes(r)),
+]
+
 const ROLE_CHIP: Record<string, string> = {
   super_admin: 'bg-purple-950/60 text-purple-300',
   hr: 'bg-blue-950/60 text-blue-300',
@@ -48,10 +56,13 @@ const ROLE_CHIP: Record<string, string> = {
 }
 // Which modules are offered for each role
 const ROLE_MODULES: Record<string, string[]> = {
-  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_invoices'],
+  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_invoices', 'mod_print_jobs'],
   hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks', 'mod_notes'],
-  branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations'],
+  branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_print_jobs'],
   sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks', 'mod_notes', 'mod_quotations'],
+  // Printing Media is not in this list for a designer. It gets a box of
+  // its own below, because picking who handles printing is a decision
+  // about a person's job, not one more thing they are allowed to open.
   design_team: ['mod_tasks', 'mod_reminders', 'mod_notes'],
 }
 
@@ -63,6 +74,7 @@ const ADMIN_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'HR Department', keys: ['mod_employees'] },
   { title: 'Productivity', keys: ['mod_tasks', 'mod_reminders', 'mod_notes'] },
   { title: 'Business', keys: ['mod_quotations'] },
+  { title: 'Designing Department', keys: ['timer_view_all', 'design_perf', 'work_types_edit', 'mod_print_jobs'] },
   { title: 'Company', keys: ['mod_settings', 'mod_backup'] },
 ]
 
@@ -95,6 +107,17 @@ const QUOTE_ACTION_LABEL: Record<string, string> = {
   quote_view_all: 'See every quotation',
   quote_delete: 'Delete quotations',
   quote_settings: 'Quotation settings (company, products)',
+}
+
+// What a person may do inside Printing Media.
+//
+// The module switch alone already lets them keep the register — add
+// entries, mark the mail sent, correct their own lines. These three are
+// the ones a Super Admin hands out on top of that.
+const PRINT_ACTION_LABEL: Record<string, string> = {
+  print_lists_edit: 'Edit services & offsets',
+  print_job_edit: "Edit anyone's entry",
+  print_job_delete: 'Delete entries',
 }
 
 const WORK_MODE: Record<string, string> = {
@@ -404,9 +427,13 @@ export default function StaffManager() {
         </button>
       </div>
 
-      {/* Role counts */}
-      <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#242424] bg-[#242424] sm:grid-cols-4">
-        {['sales', 'branch_manager', 'hr', 'super_admin'].map((r) => (
+      {/* Role counts.
+          The order is set here, but anything in ROLE_LABEL that is not
+          named gets a tile anyway — Design Team was missing for months
+          because this list was written before designers existed, and a
+          hand-written list of roles will fall behind again. */}
+      <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[#242424] bg-[#242424] sm:grid-cols-3 lg:grid-cols-5">
+        {ROLE_TILES.map((r) => (
           <button key={r} onClick={() => setRoleF(roleF === r ? 'all' : r)} className={`bg-[#151515] px-5 py-4 text-left hover:bg-[#1a1a1a] ${roleF === r ? 'ring-1 ring-inset ring-orange-500' : ''}`}>
             <p className="text-xs text-gray-400">{ROLE_LABEL[r]}</p>
             <p className="mt-1 text-2xl font-semibold tabular-nums">{counts[r] ?? 0}</p>
@@ -492,6 +519,13 @@ export default function StaffManager() {
                     <td className="py-3 pr-4 text-gray-300">{auth.get(p.id)?.email ?? '—'}</td>
                     <td className="py-3 pr-4">
                       <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs ${ROLE_CHIP[role] ?? ROLE_CHIP.sales}`}>{ROLE_LABEL[role] ?? role}</span>
+                      {/* Who handles printing, without opening anyone. One
+                          person usually does, and this is how you find them. */}
+                      {userPerms[p.id]?.mod_print_jobs === true && (
+                        <span className="ml-2 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-orange-950/60 px-2 py-0.5 text-[11px] text-orange-300">
+                          <Printer size={11} /> Printing
+                        </span>
+                      )}
                       {Object.keys(userPerms[p.id] ?? {}).length > 0 && <span className="ml-2 text-[10px] text-orange-400">custom</span>}
                     </td>
                     <td className="py-3 pr-4 text-gray-400">{branchName.get(p.branch_id ?? '') ?? '—'}</td>
@@ -633,6 +667,60 @@ export default function StaffManager() {
                 </p>
               </Field>
 
+              {/*
+                Printing Media.
+
+                A box of its own, above the permission grid, and only for a
+                designer. Choosing who handles printing is a decision about
+                what someone's job is — hiding it among twenty switches
+                called "what they can open" is how it would be missed, and
+                it was.
+
+                Turning it on hands over the register itself. The three
+                extras below it are separate because most of the time the
+                answer to them is no.
+              */}
+              {editingProfile && callerRole === 'super_admin' && !editingSelf && form.role === 'design_team' && (
+                <div className="border-t border-[#222] pt-4">
+                  <div className="rounded-xl border border-[#242424] bg-[#151515] p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 text-sm font-medium text-white">
+                          <Printer size={15} className="text-orange-400" /> Printing Media
+                        </p>
+                        <p className="mt-1 text-xs text-gray-400">
+                          This designer keeps the print register — what went to which printer, and whether
+                          the mail has gone out. It appears in their sidebar as soon as this is on.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={effective('mod_print_jobs')}
+                        aria-label="Printing Media"
+                        onClick={() => togglePerm('mod_print_jobs')}
+                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+                          effective('mod_print_jobs') ? 'bg-orange-500' : 'bg-[#2a2a2a]'
+                        }`}
+                      >
+                        <span className={`h-5 w-5 rounded-full bg-white transition-transform ${effective('mod_print_jobs') ? 'translate-x-5' : ''}`} />
+                      </button>
+                    </div>
+
+                    {effective('mod_print_jobs') && (
+                      <div className="mt-4 border-t border-[#242424] pt-4">
+                        <p className="mb-3 text-xs text-gray-500">On top of that, they may also:</p>
+                        <div className="flex flex-wrap gap-x-5 gap-y-4">
+                          {Object.entries(PRINT_ACTION_LABEL).map(([k, label]) => (
+                            <PermToggle key={k} k={k} label={label} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {editingProfile && callerRole === 'super_admin' && !editingSelf && (
                 <div className="border-t border-[#222] pt-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -717,6 +805,17 @@ export default function StaffManager() {
                       <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside quotations</p>
                       <div className="flex flex-wrap gap-x-5 gap-y-4">
                         {Object.entries(QUOTE_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
+                      </div>
+                    </>
+                  )}
+
+                  {/* A designer's print rights live in the box above, so they
+                      are not repeated here. */}
+                  {effective('mod_print_jobs') && form.role !== 'design_team' && (
+                    <>
+                      <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside Printing Media</p>
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        {Object.entries(PRINT_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
                       </div>
                     </>
                   )}
