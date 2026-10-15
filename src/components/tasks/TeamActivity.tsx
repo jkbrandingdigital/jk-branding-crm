@@ -62,6 +62,7 @@ type LogRow = {
   ended_at: string | null
   secs: number
   end_reason: string | null
+  end_note: string | null
   running: boolean
 }
 
@@ -456,6 +457,7 @@ export default function TeamActivity({ tasksPath }: { tasksPath: string }) {
                     <td className="px-4 py-2.5 text-right font-medium tabular-nums text-white">{hhmm(r.secs)}</td>
                     <td className="px-4 py-2.5 text-gray-400">
                       {r.running ? '—' : REASON_LABEL[r.end_reason ?? ''] ?? r.end_reason ?? '—'}
+                      {r.end_note && <span className="block text-xs text-gray-500">"{r.end_note}"</span>}
                     </td>
                   </tr>
                 ))}

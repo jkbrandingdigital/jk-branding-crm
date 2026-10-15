@@ -10,7 +10,7 @@ import { hhmm, TaskTimerButton } from './WorkTimer'
 
 type Tab = 'details' | 'comments' | 'files' | 'history'
 type TimeRow = { user_id: string; full_name: string | null; secs: number; sessions: number }
-type Sitting = { id: string; user_id: string; started_at: string; ended_at: string | null; end_reason: string | null }
+type Sitting = { id: string; user_id: string; started_at: string; ended_at: string | null; end_reason: string | null; end_note: string | null }
 type Comment = { id: string; user_id: string; body: string; created_at: string }
 type FileRow = { id: string; file_path: string; file_name: string; file_size: number | null; uploaded_by: string; created_at: string }
 type Activity = { id: string; user_id: string | null; kind: string; detail: string | null; created_at: string }
@@ -69,6 +69,8 @@ export default function TaskDetail({
   const [adding, setAdding] = useState(false)
   const [changeOpen, setChangeOpen] = useState(false)
   const [changeNote, setChangeNote] = useState('')
+  const [dragging, setDragging] = useState(false)
+  const [sending, setSending] = useState('')   // "2 of 5" while files go up
   const { dark } = useChartTheme()   // pale-on-cream cannot be read, so the tones swap
   const [error, setError] = useState('')
 
@@ -133,7 +135,7 @@ export default function TaskDetail({
       // the sittings. Looking at them apart hides how the time went.
       const [a, s2] = await Promise.all([
         supabase.from('task_activities').select('*').eq('task_id', task.id).order('created_at', { ascending: false }),
-        supabase.from('task_sessions').select('id, user_id, started_at, ended_at, end_reason')
+        supabase.from('task_sessions').select('id, user_id, started_at, ended_at, end_reason, end_note')
           .eq('task_id', task.id).order('started_at', { ascending: false }),
       ])
       setHistory((a.data ?? []) as Activity[])
@@ -176,23 +178,67 @@ export default function TaskDetail({
     onChanged()
   }
 
-  async function upload(f: File) {
-    if (f.size > 25 * 1024 * 1024) return setError('Files must be under 25 MB.')
-    setBusy(true)
-    const safe = f.name.replace(/[^\w.\- ]/g, '_')
-    const path = `${task.id}/${Date.now()}-${safe}`
-    const { error: upErr } = await supabase.storage.from('task-files').upload(path, f)
-    if (upErr) {
-      setBusy(false)
-      return setError(upErr.message)
+  const MAX_MB = 25
+
+  // Files go up one at a time, not all at once.
+  //
+  // A designer dropping ten CDR files in one go would otherwise open ten
+  // uploads together, and a phone or a weak line drops half of them. One
+  // after another is slower to watch but it finishes.
+  async function uploadMany(list: File[]) {
+    if (locked || list.length === 0) return
+    setError('')
+
+    const tooBig = list.filter((f) => f.size > MAX_MB * 1024 * 1024)
+    const ok = list.filter((f) => f.size <= MAX_MB * 1024 * 1024)
+    if (tooBig.length) {
+      setError(
+        tooBig.length === list.length
+          ? `Files must be under ${MAX_MB} MB.`
+          : `Skipped ${tooBig.length} file(s) over ${MAX_MB} MB: ${tooBig.map((f) => f.name).join(', ')}`,
+      )
     }
-    const { error: e } = await supabase
-      .from('task_attachments')
-      .insert({ task_id: task.id, file_path: path, file_name: f.name, file_size: f.size })
+    if (ok.length === 0) return
+
+    setBusy(true)
+    const failed: string[] = []
+
+    for (let i = 0; i < ok.length; i++) {
+      const f = ok[i]
+      setSending(ok.length > 1 ? `${i + 1} of ${ok.length}` : f.name)
+
+      const safe = f.name.replace(/[^\w.\- ]/g, '_')
+      const path = `${task.id}/${Date.now()}-${i}-${safe}`
+
+      const { error: upErr } = await supabase.storage.from('task-files').upload(path, f)
+      if (upErr) { failed.push(f.name); continue }
+
+      const { error: e } = await supabase
+        .from('task_attachments')
+        .insert({ task_id: task.id, file_path: path, file_name: f.name, file_size: f.size })
+      // The file is in Storage but the row did not save — take it back out
+      // rather than leave something nobody can see or delete.
+      if (e) {
+        await supabase.storage.from('task-files').remove([path])
+        failed.push(f.name)
+      }
+    }
+
+    setSending('')
     setBusy(false)
-    if (e) return setError(e.message)
+    if (failed.length) setError(`Could not upload: ${failed.join(', ')}`)
     loadTab()
     onChanged()
+  }
+
+  // Only files, and only real ones. Dragging text out of a mail or a folder
+  // off the desktop both land here as drag events with nothing to upload.
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragging(false)
+    if (locked) return
+    const picked = Array.from(e.dataTransfer.files ?? [])
+    if (picked.length) void uploadMany(picked)
   }
 
   // Pulls the file down first, then saves it from the browser's own memory.
@@ -237,7 +283,7 @@ export default function TaskDetail({
   // how the time actually went.
   type Line =
     | { row: 'change'; id: string; at: string; user_id: string | null; kind: string; detail: string | null }
-    | { row: 'sitting'; id: string; at: string; user_id: string; secs: number; reason: string | null; running: boolean }
+    | { row: 'sitting'; id: string; at: string; user_id: string; secs: number; reason: string | null; note: string | null; running: boolean }
 
   const timeline: Line[] = [
     ...history.map((h): Line => ({ row: 'change', id: h.id, at: h.created_at, user_id: h.user_id, kind: h.kind, detail: h.detail })),
@@ -248,11 +294,14 @@ export default function TaskDetail({
       user_id: v.user_id,
       secs: (new Date(v.ended_at ?? Date.now()).getTime() - new Date(v.started_at).getTime()) / 1000,
       reason: v.end_reason,
+      note: v.end_note,
       running: v.ended_at === null,
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 
-  const spentMins = Math.round((status?.actual_secs ?? 0) / 60)
+  // The original work, with the client's change rounds kept out — that is
+  // what the allowed time was set for.
+  const spentMins = Math.round((status?.base_secs ?? status?.actual_secs ?? 0) / 60)
   const over = (status?.allowed_mins ?? 0) > 0 && spentMins > (status?.allowed_mins ?? 0)
 
   const row = (k: string, v: React.ReactNode) => (
@@ -310,6 +359,9 @@ export default function TaskDetail({
                     {mins(spentMins)} of {mins(status.allowed_mins ?? 0)}
                     {over && <> · over by {mins(spentMins - (status.allowed_mins ?? 0))}</>}
                   </span>
+                  {status.change_secs > 0 && (
+                    <span className="text-gray-500"> · +{mins(status.change_secs / 60)} on changes</span>
+                  )}
                 </span>
               )}
             </p>
@@ -371,6 +423,15 @@ export default function TaskDetail({
               {row('Priority', <span className={`rounded px-1.5 py-0.5 text-xs ${p.cls}`}>{p.label}</span>)}
               {row('Label', label ? <span className="rounded bg-[#232323] px-1.5 py-0.5 text-xs text-gray-300">{label.name}</span> : 'No label')}
               {row('Assigned to', currentAssignees(task).map(nameOf).join(', ') || '—')}
+              {/* Who asked for this. A sales person's name belongs on the task
+                  itself, not only in the small line above the tabs. */}
+              {row(
+                'Created by',
+                <span>
+                  {nameOf(task.created_by)}
+                  <span className="text-gray-500"> · {fmtTaskDT(task.created_at)}</span>
+                </span>,
+              )}
               {/* The job came back. Saying who asked for it is the whole
                   point — a client's change is not the designer's fault, and
                   our own mistake does not earn extra time. */}
@@ -383,6 +444,11 @@ export default function TaskDetail({
                         {status.change_rounds === 0
                           ? 'None yet'
                           : `${status.change_rounds} round${status.change_rounds === 1 ? '' : 's'} · ${status.client_changes} from the client, ${status.our_changes} ours`}
+                        {status.change_secs > 0 && (
+                          <span className="ml-2" style={{ color: dark ? '#fcd34d' : '#92400e' }}>
+                            {mins(status.change_secs / 60)} spent on the client's changes
+                          </span>
+                        )}
                       </span>
                       <button
                         onClick={() => setChangeOpen((o) => !o)}
@@ -517,26 +583,68 @@ export default function TaskDetail({
                     )}
                   </li>
                 ))}
-                {files.length === 0 && <li className="py-8 text-center text-sm text-gray-500">No files yet.</li>}
+                {files.length === 0 && !dragging && !busy && (
+                  <li className="py-6 text-center text-sm text-gray-500">No files yet.</li>
+                )}
               </ul>
+
               <input
                 ref={fileRef}
                 type="file"
+                multiple
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) upload(f)
+                  const picked = Array.from(e.target.files ?? [])
+                  if (picked.length) void uploadMany(picked)
                   e.target.value = ''
                 }}
               />
+
+              {/*
+                The whole panel takes a drop, not a thin strip at the bottom.
+                Someone dragging a file aims at the box they are looking at,
+                and missing it by a few pixels drops the file onto the page,
+                which makes the browser open it and lose the task.
+
+                dragOver must call preventDefault() or the browser refuses
+                the drop — that one line is what makes dropping possible.
+              */}
               {!locked && (
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={busy}
-                className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-gray-300 hover:text-white disabled:opacity-50"
-              >
-                {busy ? <Loader2 size={15} className="animate-spin" /> : <Paperclip size={15} />} Add a file
-              </button>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); if (!dragging) setDragging(true) }}
+                  onDragLeave={(e) => {
+                    // Moving across a child fires dragLeave too; ignore those.
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
+                  }}
+                  onDrop={onDrop}
+                  className={`rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
+                    dragging
+                      ? 'border-orange-500 bg-orange-500/10'
+                      : 'border-[#2a2a2a] hover:border-[#3a3a3a]'
+                  }`}
+                >
+                  {busy ? (
+                    <p className="flex items-center justify-center gap-2 text-sm text-gray-300">
+                      <Loader2 size={15} className="animate-spin" />
+                      Uploading {sending}…
+                    </p>
+                  ) : dragging ? (
+                    <p className="text-sm font-medium text-orange-300">Drop to attach</p>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-400">
+                        Drag files here, or{' '}
+                        <button
+                          onClick={() => fileRef.current?.click()}
+                          className="font-medium text-orange-400 underline-offset-2 hover:underline"
+                        >
+                          browse
+                        </button>
+                      </p>
+                      <p className="mt-1 text-xs text-gray-600">Several at once is fine · up to {MAX_MB} MB each</p>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -564,6 +672,7 @@ export default function TaskDetail({
                       {!h.running && h.reason && (
                         <span className="text-gray-400"> · stopped: {REASON_LABEL[h.reason] ?? h.reason}</span>
                       )}
+                      {h.note && <span className="block text-gray-300">"{h.note}"</span>}
                       <span className="block text-xs text-gray-600">{nameOf(h.user_id)} · {fmtDT(h.at)}</span>
                     </span>
                   </li>

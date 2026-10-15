@@ -330,7 +330,10 @@ export default function TaskBoard() {
     // allowed time, so every other task looks exactly as it always did.
     const ts = timeOf[t.id]
     const allowed = ts?.allowed_mins ?? 0
-    const spent = Math.round((ts?.actual_secs ?? 0) / 60)
+    // Against the allowed time, only the original work counts. A client's
+    // changes get their own number so nobody is marked down for them.
+    const spent = Math.round((ts?.base_secs ?? ts?.actual_secs ?? 0) / 60)
+    const changeMins = Math.round((ts?.change_secs ?? 0) / 60)
     const timed = allowed > 0
     const over = timed && spent > allowed
 
@@ -425,6 +428,7 @@ export default function TaskBoard() {
               {ts?.per_unit && ts.work_qty > 1 && <>{ts.work_qty} {ts.unit}s · </>}
               {mins(spent)} / {mins(allowed)}
               {over && <> · over {mins(spent - allowed)}</>}
+              {changeMins > 0 && <> · +{mins(changeMins)} chg</>}
             </span>
           )}
 

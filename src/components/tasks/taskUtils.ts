@@ -20,7 +20,6 @@ export type WorkType = {
   id: string
   name: string
   minutes: number
-  change_minutes: number | null
   per_unit: boolean
   unit: string | null
   note: string | null
@@ -52,6 +51,7 @@ export type Task = {
   work_type_id: string | null
   work_qty: number
   in_changes: boolean
+  project_id: string | null
   task_assignees: TaskAssignee[]
 }
 
@@ -68,6 +68,8 @@ export type TimeStatus = {
   our_changes: number
   allowed_mins: number | null
   actual_secs: number
+  base_secs: number      // the original work
+  change_secs: number    // what the client's changes took
 }
 
 // Why a job came back. Only a client's change buys more time; our own

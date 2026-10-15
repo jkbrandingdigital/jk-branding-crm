@@ -26,7 +26,6 @@ export default function WorkTypesTab() {
   const [hours, setHours] = useState(0)
   const [minutes, setMinutes] = useState(30)
   const [unit, setUnit] = useState('option')
-  const [changeMins, setChangeMins] = useState(0)
 
   const load = useCallback(async () => {
     setRows(await loadWorkTypes())
@@ -51,7 +50,6 @@ export default function WorkTypesTab() {
       minutes: total,
       per_unit: true,                                   // every kind counts by option now
       unit: unit.trim() || 'option',
-      change_minutes: changeMins > 0 ? changeMins : Math.max(Math.round(total / 2), 5),
       sort_order: (rows[rows.length - 1]?.sort_order ?? 0) + 10,
     })
     setBusy('')
@@ -59,7 +57,6 @@ export default function WorkTypesTab() {
     setName('')
     setHours(0)
     setMinutes(30)
-    setChangeMins(0)
     setMsg({ type: 'ok', text: 'Added.' })
     void load()
   }
@@ -99,7 +96,9 @@ export default function WorkTypesTab() {
         <h1 className="text-2xl font-semibold text-white">Design work types</h1>
         <p className="mt-1 text-sm text-gray-400">
           What each kind of job should take, for one option. Two options means twice the time. A task
-          is green while it is inside its allowed time and red once it goes past.
+          is green while it is inside its allowed time and red once it goes past. Time spent on a
+          client's changes is measured by the clock and kept out of this — there is nothing to set
+          for it.
         </p>
       </div>
 
@@ -121,9 +120,6 @@ export default function WorkTypesTab() {
               <tr className="border-b border-[#242424] text-left text-xs text-gray-500">
                 <th className="px-4 py-2.5 font-medium">Work</th>
                 <th className="px-4 py-2.5 font-medium">Time per option</th>
-                <th className="px-4 py-2.5 font-medium" title="Allowed when the client asks for changes">
-                  One round of changes
-                </th>
                 <th className="px-4 py-2.5 font-medium">Counts by</th>
                 <th className="px-4 py-2.5" />
               </tr>
@@ -152,22 +148,6 @@ export default function WorkTypesTab() {
                       {busy === r.id && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />}
                     </div>
                   </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={0}
-                        max={2400}
-                        defaultValue={r.change_minutes ?? 0}
-                        onBlur={(e) => {
-                          const v = Number(e.target.value) || 0
-                          if (v !== (r.change_minutes ?? 0)) void setField(r, { change_minutes: v })
-                        }}
-                        className="w-20 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1 text-sm text-white focus:border-orange-500 focus:outline-none"
-                      />
-                      <span className="text-xs text-gray-500">mins · {mins(r.change_minutes ?? 0)}</span>
-                    </div>
-                  </td>
                   <td className="px-4 py-2.5 text-gray-400">each {r.unit ?? 'option'}</td>
                   <td className="px-4 py-2.5 text-right">
                     <button
@@ -181,7 +161,7 @@ export default function WorkTypesTab() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-500">Nothing here yet.</td></tr>
+                <tr><td colSpan={4} className="px-4 py-10 text-center text-sm text-gray-500">Nothing here yet.</td></tr>
               )}
             </tbody>
           </table>
@@ -210,21 +190,7 @@ export default function WorkTypesTab() {
             <span className="mb-1.5 block text-xs text-gray-400">Call each one a</span>
             <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="option, page, panel" className={input} />
           </label>
-          <label className="block sm:col-span-2">
-            <span className="mb-1.5 block text-xs text-gray-400">One round of client changes (mins)</span>
-            <input
-              type="number"
-              min={0}
-              max={2400}
-              value={changeMins}
-              onChange={(e) => setChangeMins(Math.max(0, Number(e.target.value) || 0))}
-              placeholder={String(Math.max(Math.round((hours * 60 + minutes) / 2), 5))}
-              className={input}
-            />
-            <span className="mt-1 block text-xs text-gray-600">
-              Leave it at 0 and half the job's time is used.
-            </span>
-          </label>
+
         </div>
         <div className="border-t border-[#242424] px-5 py-4">
           <button

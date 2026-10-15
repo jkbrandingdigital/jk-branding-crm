@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Pause, Play, Loader2 } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Pause, Play, Loader2, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
+import { useChartTheme } from '../../lib/chartTheme'
 
 /*
   One person, one running task.
@@ -103,10 +105,119 @@ export async function startTask(taskId: string, reason = 'switched') {
   if (error) throw new Error(error.message)
 }
 
-export async function stopTask(reason = 'break') {
-  const { error } = await supabase.rpc('task_timer_stop', { p_reason: reason })
+export async function stopTask(reason = 'break', note = '') {
+  const { error } = await supabase.rpc('task_timer_stop', { p_reason: reason, p_note: note.trim() || null })
   tellEveryone()
   if (error) throw new Error(error.message)
+}
+
+/*
+  The one pause box.
+
+  It is the same wherever a timer is stopped — the strip at the top and the
+  button on a card — because a designer should not have to learn two ways to
+  say the same thing. The remark is optional: a reason alone is often enough,
+  and demanding a sentence every time would only teach people to type a dot.
+
+  It opens in the middle of the screen, through a portal to <body>, rather
+  than hanging off the button that opened it. A board column scrolls
+  sideways and clips anything that pokes out of it, so a box anchored to a
+  card was being cut in half. The middle of the screen belongs to nobody,
+  so nothing can cut it.
+*/
+export function PausePrompt({
+  onPause, onCancel, busy,
+}: {
+  onPause: (reason: string, note: string) => void
+  onCancel: () => void
+  busy?: boolean
+}) {
+  const [note, setNote] = useState('')
+  // theme.css does not re-map every hex inside a utility class, so the
+  // colours are written out for both themes rather than hoped for.
+  const { dark } = useChartTheme()
+
+  // Escape closes it, the way every other box on screen behaves.
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [onCancel])
+
+  const box = dark
+    ? { background: '#161616', borderColor: '#2a2a2a' }
+    : { background: '#ffffff', borderColor: '#e2ddd3' }
+  const line = dark ? '#242424' : '#e9e4da'
+  const dim = dark ? '#9ca3af' : '#6b6356'
+  const field = dark
+    ? { background: '#1a1a1a', borderColor: '#2a2a2a', color: '#ffffff' }
+    : { background: '#fbf9f5', borderColor: '#ddd6cb', color: '#2b2722' }
+  const row = dark
+    ? { background: '#1b1b1b', borderColor: '#2a2a2a', color: '#e5e7eb' }
+    : { background: '#fbf9f5', borderColor: '#e2ddd3', color: '#2b2722' }
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}
+      onClick={(e) => e.stopPropagation()}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Why are you stopping?"
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-xl border shadow-2xl"
+        style={box}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: line }}>
+          <h3 className="text-sm font-semibold" style={{ color: dark ? '#ffffff' : '#2b2722' }}>
+            Why are you stopping?
+          </h3>
+          <button
+            onClick={onCancel}
+            aria-label="Cancel"
+            className="rounded-md p-1 opacity-70 transition-opacity hover:opacity-100"
+            style={{ color: dim }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-4">
+          <label className="mb-1.5 block text-xs" style={{ color: dim }}>
+            Remark (optional)
+          </label>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="What is it waiting on?"
+            autoFocus
+            className="mb-4 w-full rounded-lg border px-3 py-2.5 text-sm focus:border-orange-500 focus:outline-none"
+            style={field}
+          />
+
+          <p className="mb-2 text-xs" style={{ color: dim }}>Pick a reason to stop</p>
+          <ul className="space-y-1.5">
+            {PAUSE_REASONS.map((r) => (
+              <li key={r.key}>
+                <button
+                  onClick={() => onPause(r.key, note)}
+                  disabled={busy}
+                  className="flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors hover:border-orange-500/60 disabled:opacity-50"
+                  style={row}
+                >
+                  {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {r.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
 }
 
 // =====================================================================
@@ -132,10 +243,10 @@ export function WorkTimerBar() {
   if (permsReady && !can('mod_work_timer')) return null
   if (!running) return null
 
-  async function pause(reason: string) {
+  async function pause(reason: string, note: string) {
     setBusy(true)
     try {
-      await stopTask(reason)
+      await stopTask(reason, note)
     } finally {
       setBusy(false)
       setAsking(false)
@@ -166,23 +277,9 @@ export function WorkTimerBar() {
         </button>
       </div>
 
-      {asking && (
-        <div className="absolute right-4 top-full z-40 mt-1 w-64 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#161616] shadow-lg sm:right-8">
-          <p className="border-b border-[#242424] px-3 py-2 text-xs text-gray-400">Why are you stopping?</p>
-          <ul>
-            {PAUSE_REASONS.map((r) => (
-              <li key={r.key}>
-                <button
-                  onClick={() => pause(r.key)}
-                  className="block w-full px-3 py-2 text-left text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
-                >
-                  {r.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* The box puts itself in the middle of the screen, so there is
+          nothing to position here. */}
+      {asking && <PausePrompt onPause={pause} onCancel={() => setAsking(false)} busy={busy} />}
     </div>
   )
 }
@@ -203,6 +300,7 @@ export function TaskTimerButton({
   const { running } = useRunningTask()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [asking, setAsking] = useState(false)
   const [, tick] = useState(0)
 
   const isThisOne = running?.task_id === taskId
@@ -219,15 +317,18 @@ export function TaskTimerButton({
 
   if (permsReady && !can('mod_work_timer')) return null
 
+  // Stopping always asks why, here as well as in the strip — the same box,
+  // so there is only one thing to learn.
   async function click(e: React.MouseEvent) {
     e.stopPropagation()
+    if (isThisOne) return setAsking((a) => !a)
+
     setBusy(true)
     setErr('')
     try {
       // Pressing ▶ while another task runs is the normal case, not a mistake:
       // that other one is paused as "urgent", which is what actually happened.
-      if (isThisOne) await stopTask('break')
-      else await startTask(taskId, somethingElse ? 'urgent' : 'switched')
+      await startTask(taskId, somethingElse ? 'urgent' : 'switched')
       onChanged?.()
     } catch (e2) {
       setErr((e2 as Error).message)
@@ -236,28 +337,46 @@ export function TaskTimerButton({
     }
   }
 
+  async function pause(reason: string, note: string) {
+    setBusy(true)
+    setErr('')
+    try {
+      await stopTask(reason, note)
+      onChanged?.()
+    } catch (e2) {
+      setErr((e2 as Error).message)
+    } finally {
+      setBusy(false)
+      setAsking(false)
+    }
+  }
+
   const pad = size === 'md' ? 'px-3 py-1.5 text-sm' : 'px-2 py-1 text-xs'
   const icon = size === 'md' ? 'h-4 w-4' : 'h-3.5 w-3.5'
 
   return (
-    <button
-      onClick={click}
-      disabled={busy}
-      title={err || (isThisOne ? 'Pause this task' : somethingElse ? 'Start this and pause the other one' : 'Start working on this')}
-      className={`flex shrink-0 items-center gap-1.5 rounded-lg border font-medium tabular-nums transition-colors disabled:opacity-50 ${pad} ${
-        isThisOne
-          ? 'border-orange-500/50 bg-orange-500/15 text-orange-300 hover:bg-orange-500/25'
-          : 'border-[#2a2a2a] text-gray-400 hover:border-green-600/50 hover:text-green-400'
-      }`}
-    >
-      {busy ? (
-        <Loader2 className={`${icon} animate-spin`} />
-      ) : isThisOne ? (
-        <Pause className={icon} />
-      ) : (
-        <Play className={icon} />
-      )}
-      {isThisOne ? sinceExact(running.started_at) : 'Start'}
-    </button>
+    <span className="relative inline-block" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={click}
+        disabled={busy}
+        title={err || (isThisOne ? 'Pause this task' : somethingElse ? 'Start this and pause the other one' : 'Start working on this')}
+        className={`flex shrink-0 items-center gap-1.5 rounded-lg border font-medium tabular-nums transition-colors disabled:opacity-50 ${pad} ${
+          isThisOne
+            ? 'border-orange-500/50 bg-orange-500/15 text-orange-300 hover:bg-orange-500/25'
+            : 'border-[#2a2a2a] text-gray-400 hover:border-green-600/50 hover:text-green-400'
+        }`}
+      >
+        {busy ? (
+          <Loader2 className={`${icon} animate-spin`} />
+        ) : isThisOne ? (
+          <Pause className={icon} />
+        ) : (
+          <Play className={icon} />
+        )}
+        {isThisOne ? sinceExact(running.started_at) : 'Start'}
+      </button>
+
+      {asking && <PausePrompt onPause={pause} onCancel={() => setAsking(false)} busy={busy} />}
+    </span>
   )
 }

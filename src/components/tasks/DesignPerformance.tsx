@@ -36,6 +36,8 @@ type Summary = {
   full_name: string | null
   done_tasks: number
   allowed_mins: number
+  base_mins: number
+  change_mins: number
   actual_mins: number
   worked_mins: number
   on_time: number
@@ -51,6 +53,7 @@ type Point = {
   done_tasks: number
   allowed_mins: number
   actual_mins: number
+  change_mins: number
   efficiency: number | null
 }
 
@@ -67,6 +70,8 @@ type ReportRow = {
   client_changes: number
   our_changes: number
   allowed_mins: number
+  base_mins: number
+  change_mins: number
   actual_mins: number
   over_mins: number
   on_time: boolean
@@ -84,19 +89,40 @@ type Person = {
   date_of_joining: string | null
 }
 
-const GRAINS: { key: Grain; label: string; back: number }[] = [
-  { key: 'day', label: 'Daily', back: 29 },
-  { key: 'week', label: 'Weekly', back: 83 },
-  { key: 'month', label: 'Monthly', back: 364 },
-  { key: 'year', label: 'Yearly', back: 1824 },
+/*
+  One control for the whole page.
+
+  Before this there were three date controls fighting each other — chart
+  grain pills, a from/to pair, and the task list showing whatever happened to
+  be loaded. Now a period sets the days, and the chart's buckets follow from
+  it. Everything on the page — the figures, the chart, the task list and the
+  Excel — is about the same days.
+*/
+type Period = 'today' | 'week' | 'month' | 'year' | 'custom'
+
+const PERIODS: { key: Period; label: string; grain: Grain }[] = [
+  { key: 'today', label: 'Daily', grain: 'day' },
+  { key: 'week', label: 'Weekly', grain: 'day' },
+  { key: 'month', label: 'Monthly', grain: 'day' },
+  { key: 'year', label: 'Yearly', grain: 'month' },
+  { key: 'custom', label: 'Pick days', grain: 'day' },
 ]
 
 const ist = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
 const today = () => ist(new Date())
-const back = (n: number) => {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return ist(d)
+// Where a period starts, in the office's own calendar — the week from Monday,
+// the month from the 1st, the year from 1 January.
+function startOf(p: Period): string {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }))
+  if (p === 'week') {
+    const back = (now.getDay() + 6) % 7      // Monday = 0
+    now.setDate(now.getDate() - back)
+  } else if (p === 'month') {
+    now.setDate(1)
+  } else if (p === 'year') {
+    now.setMonth(0, 1)
+  }
+  return ist(now)
 }
 const day = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—'
@@ -136,8 +162,9 @@ export default function DesignPerformance() {
   const { can, isSuper, ready } = usePermissions()
   const chart = useChartTheme()
 
+  const [period, setPeriod] = useState<Period>('month')
   const [grain, setGrain] = useState<Grain>('day')
-  const [from, setFrom] = useState(back(29))
+  const [from, setFrom] = useState(startOf('month'))
   const [to, setTo] = useState(today())
   const [who, setWho] = useState('')          // '' = everyone
 
@@ -197,9 +224,11 @@ export default function DesignPerformance() {
       .then(({ data }) => setPerson((data ?? null) as Person | null))
   }, [who])
 
-  function pickGrain(g: Grain) {
-    setGrain(g)
-    setFrom(back(GRAINS.find((x) => x.key === g)!.back))
+  function pickPeriod(p: Period) {
+    setPeriod(p)
+    if (p === 'custom') return                 // the two date boxes take over
+    setGrain(PERIODS.find((x) => x.key === p)!.grain)
+    setFrom(startOf(p))
     setTo(today())
   }
 
@@ -213,13 +242,15 @@ export default function DesignPerformance() {
 
     const head = [
       'Task', 'Subject', 'Work', 'Qty', 'Unit', 'Designer', 'Stage', 'Done', 'In changes',
-      'Client changes', 'Our redos', 'Allowed (mins)', 'Actual (mins)', 'Over (mins)', 'On time',
+      'Client changes', 'Our redos', 'Allowed (mins)', 'Original work (mins)', 'On changes (mins)',
+      'Total (mins)', 'Over (mins)', 'On time',
       'Sittings', 'Interruptions', 'Started', 'Completed', 'Due',
     ]
     const body = ((data ?? []) as ReportRow[]).map((r) => [
       r.task_no, r.subject, r.work_type, r.qty, r.unit, r.designer, r.stage,
       r.is_done ? 'Yes' : 'No', r.in_changes ? 'Yes' : 'No', r.client_changes, r.our_changes,
-      r.allowed_mins, r.actual_mins, r.over_mins, r.on_time ? 'Yes' : 'No', r.sittings, r.breaks,
+      r.allowed_mins, r.base_mins, r.change_mins, r.actual_mins, r.over_mins,
+      r.on_time ? 'Yes' : 'No', r.sittings, r.breaks,
       day(r.started_on), day(r.completed_on), day(r.due_at),
     ])
     const csv = [head, ...body].map((r) => r.map(cell).join(',')).join('\n')
@@ -238,22 +269,31 @@ export default function DesignPerformance() {
     (t, r) => ({
       done: t.done + r.done_tasks,
       allowed: t.allowed + r.allowed_mins,
+      base: t.base + r.base_mins,
+      change: t.change + r.change_mins,
       actual: t.actual + r.actual_mins,
       worked: t.worked + r.worked_mins,
       onTime: t.onTime + r.on_time,
       client: t.client + r.client_changes,
       ours: t.ours + r.our_changes,
     }),
-    { done: 0, allowed: 0, actual: 0, worked: 0, onTime: 0, client: 0, ours: 0 },
+    { done: 0, allowed: 0, base: 0, change: 0, actual: 0, worked: 0, onTime: 0, client: 0, ours: 0 },
   )
 
   const open = rows.filter((r) => !r.is_done)
   const started = open.filter((r) => r.actual_mins > 0)
   const notStarted = open.filter((r) => r.actual_mins === 0)
   const assigned = rows.length
-  const eff = effOf(total.allowed, total.actual)
+  const periodLabel =
+    period === 'today' ? `Today · ${day(from)}`
+    : period === 'week' ? `This week · ${day(from)} to ${day(to)}`
+    : period === 'month' ? `This month · ${day(from)} to ${day(to)}`
+    : period === 'year' ? `This year · ${day(from)} to ${day(to)}`
+    : `${day(from)} to ${day(to)}`
+
+  const eff = effOf(total.allowed, total.base)   // the original work, not the client's changes
   const onTimePct = total.done > 0 ? Math.round((total.onTime / total.done) * 1000) / 10 : null
-  const avgDone = total.done > 0 ? total.actual / total.done : 0
+  const avgDone = total.done > 0 ? total.base / total.done : 0
 
   const byType = useMemo(() => {
     const m = new Map<string, { n: number; onTime: number; actual: number; allowed: number }>()
@@ -283,6 +323,7 @@ export default function DesignPerformance() {
     label: axisLabel(p.period, grain),
     Allowed: Math.round(p.allowed_mins / 6) / 10,
     Actual: Math.round(p.actual_mins / 6) / 10,
+    Changes: Math.round(p.change_mins / 6) / 10,
     Tasks: p.done_tasks,
   }))
 
@@ -356,7 +397,7 @@ export default function DesignPerformance() {
         <div>
           <h1 className="text-2xl font-semibold text-white">Design performance</h1>
           <p className="mt-1 text-sm text-gray-400">
-            The time a job was meant to take, against the time it took.
+            The time a job was meant to take, against the time it took · {periodLabel}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -366,14 +407,6 @@ export default function DesignPerformance() {
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Refresh
-          </button>
-          <button
-            onClick={download}
-            disabled={saving}
-            className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            Excel
           </button>
         </div>
       </div>
@@ -415,14 +448,6 @@ export default function DesignPerformance() {
               </select>
             </label>
           )}
-          <label className="block">
-            <span className="mb-1.5 block text-xs text-gray-400">From</span>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={input} />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-xs text-gray-400">To</span>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={input} />
-          </label>
         </div>
       </div>
 
@@ -442,31 +467,17 @@ export default function DesignPerformance() {
         <Tile icon={TrendingUp} k="Finished in time" v={onTimePct === null ? '—' : `${onTimePct}%`}
               sub={`${total.onTime} of ${total.done}`}
               tone={onTimePct === null ? undefined : onTimePct >= 70 ? 'good' : 'bad'} />
-        <Tile icon={RotateCcw} k="Changes" v={String(total.client + total.ours)}
-              sub={`${total.client} client · ${total.ours} ours`}
-              tone={total.ours > 0 ? 'warn' : undefined} />
+        <Tile icon={RotateCcw} k="Time on changes" v={mins(total.change)}
+              sub={`${total.client} client · ${total.ours} ours · not counted against anyone`}
+              tone={total.change > 0 ? 'warn' : undefined} />
       </div>
 
       {/* ---- Trend, split, quick stats ---- */}
       <div className="grid items-start gap-4 lg:grid-cols-3">
         <section className={`${card} p-4 lg:col-span-2`}>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="mb-3">
             <h2 className="font-medium text-white">Hours — allowed against actual</h2>
-            <div className="flex gap-1">
-              {GRAINS.map((g) => (
-                <button
-                  key={g.key}
-                  onClick={() => pickGrain(g.key)}
-                  className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
-                    grain === g.key
-                      ? 'bg-orange-500/15 font-medium text-orange-400'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  {g.label}
-                </button>
-              ))}
-            </div>
+            <p className="mt-0.5 text-xs text-gray-500">{periodLabel}</p>
           </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -493,6 +504,7 @@ export default function DesignPerformance() {
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Area type="monotone" dataKey="Allowed" stroke={chart.series[1]} strokeWidth={2} fill="url(#gAllowed)" />
                 <Area type="monotone" dataKey="Actual" stroke={chart.series[0]} strokeWidth={2.5} fill="url(#gActual)" />
+                <Area type="monotone" dataKey="Changes" stroke={chart.series[2]} strokeWidth={1.5} fillOpacity={0} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -522,6 +534,7 @@ export default function DesignPerformance() {
           <section className={card}>
             <Stat first icon={Timer} k="Average time on a finished job" v={avgDone > 0 ? mins(avgDone) : '—'} />
             <Stat icon={Clock} k="Hours at work in these days" v={mins(total.worked)} />
+            <Stat icon={RotateCcw} k="Of that, on the client's changes" v={mins(total.change)} />
             <Stat
               icon={TrendingUp}
               k="Efficiency · allowed ÷ actual"
@@ -534,25 +547,69 @@ export default function DesignPerformance() {
       {/* ---- Every task, and what is running now ---- */}
       <div className="grid items-start gap-4 lg:grid-cols-3">
         <section className={`${card} overflow-hidden lg:col-span-2`}>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#242424] px-5 py-3">
-            <h2 className="font-medium text-white">Every task</h2>
-            <div className="flex gap-1">
-              {([
-                ['all', `All ${rows.length}`],
-                ['done', `Finished ${total.done}`],
-                ['open', `Open ${open.length}`],
-                ['changes', `Changed ${rows.filter((r) => r.client_changes + r.our_changes > 0).length}`],
-              ] as [Filter, string][]).map(([k, label]) => (
-                <button
-                  key={k}
-                  onClick={() => setFilter(k)}
-                  className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
-                    filter === k ? 'bg-orange-500/15 font-medium text-orange-400' : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+          <div className="space-y-3 border-b border-[#242424] px-5 py-3.5">
+            {/* Which days, and the Excel of exactly those days. Both live here
+                because this is the list a person actually looks at before
+                downloading — a control at the top of the page left them
+                guessing what the file would hold. */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                <h2 className="font-medium text-white">Every task</h2>
+                <p className="mt-0.5 text-xs text-gray-500">{periodLabel}</p>
+              </span>
+              <button
+                onClick={download}
+                disabled={saving || rows.length === 0}
+                className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                Excel · {rows.length}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex gap-1">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p.key}
+                    onClick={() => pickPeriod(p.key)}
+                    className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
+                      period === p.key
+                        ? 'bg-orange-500/15 font-medium text-orange-400'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {period === 'custom' && (
+                <div className="flex items-center gap-2">
+                  <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${input} py-1.5 text-xs`} />
+                  <span className="text-xs text-gray-600">to</span>
+                  <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${input} py-1.5 text-xs`} />
+                </div>
+              )}
+
+              <div className="ml-auto flex gap-1">
+                {([
+                  ['all', `All ${rows.length}`],
+                  ['done', `Finished ${total.done}`],
+                  ['open', `Open ${open.length}`],
+                  ['changes', `Changed ${rows.filter((r) => r.client_changes + r.our_changes > 0).length}`],
+                ] as [Filter, string][]).map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setFilter(k)}
+                    className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
+                      filter === k ? 'bg-orange-500/15 font-medium text-orange-400' : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -591,9 +648,14 @@ export default function DesignPerformance() {
                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">{mins(r.allowed_mins)}</td>
                     <td
                       className="px-4 py-2.5 text-right font-medium tabular-nums"
-                      style={{ color: r.actual_mins > r.allowed_mins ? bad : good }}
+                      style={{ color: r.base_mins > r.allowed_mins ? bad : good }}
                     >
-                      {mins(r.actual_mins)}
+                      {mins(r.base_mins)}
+                      {r.change_mins > 0 && (
+                        <span className="block text-[11px] font-normal" style={{ color: warn }}>
+                          +{mins(r.change_mins)} chg
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">
                       <span className={`rounded px-1.5 py-0.5 text-[11px] ${r.is_done ? '' : 'text-gray-400'}`}
@@ -721,16 +783,16 @@ export default function DesignPerformance() {
                     </td>
                     <td
                       className="px-4 py-2.5 text-right font-medium tabular-nums"
-                      title={effOf(r.allowed_mins, r.actual_mins) === null
+                      title={effOf(r.allowed_mins, r.base_mins) === null
                         ? 'Too little time on the clock to tell'
-                        : `${mins(r.allowed_mins)} allowed · ${mins(r.actual_mins)} taken`}
+                        : `${mins(r.allowed_mins)} allowed · ${mins(r.base_mins)} on the original work`}
                       style={{
-                        color: effOf(r.allowed_mins, r.actual_mins) === null
+                        color: effOf(r.allowed_mins, r.base_mins) === null
                           ? plain
-                          : (effOf(r.allowed_mins, r.actual_mins) as number) >= 100 ? good : bad,
+                          : (effOf(r.allowed_mins, r.base_mins) as number) >= 100 ? good : bad,
                       }}
                     >
-                      {effText(effOf(r.allowed_mins, r.actual_mins))}
+                      {effText(effOf(r.allowed_mins, r.base_mins))}
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums"
                         style={{ color: r.our_changes > 0 ? warn : plain }}>
@@ -752,9 +814,10 @@ export default function DesignPerformance() {
       </div>
 
       <p className="text-xs text-gray-600">
-        Only design work with a work type set is counted. A client's change rounds add to the time a
-        job is allowed, so they do not count against anyone; our own redos add none. "Open right now"
-        lists every unfinished job, whenever it was started.
+        Only design work with a work type set is counted. Efficiency is measured on the original work:
+        the hours that follow a client's change round are counted separately and held against nobody.
+        A redo caused by our own mistake stays in the original work, because that is our own time to
+        make up. "Open right now" lists every unfinished job, whenever it was started.
       </p>
     </div>
   )
