@@ -60,7 +60,7 @@ export default function HrLayout({ children }: { children: ReactNode }) {
   const sidebar = (
     <nav className="flex h-full flex-col px-3 py-5">
       <div className="flex-1 space-y-5 overflow-y-auto [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
-        {GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.perm || !permsReady || can(i.perm)) }))
+        {GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !i.perm || (permsReady && can(i.perm))) }))
           .filter((g) => g.items.length > 0)
           .map((g) => {
           const foldable = FOLDABLE.includes(g.title)

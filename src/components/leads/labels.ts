@@ -1,3 +1,5 @@
+// Lead label type and colours, kept in their own file so Fast Refresh keeps working.
+
 export type Label = {
   id: string
   name: string

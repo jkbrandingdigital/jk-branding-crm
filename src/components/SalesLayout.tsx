@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
+import { FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
@@ -10,10 +10,11 @@ import { istDate } from '../lib/format'
 
 export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
-type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new'
+type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'projects'
 const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   reminders: '/sales/reminders',
   tasks: '/sales/tasks',
+  projects: '/sales/projects',
   todos: '/sales/todos',
   notes: '/sales/notes',
   quotations: '/sales/quotations',
@@ -46,6 +47,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
   {
     title: 'Productivity',
     items: [
+      { label: 'Projects', page: 'projects', icon: FolderKanban, perm: 'mod_projects' },
       { label: 'My Tasks', page: 'tasks', icon: ListTodo, perm: 'mod_tasks' },
       { label: 'My To-Do', page: 'todos', icon: ListChecks, perm: 'mod_todos' },
       { label: 'My Reminders', page: 'reminders', icon: AlarmClock, perm: 'mod_reminders' },
@@ -112,7 +114,7 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
   // Only the modules this person is allowed to open
   const sections = NAV.map((s) => ({
     ...s,
-    items: s.items.filter((i) => !i.perm || !ready || can(i.perm)),
+    items: s.items.filter((i) => !i.perm || (ready && can(i.perm))),
   })).filter((s) => s.items.length > 0)
 
   // Whichever section holds the page you are on stays open

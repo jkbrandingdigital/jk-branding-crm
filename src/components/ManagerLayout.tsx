@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  Activity, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
+  Activity, FolderKanban, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -28,6 +28,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Productivity',
     items: [
+      { label: 'Projects', path: '/manager/projects', icon: FolderKanban, ready: true, perm: 'mod_projects' },
       { label: 'Tasks', path: '/manager/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
       { label: 'Team activity', path: '/manager/activity', icon: Activity, ready: true, perm: 'timer_view_all' },
       { label: 'To-Do', path: '/manager/todos', icon: ListChecks, ready: true, perm: 'mod_todos' },
@@ -87,7 +88,7 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
   // Only the modules this person is allowed to open
   const sections = NAV_SECTIONS.map((s) => ({
     ...s,
-    items: s.items.filter((i) => !i.perm || !permsReady || can(i.perm)),
+    items: s.items.filter((i) => !i.perm || (permsReady && can(i.perm))),
   })).filter((s) => s.items.length > 0)
 
   // Whichever section holds the page you are on stays open

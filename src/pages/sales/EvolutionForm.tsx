@@ -269,7 +269,7 @@ export default function EvolutionForm() {
             </ol>
           )}
 
-          <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-[#1f1f1f] bg-[#0f0f0f]/95 py-4 backdrop-blur">
+          <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-[#242424] bg-[#151515] px-4 py-4">
             <p className="flex items-center gap-2 text-xs text-gray-500">
               <Lock size={13} /> {existingId ? 'Submitted. These answers cannot be changed.' : 'Check your answers — you cannot change them after submitting.'}
             </p>
@@ -285,7 +285,7 @@ export default function EvolutionForm() {
                 <button
                   onClick={handleSave}
                   disabled={saving || loading || questions.length === 0}
-                  className="rounded-lg bg-orange-500 px-6 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+                  className="rounded-lg bg-orange-500 px-6 py-2.5 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
                 >
                   {saving ? 'Saving…' : 'Submit form'}
                 </button>
