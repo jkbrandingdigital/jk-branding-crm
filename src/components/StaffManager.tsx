@@ -56,14 +56,14 @@ const ROLE_CHIP: Record<string, string> = {
 }
 // Which modules are offered for each role
 const ROLE_MODULES: Record<string, string[]> = {
-  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_invoices', 'mod_print_jobs'],
+  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_invoices', 'mod_print_jobs', 'mod_customers', 'mod_projects'],
   hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks', 'mod_notes'],
-  branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_print_jobs'],
-  sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks', 'mod_notes', 'mod_quotations'],
+  branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_print_jobs', 'mod_customers', 'mod_projects'],
+  sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_customers', 'mod_projects'],
   // Printing Media is not in this list for a designer. It gets a box of
   // its own below, because picking who handles printing is a decision
   // about a person's job, not one more thing they are allowed to open.
-  design_team: ['mod_tasks', 'mod_reminders', 'mod_notes'],
+  design_team: ['mod_tasks', 'mod_reminders', 'mod_notes', 'mod_projects'],
 }
 
 // Everything the admin area holds, grouped the way its sidebar groups it.
@@ -73,8 +73,8 @@ const ADMIN_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'Sales Department', keys: ['mod_leads', 'mod_lead_assignment', 'mod_performance', 'mod_reports', 'mod_evolution', 'mod_questions', 'mod_targets'] },
   { title: 'HR Department', keys: ['mod_employees'] },
   { title: 'Productivity', keys: ['mod_tasks', 'mod_reminders', 'mod_notes'] },
-  { title: 'Business', keys: ['mod_quotations'] },
-  { title: 'Designing Department', keys: ['timer_view_all', 'design_perf', 'work_types_edit', 'mod_print_jobs'] },
+  { title: 'Business', keys: ['mod_quotations', 'mod_customers'] },
+  { title: 'Designing Department', keys: ['mod_projects', 'timer_view_all', 'design_perf', 'work_types_edit', 'mod_print_jobs'] },
   { title: 'Company', keys: ['mod_settings', 'mod_backup'] },
 ]
 
@@ -107,6 +107,20 @@ const QUOTE_ACTION_LABEL: Record<string, string> = {
   quote_view_all: 'See every quotation',
   quote_delete: 'Delete quotations',
   quote_settings: 'Quotation settings (company, products)',
+}
+
+// What a person may do inside the customer module
+const CUSTOMER_ACTION_LABEL: Record<string, string> = {
+  customer_view_all: 'See every customer',
+  customer_edit: "Edit anyone's customer",
+  customer_delete: 'Delete customers',
+}
+
+// What a person may do inside the project module
+const PROJECT_ACTION_LABEL: Record<string, string> = {
+  project_view_all: 'See every project',
+  project_edit: "Edit anyone's project",
+  project_delete: 'Delete projects',
 }
 
 // What a person may do inside Printing Media.
@@ -796,6 +810,24 @@ export default function StaffManager() {
                       <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside tasks</p>
                       <div className="flex flex-wrap gap-x-5 gap-y-4">
                         {Object.entries(TASK_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
+                      </div>
+                    </>
+                  )}
+
+                  {effective('mod_projects') && (
+                    <>
+                      <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside projects</p>
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        {Object.entries(PROJECT_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
+                      </div>
+                    </>
+                  )}
+
+                  {effective('mod_customers') && (
+                    <>
+                      <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside customers</p>
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        {Object.entries(CUSTOMER_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
                       </div>
                     </>
                   )}

@@ -27,6 +27,9 @@ export type Lead = {
   next_follow_up: string | null
   follow_up_count: number
   last_activity_at: string | null
+  // Set once this lead has become a customer. It is also what stops the
+  // board offering to convert the same lead a second time.
+  customer_id: string | null
   created_by: string | null
   created_at: string
 }

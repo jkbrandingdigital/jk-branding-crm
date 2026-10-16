@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Check, Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save } from 'lucide-react'
+import { useLocation, useSearchParams } from 'react-router-dom'
+import { Check, Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save, UserPlus } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
@@ -8,11 +8,14 @@ import LeadDrawer from './LeadDrawer'
 import { DateField, DateTimeField } from '../DateField'
 import ImportLeads from './ImportLeads'
 import LeadSearchCard from './LeadSearchCard'
+import ConvertLead from '../customers/ConvertLead'
+import ClientMasterForm from '../customers/ClientMasterForm'
+import LeadCreateMenu from './LeadCreateMenu'
+import { loadBranches, type Branch, type Customer } from '../customers/customerUtils'
 import { LABEL_CLS, type Label } from './labels'
 import { SOURCES, sourceOf, loadSources, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadStaff, type Lead, type Source, type Stage, type Staff } from './leadUtils'
 
 type LeadL = Lead & { label_id?: string | null; label_ids?: string[] | null }
-
 
 // One row per stage, straight from lead_board_summary()
 type SummaryRow = { stage_id: string | null; cnt: number; amount: number; overdue: number }
@@ -71,8 +74,10 @@ const BULK_PAGE = 1000       // export and delete-all walk through in these step
 
 // The board draws these and nothing else. Asking for * drags `requirement`
 // along — the long 365 comment — and that is most of the weight on the wire.
+// requirement and customer_id ride along so a card dropped into Won can
+// offer to make the customer without a second trip to the database.
 const CARD_COLS =
-  'id, lead_no, name, phone, company, city, source, stage_id, assigned_to, created_by, created_at, next_follow_up, follow_up_count, rating, estimated_amount, label_id, label_ids'
+  'id, lead_no, name, phone, company, city, source, stage_id, assigned_to, created_by, created_at, next_follow_up, follow_up_count, rating, estimated_amount, label_id, label_ids, requirement, customer_id'
 
 const PREF_KEY = 'jk_leads_card_prefs'
 const STAGE_KEY = 'jk_leads_hidden_stages'
@@ -222,8 +227,25 @@ const emptyNew = (): NewLead => ({
   name: '', phone: '', email: '', company: '', city: '', requirement: '', source: 'manual', estimated_amount: '', next_follow_up: '', assign: 'auto',
 })
 
-export default function LeadsBoard() {
+/*
+  Two screens, one component.
+
+  This board is both "My Leads" in a person's own work and "Leads" in the
+  admin area. They are not the same question: a sub admin's own screen is
+  their own round of calls, while the admin screen is the company's.
+
+  Until now the component asked the same question in both places and let
+  the database decide, so a sales person given admin rights found all
+  twelve thousand leads sitting in their own list — including ones
+  assigned to HR.
+
+  `scope` settles it. Left out, it is read from the address, because the
+  two call sites are a page apart and the address is what tells them
+  apart.
+*/
+export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
   const { can, ready } = usePermissions()
+  const { pathname } = useLocation()
   const [myId, setMyId] = useState<string | null>(null)
   const [stages, setStages] = useState<Stage[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
@@ -289,6 +311,9 @@ export default function LeadsBoard() {
   const [importOpen, setImportOpen] = useState(false)
   const [fu, setFu] = useState<{ lead: LeadL; when: string; text: string } | null>(null)
   const [cancelFor, setCancelFor] = useState<{ leadId: string; stageId: string; name: string } | null>(null)
+  const [wonFor, setWonFor] = useState<{ leadId: string; name: string; requirement: string | null } | null>(null)
+  const [newCustomer, setNewCustomer] = useState<Customer | null>(null)
+  const [branches, setBranches] = useState<Branch[]>([])
   const [reasons, setReasons] = useState<{ id: string; name: string }[]>([])
   const [cancelPick, setCancelPick] = useState('')
   const [cancelNote, setCancelNote] = useState('')
@@ -304,8 +329,52 @@ export default function LeadsBoard() {
     [stages, hiddenStages, f.stage],
   )
 
+  // A person's own work lives under /sales; everything else is a screen
+  // that is meant to show more than one person's leads.
+  const mineOnly = (scope ?? (pathname.startsWith('/sales') ? 'mine' : 'all')) === 'mine'
+
+  /*
+    What happens the moment a customer is made.
+
+    The customer exists before the form opens, not after it is filled in.
+    A deal lands while someone is on the phone; if the form had to be
+    completed first, closing it — or the browser — would leave a won deal
+    with nothing recorded anywhere. Saved first, filled in second, and
+    the Incomplete mark carries what is missing.
+
+    The board is NOT re-fetched afterwards. Making a customer does not
+    move a lead — it stays in the column it was in, and only its icon
+    changes. Re-asking the server for every column to show one changed
+    icon was both wasteful and the reason a card could jump or vanish
+    under someone's hand. The one card is patched where it sits.
+  */
+  const openCustomerForm = useCallback(async (customerId: string) => {
+    const { data } = await supabase.from('customer_list').select('*').eq('id', customerId).single()
+    if (data) setNewCustomer(data as Customer)
+  }, [])
+
+  /*
+    The filters the queries actually use.
+
+    Narrowing to one person is done by setting the owner filter rather
+    than by a separate rule, because `summaryArgs` already passes an
+    owner to lead_board_summary(). One change, and the column headings —
+    the counts and the ₹ totals — narrow with the cards. Add a rule
+    beside the filters instead and the headings keep counting everyone,
+    which is worse than no narrowing at all: the list and the number
+    above it disagree and neither looks wrong on its own.
+  */
+  const ef = useMemo(
+    () => (mineOnly && myId ? { ...f, owner: myId } : f),
+    [f, myId, mineOnly],
+  )
+
+  // Nothing is fetched until we know who is asking. Without this the
+  // board shows every lead for the moment before the id arrives.
+  const waiting = mineOnly && !myId
+
   // Answers that arrive after the filters changed again are thrown away
-  const queryKey = useMemo(() => JSON.stringify([f, q]), [f, q])
+  const queryKey = useMemo(() => JSON.stringify([ef, q]), [ef, q])
   const keyRef = useRef(queryKey)
   keyRef.current = queryKey
 
@@ -313,16 +382,23 @@ export default function LeadsBoard() {
   const loadMeta = useCallback(async () => {
     setLoading(true)
     try {
-      const [{ data: u }, st, sf, lb, cr, tot, src] = await Promise.all([
-        supabase.auth.getUser(),
+      // Who is asking has to be known before the total is counted, or
+      // the heading says twelve thousand on a board showing forty.
+      const { data: u } = await supabase.auth.getUser()
+      const me = u.user?.id ?? null
+
+      let totQ = supabase.from('leads').select('id', { count: 'exact', head: true }).is('deleted_at', null)
+      if (mineOnly && me) totQ = totQ.eq('assigned_to', me)
+
+      const [st, sf, lb, cr, tot, src] = await Promise.all([
         supabase.from('lead_stages').select('*').eq('is_active', true).order('sort_order'),
         loadStaff(),
         supabase.from('lead_labels').select('*').eq('is_active', true).order('sort_order'),
         supabase.from('lead_cancel_reasons').select('id, name').eq('is_active', true).order('sort_order'),
-        supabase.from('leads').select('id', { count: 'exact', head: true }).is('deleted_at', null),
+        totQ,
         loadSources(true),
       ])
-      setMyId(u.user?.id ?? null)
+      setMyId(me)
       setStages((st.data ?? []) as Stage[])
       setStaff(sf)
       setLabels((lb.data ?? []) as Label[])
@@ -334,17 +410,24 @@ export default function LeadsBoard() {
       setError((e as Error).message)
     }
     setLoading(false)
-  }, [])
+  }, [mineOnly])
 
   useEffect(() => {
     void loadMeta()
   }, [loadMeta])
 
+  // `ready`, not `can`: usePermissions hands back a fresh `can` on every
+  // render, so depending on it would re-run this for ever.
+  useEffect(() => {
+    if (ready && can('mod_customers')) void (async () => setBranches(await loadBranches()))()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready])
+
   // ---------- Column headings: counts, ₹ totals, overdue ----------
   const loadSummary = useCallback(async () => {
-    if (stages.length === 0) return
-    const { data, error: e } = await supabase.rpc('lead_board_summary', summaryArgs(f, q, openStageIds))
-    if (keyRef.current !== JSON.stringify([f, q])) return
+    if (stages.length === 0 || waiting) return
+    const { data, error: e } = await supabase.rpc('lead_board_summary', summaryArgs(ef, q, openStageIds))
+    if (keyRef.current !== JSON.stringify([ef, q])) return
     if (e) return setError(friendly(e.message))
     const byStage: Record<string, { cnt: number; amount: number }> = {}
     let shown = 0
@@ -355,7 +438,7 @@ export default function LeadsBoard() {
       overdue += Number(r.overdue) || 0
     }
     setSummary({ byStage, shown, overdue })
-  }, [f, q, openStageIds, stages.length])
+  }, [ef, q, openStageIds, stages.length, waiting])
 
   useEffect(() => {
     void loadSummary()
@@ -366,7 +449,8 @@ export default function LeadsBoard() {
     async (stageId: string, size: number) => {
       const mine = queryKey
       setCols((c) => ({ ...c, [stageId]: { rows: c[stageId]?.rows ?? [], loading: true } }))
-      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS).eq('stage_id', stageId), f, q, openStageIds)
+      if (waiting) return
+      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS).eq('stage_id', stageId), ef, q, openStageIds)
       const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
       if (keyRef.current !== mine) return
       if (e) {
@@ -377,7 +461,7 @@ export default function LeadsBoard() {
       const got = (data ?? []) as LeadL[]
       setCols((c) => ({ ...c, [stageId]: { rows: got, loading: false } }))
     },
-    [f, q, openStageIds, queryKey],
+    [ef, q, openStageIds, queryKey, waiting],
   )
 
   // ---------- Every column at once, while searching ----------
@@ -389,6 +473,7 @@ export default function LeadsBoard() {
   const fetchAllCols = useCallback(
     async (size: number) => {
       const mine = queryKey
+      if (waiting) return
       const ids = visibleStages.map((s) => s.id)
       setCols((c) => {
         const next: Record<string, { rows: LeadL[]; loading: boolean }> = {}
@@ -396,7 +481,7 @@ export default function LeadsBoard() {
         return next
       })
 
-      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS), f, q, openStageIds)
+      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS), ef, q, openStageIds)
       const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
       if (keyRef.current !== mine) return
 
@@ -420,15 +505,16 @@ export default function LeadsBoard() {
       for (const id of ids) next[id] = { rows: byStage[id] ?? [], loading: false }
       setCols(next)
     },
-    [f, q, openStageIds, queryKey, visibleStages],
+    [ef, q, openStageIds, queryKey, visibleStages, waiting],
   )
 
   // ---------- List view page ----------
   const fetchList = useCallback(
     async (size: number) => {
       const mine = queryKey
+      if (waiting) return
       setListBusy(true)
-      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS), f, q, openStageIds)
+      const qy = applyLeadFilters(supabase.from('leads').select(CARD_COLS), ef, q, openStageIds)
       const { data, error: e } = await qy.order('created_at', { ascending: false }).range(0, size - 1)
       if (keyRef.current !== mine) return
       setListBusy(false)
@@ -436,7 +522,7 @@ export default function LeadsBoard() {
       const got = (data ?? []) as LeadL[]
       setRows(got)
     },
-    [f, q, openStageIds, queryKey],
+    [ef, q, openStageIds, queryKey, waiting],
   )
 
   const searching = cleanQ(q) !== ''
@@ -570,9 +656,6 @@ export default function LeadsBoard() {
   const shown = summary.shown
   const overdueCount = summary.overdue
 
-  // Nothing found here? Ask the database whether this number exists anywhere.
-  
-
   // ---------- Stage change by drag ----------
   async function moveTo(leadId: string, stageId: string) {
     setMenu(null)
@@ -590,6 +673,14 @@ export default function LeadsBoard() {
     const { error: e } = await supabase.from('leads').update({ stage_id: stageId }).eq('id', leadId)
     if (e) setError(e.message)
     refresh()
+
+    // Won: the move has already happened, and now it offers. Making the
+    // customer silently would be worse than not making it — a card lands
+    // in Won by mistake often enough, and nobody can tell afterwards
+    // whether a customer that appeared on its own is real.
+    if (target?.is_won && !lead.customer_id && can('mod_customers')) {
+      setWonFor({ leadId, name: lead.name, requirement: lead.requirement ?? null })
+    }
   }
 
   // ---------- Quick actions ----------
@@ -906,11 +997,38 @@ export default function LeadsBoard() {
                 <UserCog size={14} />
               </button>
             )}
+            {/* Make this lead a customer. Once it is one the icon is gone
+                — there is nothing left to do from here. Converting twice
+                is refused by the database anyway: the lead already carries
+                its customer, so a second attempt returns the same one. */}
+            {can('mod_customers') && !l.customer_id && (
+              <button
+                onClick={() => setWonFor({ leadId: l.id, name: l.name, requirement: l.requirement ?? null })}
+                className={`${iconBtn} hover:text-orange-400`}
+                title="Make this a customer"
+              >
+                <UserPlus size={14} />
+              </button>
+            )}
             {can('lead_delete') && (
               <button onClick={() => removeLead(l)} className={`${iconBtn} hover:text-red-400`} title="Delete">
                 <Trash2 size={14} />
               </button>
             )}
+
+            {/* Task, meeting, quotation, reminder, note — the same list
+                as inside the lead, from the same file. It opens here on
+                the card: going into the lead first to reach it is three
+                steps for one. */}
+            <LeadCreateMenu
+              lead={{ id: l.id, name: l.name, lead_no: l.lead_no, phone: l.phone ?? null }}
+              staff={staff}
+              can={can}
+              size={14}
+              drop="up"
+              className="ml-auto"
+              onDone={() => refresh()}
+            />
 
             {menu?.id === l.id && (
               <div className="absolute bottom-9 left-0 z-20 max-h-56 w-52 overflow-y-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
@@ -1108,13 +1226,18 @@ export default function LeadsBoard() {
                     </select>
                   </Field>
 
-                  <Field label="Assign to">
-                    <select value={f.owner} onChange={(e) => set({ owner: e.target.value })} className={panelSelect}>
-                      <option value="all">All assign</option>
-                      <option value="none">Unassigned</option>
-                      {owners.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                    </select>
-                  </Field>
+                  {/* On a person's own board this can only ever be them,
+                      and a control that changes nothing is worse than no
+                      control — it reads as broken. */}
+                  {!mineOnly && (
+                    <Field label="Assign to">
+                      <select value={f.owner} onChange={(e) => set({ owner: e.target.value })} className={panelSelect}>
+                        <option value="all">All assign</option>
+                        <option value="none">Unassigned</option>
+                        {owners.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                      </select>
+                    </Field>
+                  )}
 
                   <Field label="Labels">
                     <select value={f.label} onChange={(e) => set({ label: e.target.value })} className={panelSelect}>
@@ -1229,8 +1352,6 @@ export default function LeadsBoard() {
           ))}
         </div>
       )}
-
-      
 
       {/* Board */}
       {view === 'board' ? (
@@ -1373,6 +1494,33 @@ export default function LeadsBoard() {
           onClose={closeDrawer}
           onChanged={refresh}
           onOpenLead={(id) => setOpenId(id)}
+        />
+      )}
+
+      {/* Won: offer to open the customer */}
+      {wonFor && (
+        <ConvertLead
+          leadId={wonFor.leadId}
+          leadName={wonFor.name}
+          requirement={wonFor.requirement}
+          onClose={() => setWonFor(null)}
+          onDone={(customerId) => {
+            // The card keeps its place; only the icon flips to the ✓.
+            patchLead(wonFor.leadId, { customer_id: customerId })
+            setWonFor(null)
+            void openCustomerForm(customerId)
+          }}
+        />
+      )}
+
+      {/* The client information, opened on the leads screen itself. Sending
+          someone to another page to finish is how it stays unfinished. */}
+      {newCustomer && (
+        <ClientMasterForm
+          customer={newCustomer}
+          branches={branches}
+          onClose={() => setNewCustomer(null)}
+          onSaved={() => setNewCustomer(null)}
         />
       )}
 

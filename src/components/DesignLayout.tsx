@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Menu, X, type LucideIcon } from 'lucide-react'
+import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Menu, X, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
@@ -13,7 +13,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
   {
     title: 'Work',
     items: [
-      // Projects is on hold until the model is settled — no route for it yet.
+      { label: 'Projects', path: '/design/projects', icon: FolderKanban, perm: 'mod_projects' },
       { label: 'Tasks', path: '/design/tasks', icon: ListTodo, perm: 'mod_tasks' },
       { label: 'To-Do', path: '/design/todos', icon: ListChecks, perm: 'mod_todos' },
       { label: 'Reminders', path: '/design/reminders', icon: AlarmClock, perm: 'mod_reminders' },

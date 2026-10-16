@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { CalendarDays, ChevronLeft, ChevronRight, Clock } from 'lucide-react'
 
 /**
  * One date picker for the whole CRM: a dialog in the middle of the screen with
  * a calendar page and a clock face.
+ *
+ * The dialog goes through a portal to <body>, and that is not decoration.
+ * A `position: fixed` box is held in place by any ancestor carrying a
+ * transform or a filter — and every modal in this CRM has backdrop-blur on
+ * it, which is a filter. Rendered in place, the picker was being pinned
+ * inside the modal and then clipped away by its scrollbar: it opened, and
+ * nothing appeared. Out at <body> it has no such ancestor.
  *
  * Values keep the same shape the browser's own fields used, so these are a
  * straight swap for <input type="date"> and <input type="datetime-local">:
@@ -18,6 +26,11 @@ const MONTHS_LONG = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
+
+// Far enough back for a grandparent's birthday, far enough on for a
+// delivery date a few years out.
+const THIS_YEAR = new Date().getFullYear()
+const YEARS = Array.from({ length: THIS_YEAR + 10 - 1925 + 1 }, (_, i) => THIS_YEAR + 10 - i)
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -143,9 +156,9 @@ function Picker({
         </span>
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
           onClick={() => setOpen(false)}
         >
           <div
@@ -226,6 +239,11 @@ function Picker({
             <div className="px-4 py-4">
               {tab === 'date' ? (
                 <>
+                  {/* The month and the year are chosen, not stepped to. A
+                      birthday is forty years back; with arrows alone that is
+                      five hundred clicks, so nobody fills the field in. The
+                      arrows stay for the near months, which is what they are
+                      good at. */}
                   <div className="mb-2 flex items-center gap-1">
                     <button
                       type="button"
@@ -235,9 +253,26 @@ function Picker({
                     >
                       <ChevronLeft size={17} />
                     </button>
-                    <p className="flex-1 text-center text-sm font-medium text-white">
-                      {MONTHS_LONG[month.getMonth()]} {month.getFullYear()}
-                    </p>
+
+                    <div className="flex flex-1 items-center justify-center gap-1.5">
+                      <select
+                        value={month.getMonth()}
+                        onChange={(e) => setMonth(new Date(month.getFullYear(), Number(e.target.value), 1))}
+                        aria-label="Month"
+                        className="cursor-pointer rounded-md border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1 text-sm font-medium text-white focus:border-orange-500 focus:outline-none"
+                      >
+                        {MONTHS_LONG.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                      </select>
+                      <select
+                        value={month.getFullYear()}
+                        onChange={(e) => setMonth(new Date(Number(e.target.value), month.getMonth(), 1))}
+                        aria-label="Year"
+                        className="cursor-pointer rounded-md border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1 text-sm font-medium text-white focus:border-orange-500 focus:outline-none"
+                      >
+                        {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                    </div>
+
                     <button
                       type="button"
                       onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}
@@ -321,7 +356,8 @@ function Picker({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

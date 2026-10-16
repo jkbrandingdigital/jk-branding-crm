@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Briefcase as BriefcaseIcon, type LucideIcon,
+  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Briefcase as BriefcaseIcon, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -62,6 +62,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: 'Create Quotation', path: '/admin/quotations/new', icon: Plus, ready: true, perm: 'quote_create' },
       { label: 'All Quotations', path: '/admin/quotations', icon: FileText, ready: true, perm: 'mod_quotations' },
+      { label: 'Customers', path: '/admin/customers', icon: Users, ready: true, perm: 'mod_customers' },
       { label: 'Quotation Settings', path: '/admin/quotations/settings', icon: Settings, ready: true, perm: 'quote_settings' },
     ],
   },
@@ -72,11 +73,11 @@ const GROUPS: NavGroup[] = [
     label: 'Designing Department',
     icon: Palette,
     items: [
-      // Projects is on hold until the model is settled — no route for it yet.
+      { label: 'Projects', path: '/admin/projects', icon: FolderKanban, ready: true, perm: 'mod_projects' },
       { label: 'Team activity', path: '/admin/activity', icon: Activity, ready: true, perm: 'timer_view_all' },
       { label: 'Design performance', path: '/admin/design-performance', icon: TrendingUp, ready: true, perm: 'design_perf' },
       { label: 'Work Types', path: '/admin/work-types', icon: Timer, ready: true, perm: 'work_types_edit' },
-      { label: 'Print Register', path: '/admin/print', icon: Printer, ready: true, perm: 'mod_print_jobs' },
+      { label: 'Printing Media', path: '/admin/print', icon: Printer, ready: true, perm: 'mod_print_jobs' },
     ],
   },
   { key: 'finance', label: 'Finance Department', icon: Wallet, items: [] },
@@ -88,6 +89,7 @@ const GROUPS: NavGroup[] = [
       { label: 'Branches', path: '/admin/branches', icon: Building2, ready: false },
       { label: 'Announcements', path: '/admin/announcements', icon: Megaphone, ready: false },
       { label: 'General Settings', path: '/admin/settings', icon: Settings, ready: true, perm: 'mod_settings' },
+      { label: 'Greetings', path: '/admin/greetings', icon: Cake, ready: true, perm: 'mod_customers' },
       { label: 'Backup', path: '/admin/backup', icon: DatabaseBackup, ready: true, perm: 'mod_backup' },
     ],
   },

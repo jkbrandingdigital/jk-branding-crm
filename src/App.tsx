@@ -59,6 +59,17 @@ import AdminDesignPerformance from './pages/admin/DesignPerformance'
 import HrDesignPerformance from './pages/hr/DesignPerformance'
 import AdminWorkTypes from './pages/admin/WorkTypes'
 import AdminPrintRegister from './pages/admin/PrintRegister'
+import AdminCustomers from './pages/admin/Customers'
+import GreetingsPopup from './components/customers/GreetingsPopup'
+import AdminGreetings from './pages/admin/Greetings'
+import ManagerGreetings from './pages/manager/Greetings'
+import SalesGreetings from './pages/sales/Greetings'
+import AdminProjects from './pages/admin/Projects'
+import DesignProjects from './pages/design/Projects'
+import ManagerProjects from './pages/manager/Projects'
+import SalesProjects from './pages/sales/Projects'
+import SalesCustomers from './pages/sales/Customers'
+import ManagerCustomers from './pages/manager/Customers'
 import DesignPrintRegister from './pages/design/PrintRegister'
 import ManagerQuotations from './pages/manager/Quotations'
 import ManagerQuotationEdit from './pages/manager/QuotationEdit'
@@ -133,6 +144,12 @@ function AppRoutes() {
   const home = ownHome(role)
 
   return (
+    <>
+      {/* Today's birthdays and anniversaries, wherever the person is.
+          Put here rather than in each layout so there is one of it, and
+          so it cannot be missed by opening a page that happens to use a
+          different layout. */}
+      <GreetingsPopup />
     <Routes>
       {adminArea && (
         <>
@@ -156,6 +173,9 @@ function AppRoutes() {
           <Route path="/admin/design-performance" element={<Guard ok={may('design_perf')}><AdminDesignPerformance /></Guard>} />
           <Route path="/admin/work-types" element={<Guard ok={may('work_types_edit')}><AdminWorkTypes /></Guard>} />
           <Route path="/admin/print" element={<Guard ok={may('mod_print_jobs')}><AdminPrintRegister /></Guard>} />
+          <Route path="/admin/customers" element={<Guard ok={may('mod_customers')}><AdminCustomers /></Guard>} />
+          <Route path="/admin/greetings" element={<Guard ok={may('mod_customers')}><AdminGreetings /></Guard>} />
+          <Route path="/admin/projects" element={<Guard ok={may('mod_projects')}><AdminProjects /></Guard>} />
           <Route path="/admin/quotations" element={<Guard ok={may('mod_quotations')}><AdminQuotations /></Guard>} />
           <Route path="/admin/quotations/settings" element={<Guard ok={may('quote_settings')}><AdminQuotationSettings /></Guard>} />
           <Route path="/admin/quotations/new" element={<Guard ok={may('quote_create')}><AdminQuotationEdit /></Guard>} />
@@ -179,6 +199,9 @@ function AppRoutes() {
           <Route path="/manager/notes" element={<ManagerNotes />} />
           <Route path="/manager/todos" element={<ManagerTodos />} />
           <Route path="/manager/activity" element={<ManagerTeamActivity />} />
+          <Route path="/manager/customers" element={<ManagerCustomers />} />
+          <Route path="/manager/greetings" element={<ManagerGreetings />} />
+          <Route path="/manager/projects" element={<ManagerProjects />} />
           <Route path="/manager/quotations" element={<ManagerQuotations />} />
           <Route path="/manager/quotations/new" element={<ManagerQuotationEdit />} />
           <Route path="/manager/quotations/:id/preview" element={<ManagerQuotationView />} />
@@ -192,6 +215,9 @@ function AppRoutes() {
           <Route path="/sales/tasks" element={<SalesTasks />} />
           <Route path="/sales/notes" element={<SalesNotes />} />
           <Route path="/sales/todos" element={<SalesTodos />} />
+          <Route path="/sales/customers" element={<SalesCustomers />} />
+          <Route path="/sales/greetings" element={<SalesGreetings />} />
+          <Route path="/sales/projects" element={<SalesProjects />} />
           <Route path="/sales/quotations" element={<SalesQuotations />} />
           <Route path="/sales/quotations/new" element={<SalesQuotationEdit />} />
           <Route path="/sales/quotations/:id/preview" element={<SalesQuotationView />} />
@@ -220,11 +246,13 @@ function AppRoutes() {
           <Route path="/design/activity" element={<DesignTeamActivity />} />
           <Route path="/design/performance" element={<DesignPerformancePage />} />
           <Route path="/design/print" element={<DesignPrintRegister />} />
+          <Route path="/design/projects" element={<DesignProjects />} />
           <Route path="/design/*" element={<DesignDashboard />} />
         </>
       )}
       <Route path="*" element={<Navigate to={home} />} />
     </Routes>
+    </>
   )
 }
 

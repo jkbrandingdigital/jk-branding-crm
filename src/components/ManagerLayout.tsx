@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  Activity, FolderKanban, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
+  Activity, Cake, FolderKanban, Users2, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -40,6 +40,8 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: 'Business',
     items: [
       { label: 'Create Quotation', path: '/manager/quotations/new', icon: Plus, ready: true, perm: 'quote_create' },
+      { label: 'Customers', path: '/manager/customers', icon: Users2, ready: true, perm: 'mod_customers' },
+      { label: 'Greetings', path: '/manager/greetings', icon: Cake, ready: true, perm: 'mod_customers' },
       { label: 'All Quotations', path: '/manager/quotations', icon: FileText, ready: true, perm: 'mod_quotations' },
     ],
   },

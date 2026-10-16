@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
+import { Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
@@ -10,10 +10,12 @@ import { istDate } from '../lib/format'
 
 export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
-type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'projects'
+type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'customers' | 'projects' | 'greetings'
 const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   reminders: '/sales/reminders',
   tasks: '/sales/tasks',
+  customers: '/sales/customers',
+  greetings: '/sales/greetings',
   projects: '/sales/projects',
   todos: '/sales/todos',
   notes: '/sales/notes',
@@ -57,6 +59,8 @@ const NAV: { title: string; items: NavItem[] }[] = [
   {
     title: 'Business',
     items: [
+      { label: 'Customers', page: 'customers', icon: Users, perm: 'mod_customers' },
+      { label: 'Greetings', page: 'greetings', icon: Cake, perm: 'mod_customers' },
       { label: 'Create Quotation', page: 'quote-new', icon: Plus, perm: 'quote_create' },
       { label: 'All Quotations', page: 'quotations', icon: FileText, perm: 'mod_quotations' },
     ],

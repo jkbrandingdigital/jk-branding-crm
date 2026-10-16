@@ -380,7 +380,7 @@ export default function PrintRegister() {
                         >
                           {busy === r.id ? <Loader2 size={13} className="animate-spin" /> : <MailCheck size={13} />}
                           Sent
-                          {r.sent_at && <span className="font-normal text-green-600/80">· {fmtTime(r.sent_at)}</span>}
+                          {r.sent_at && <span className="font-normal opacity-75">· {fmtTime(r.sent_at)}</span>}
                         </button>
                       ) : (
                         <button

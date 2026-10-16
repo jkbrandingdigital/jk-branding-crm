@@ -7,6 +7,7 @@ import { fromInputDT, toInputDT, type Staff } from '../leads/leadUtils'
 import { DateTimeField } from '../DateField'
 import { searchLeads, type LeadLite } from '../reminders/reminderUtils'
 import { RichText, isEmptyHtml, toHtml } from '../RichText'
+import { loadProjectsLite } from '../projects/projectUtils'
 import {
   PRIORITIES, REPEATS, currentAssignees,
   type Priority, type Task, type TaskLabel, type TaskStage,
@@ -18,6 +19,9 @@ type Props = {
   stages: TaskStage[]
   labels: TaskLabel[]
   staff: Staff[]
+  // A task started from a lead arrives with that lead already attached.
+  // It can still be taken off inside the window.
+  lead?: LeadLite | null
   onClose: () => void
   onSaved: () => void
 }
@@ -33,7 +37,7 @@ function tomorrow() {
   return toInputDT(d.toISOString())
 }
 
-export default function TaskModal({ task, stages, labels, staff, onClose, onSaved }: Props) {
+export default function TaskModal({ task, stages, labels, staff, lead: fromLead = null, onClose, onSaved }: Props) {
   const { user } = useAuth()
   const { can } = usePermissions()
   const me = user?.id ?? ''
@@ -47,13 +51,15 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
   const [start, setStart] = useState(toInputDT(task?.start_at ?? new Date().toISOString()))
   const [due, setDue] = useState(task?.due_at ? toInputDT(task.due_at) : tomorrow())
   const [repeat, setRepeat] = useState(task?.repeat_every ?? 'none')
-  const [lead, setLead] = useState<LeadLite | null>(null)
+  const [lead, setLead] = useState<LeadLite | null>(fromLead)
   const [customer, setCustomer] = useState(task?.customer_name ?? '')
   const [phone, setPhone] = useState(task?.customer_phone ?? '')
   const [to, setTo] = useState<Set<string>>(new Set(task ? currentAssignees(task) : []))
   const [leadQ, setLeadQ] = useState('')
   const [leadHits, setLeadHits] = useState<LeadLite[]>([])
   const [staffQ, setStaffQ] = useState('')
+  const [projects, setProjects] = useState<{ id: string; project_no: number; name: string; customer_name: string | null; is_done: boolean }[]>([])
+  const [projectId, setProjectId] = useState(task?.project_id ?? '')
   const [workTypes, setWorkTypes] = useState<WorkType[]>([])
   const [workTypeId, setWorkTypeId] = useState(task?.work_type_id ?? '')
   const [workQty, setWorkQty] = useState(task?.work_qty ?? 1)
@@ -101,7 +107,15 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
 
   useEffect(() => {
     void loadWorkTypes().then(setWorkTypes)
+    void loadProjectsLite().then(setProjects)
   }, [])
+
+  // A task opened from a project arrives with it already chosen
+  useEffect(() => {
+    if (task) return
+    const fromUrl = new URLSearchParams(window.location.search).get('project')
+    if (fromUrl) setProjectId(fromUrl)
+  }, [task])
 
   // The time rules are a design-team thing. A task given to sales or HR
   // gets no work type, no allowed time and no timer.
@@ -131,6 +145,7 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
       start_at: fromInputDT(start) ?? new Date().toISOString(),
       due_at: fromInputDT(due),
       repeat_every: repeat,
+      project_id: projectId || null,
       work_type_id: forDesign ? workTypeId || null : null,
       work_qty: forDesign && chosen?.per_unit ? Math.max(1, Math.min(99, workQty)) : 1,
     }
@@ -222,6 +237,22 @@ export default function TaskModal({ task, stages, labels, staff, onClose, onSave
                 {labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
+          </div>
+
+          {/* Which client order this belongs to. Optional on purpose: a one-off
+              visiting card needs no project, and forcing one would mean a
+              project gets made for every small job and the list stops meaning
+              anything. */}
+          <div>
+            <label className={label} htmlFor="task-project">Project <span className="text-gray-600">(optional)</span></label>
+            <select id="task-project" value={projectId} onChange={(e) => setProjectId(e.target.value)} className={input}>
+              <option value="">Not part of a project</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  #{p.project_no} · {p.name}{p.customer_name ? ` · ${p.customer_name}` : ''}{p.is_done ? ' (delivered)' : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Design work: which kind of job, and how much of it.
