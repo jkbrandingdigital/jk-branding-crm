@@ -6,11 +6,31 @@ import { getCurrentUser, getUserProfile } from '../../lib/auth'
 import { istDate, addMonths, inr } from '../../lib/format'
 import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../../lib/targets'
 
-type Member = { id: string; name: string; saved: number | null; achieved: number }
+/*
+  Team Targets — the branch manager splits their branch's month.
+
+  The manager is now in their own list.
+
+  They used to be left out, because the list asked for role 'sales' and
+  a manager does not have it. But a manager who takes 30L and gives 10L
+  and 10L to two people keeps the last 10L and sells it themselves —
+  that is the normal shape of a branch. With no row to put it in, their
+  ten lakh existed nowhere: not in the split, not in any target total,
+  and not on the performance screen, which had the same omission.
+
+  Saving goes through set_employee_target rather than an upsert. Two
+  reasons: the function holds the rule about who may set whose target,
+  in one place instead of three screens; and it does update-then-insert,
+  so it does not depend on guessing which unique constraint the table
+  carries.
+*/
+
+type Member = { id: string; name: string; saved: number | null; achieved: number; isManager: boolean }
 
 export default function ManagerTargets() {
   const today = istDate()
   const [ym, setYm] = useState(today.slice(0, 7))
+  const [meId, setMeId] = useState<string | null>(null)
   const [branchId, setBranchId] = useState<string | null>(null)
   const [branchName, setBranchName] = useState('')
   const [branchTarget, setBranchTarget] = useState<number | null>(null)
@@ -25,6 +45,7 @@ export default function ManagerTargets() {
     ;(async () => {
       const user = await getCurrentUser()
       if (!user) return
+      setMeId(user.id)
       try {
         const p = await getUserProfile(user.id)
         if (!p?.branch_id) {
@@ -51,7 +72,9 @@ export default function ManagerTargets() {
       supabase.from('branch_targets').select('target_amount').eq('branch_id', branchId).eq('month', from).maybeSingle(),
       supabase.from('employee_targets').select('user_id, target_amount').eq('branch_id', branchId).eq('month', from),
       supabase.from('profiles').select('id, full_name, is_active').eq('branch_id', branchId).order('full_name'),
-      supabase.from('user_roles').select('user_id').eq('role', 'sales'),
+      // Branch managers too — they sell as well, and the leftover of the
+      // split is usually theirs.
+      supabase.from('user_roles').select('user_id, role').in('role', ['sales', 'branch_manager']),
       supabase
         .from('daily_reports')
         .select('user_id, revenue')
@@ -67,14 +90,24 @@ export default function ManagerTargets() {
       return
     }
 
-    const salesIds = new Set((roles.data ?? []).map((r) => r.user_id))
+    const managerIds = new Set((roles.data ?? []).filter((r) => r.role === 'branch_manager').map((r) => r.user_id))
+    const sellerIds = new Set((roles.data ?? []).map((r) => r.user_id))
     const saved = new Map((et.data ?? []).map((t) => [t.user_id, Number(t.target_amount)]))
     const achieved = new Map<string, number>()
     for (const r of reports.data ?? []) achieved.set(r.user_id, (achieved.get(r.user_id) ?? 0) + Number(r.revenue ?? 0))
 
     const list: Member[] = (p.data ?? [])
-      .filter((x) => x.is_active !== false && salesIds.has(x.id))
-      .map((x) => ({ id: x.id, name: x.full_name || 'Unnamed', saved: saved.get(x.id) ?? null, achieved: achieved.get(x.id) ?? 0 }))
+      .filter((x) => x.is_active !== false && sellerIds.has(x.id))
+      .map((x) => ({
+        id: x.id,
+        name: x.full_name || 'Unnamed',
+        saved: saved.get(x.id) ?? null,
+        achieved: achieved.get(x.id) ?? 0,
+        isManager: managerIds.has(x.id),
+      }))
+      // Manager at the top — it is their split, and their own row is the
+      // one they are most likely to forget.
+      .sort((a, c) => Number(c.isManager) - Number(a.isManager) || a.name.localeCompare(c.name))
 
     setBranchTarget(bt.data ? Number(bt.data.target_amount) : null)
     setMembers(list)
@@ -109,31 +142,34 @@ export default function ManagerTargets() {
     for (const m of members) {
       const raw = inputs[m.id]
       if (raw === '' && m.saved == null) continue
+      // An emptied box means no target at all, which the function turns
+      // into a deleted row. A target of zero would hold the person at 0%
+      // in the red for the whole month.
       const amount = raw === '' ? 0 : Number(raw)
       if (!(amount >= 0)) bad = true
       else if (amount !== m.saved) changes.push({ m, amount })
     }
 
-    if (bad) return setMessage({ type: 'error', text: 'Enter a valid amount for every employee.' })
+    if (bad) return setMessage({ type: 'error', text: 'Enter a valid amount for everyone.' })
     if (changes.length === 0) return setMessage({ type: 'error', text: 'Nothing changed.' })
 
-    const row = (c: { m: Member; amount: number }) => ({
-      user_id: c.m.id,
-      branch_id: branchId,
-      month: monthFirst(ym),
-      target_amount: c.amount,
-    })
-    // Save reductions first, so the branch total is never exceeded mid-save
-    const down = changes.filter((c) => c.amount < (c.m.saved ?? 0)).map(row)
-    const up = changes.filter((c) => c.amount >= (c.m.saved ?? 0)).map(row)
+    // Reductions first, so the branch total is never briefly exceeded
+    // part-way through the save.
+    const down = changes.filter((c) => c.amount < (c.m.saved ?? 0))
+    const up = changes.filter((c) => c.amount >= (c.m.saved ?? 0))
 
     setSaving(true)
     for (const batch of [down, up]) {
-      if (batch.length === 0) continue
-      const { error } = await supabase.from('employee_targets').upsert(batch, { onConflict: 'user_id,month' })
-      if (error) {
-        setSaving(false)
-        return setMessage({ type: 'error', text: error.message })
+      for (const c of batch) {
+        const { error } = await supabase.rpc('set_employee_target', {
+          p_user: c.m.id,
+          p_month: monthFirst(ym),
+          p_amount: c.amount,
+        })
+        if (error) {
+          setSaving(false)
+          return setMessage({ type: 'error', text: `${c.m.name}: ${error.message}` })
+        }
       }
     }
     setSaving(false)
@@ -151,7 +187,9 @@ export default function ManagerTargets() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Team Targets</h1>
-            <p className="mt-1 text-sm text-gray-400">Split {branchName ? `${branchName}’s` : 'your branch'} monthly target among your sales team.</p>
+            <p className="mt-1 text-sm text-gray-400">
+              Split {branchName ? `${branchName}’s` : 'your branch'} monthly target — your own share included.
+            </p>
           </div>
           <div className="flex items-center gap-1 rounded-lg border border-[#2a2a2a] bg-[#161616] p-1">
             <button onClick={() => setYm(addMonths(ym, -1))} className="rounded-md p-1.5 text-gray-400 hover:text-white" aria-label="Previous month">
@@ -210,7 +248,7 @@ export default function ManagerTargets() {
               {/* Team list */}
               <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-sm font-medium text-gray-300">Sales team ({members.length})</h2>
+                  <h2 className="text-sm font-medium text-gray-300">Who sells ({members.length})</h2>
                   {members.length > 0 && (
                     <button
                       onClick={splitEqually}
@@ -222,7 +260,7 @@ export default function ManagerTargets() {
                 </div>
 
                 {members.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-gray-500">No sales employees in your branch yet.</p>
+                  <p className="py-6 text-center text-sm text-gray-500">Nobody in your branch sells yet.</p>
                 ) : (
                   <ul className="divide-y divide-[#222]">
                     {members.map((m) => {
@@ -232,8 +270,18 @@ export default function ManagerTargets() {
                       const share = branchTarget > 0 ? (target / branchTarget) * 100 : 0
                       return (
                         <li key={m.id} className="grid items-center gap-3 py-3 text-sm sm:grid-cols-[1.4fr_180px_1.6fr]">
-                          <div>
-                            <p className="font-medium">{m.name}</p>
+                          <div className="min-w-0">
+                            <p className="flex items-center gap-2 font-medium">
+                              <span className="truncate">{m.name}</span>
+                              {/* "You" only when it really is. A branch with
+                                  two managers would otherwise label the
+                                  wrong person. */}
+                              {m.isManager && (
+                                <span className="shrink-0 rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-400">
+                                  {m.id === meId ? 'You' : 'Manager'}
+                                </span>
+                              )}
+                            </p>
                             <p className="text-xs text-gray-500">{share.toFixed(0)}% of branch target</p>
                           </div>
                           <input
@@ -241,7 +289,7 @@ export default function ManagerTargets() {
                             min={0}
                             value={inputs[m.id] ?? ''}
                             onChange={(e) => setInputs((s) => ({ ...s, [m.id]: e.target.value }))}
-                            placeholder="Target ₹"
+                            placeholder="No target"
                             className={inputCls}
                             aria-label={`Target for ${m.name}`}
                           />
@@ -270,7 +318,7 @@ export default function ManagerTargets() {
               </section>
 
               <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-[#1f1f1f] bg-[#0f0f0f]/95 py-4 backdrop-blur">
-                <p className="text-xs text-gray-500">The team total can’t go above the branch target.</p>
+                <p className="text-xs text-gray-500">The total can’t go above the branch target. An empty box means no target.</p>
                 <button
                   onClick={handleSave}
                   disabled={saving || loading || over}

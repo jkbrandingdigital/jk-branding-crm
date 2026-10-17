@@ -3,7 +3,8 @@ import {
   Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import {
-  AlertCircle, CalendarDays, CheckCircle2, Clock, Download, Loader2, RefreshCw, RotateCcw, Timer, TrendingUp,
+  AlertCircle, Award, CalendarDays, CheckCircle2, Clock, Download, Loader2, RefreshCw, RotateCcw,
+  Target, Timer, TrendingDown, TrendingUp,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
@@ -11,6 +12,8 @@ import { useChartTheme } from '../../lib/chartTheme'
 import { useAuth } from '../../contexts/AuthContext'
 import DonutChart from '../DonutChart'
 import { loadStaff, type Staff } from '../leads/leadUtils'
+import { pctOf, zoneOf } from '../../lib/targets'
+import ExtraTimeInbox from './ExtraTimeInbox'
 import { mins } from './taskUtils'
 
 /*
@@ -148,6 +151,70 @@ const cell = (v: unknown) => {
 const ENOUGH_MINS = 5
 const MAX_SHOWN = 500
 
+/*
+  Points — how MUCH work was done, beside how FAST it was done.
+
+  This page has always answered the second question and never the first.
+  "Finished" counts a visiting card and a twelve-page brochure as one
+  each, so a designer who turned out twelve cards and one who turned out
+  one brochure both come back as a number that says nothing. Efficiency
+  has the same blind spot: fifteen minutes of work done in twelve reads
+  125%, and so does a whole day of it.
+
+  Points are the job's STANDARD time in the office's own currency —
+  one hour = 20, so 15 minutes = 5 and 45 = 15. It is the very same
+  figure as `allowed_mins`, in the unit the All Services sheet is written
+  in. Not a second measure, and not a second query.
+
+  Counted on the standard time, NEVER the actual. A three-hour logo
+  earns 60 points whether it took two hours or five. Speed already has
+  its own number beside this one, and paying twice for one thing would
+  quietly reward working slowly.
+
+  A day is 8 hours at 20 an hour: 160 points. The All Services sheet
+  also carries 170 in one box, which is 8.5 hours — the two do not
+  agree, and 160 is the one that matches its own working-hours line.
+  Sundays are not working days; there is no holiday calendar, so this is
+  as near the truth as the data reaches.
+*/
+const POINTS_PER_HOUR = 20
+const DAILY_HOURS = 8
+const DAILY_POINTS = POINTS_PER_HOUR * DAILY_HOURS   // 160
+
+const ptsOf = (allowedMins: number) => Math.round((allowedMins * POINTS_PER_HOUR) / 60)
+
+/*
+  Quality — first-pass work.
+
+      quality % = finished jobs with no redo of ours ÷ finished jobs × 100
+
+  "Approved first-pass deliveries over eligible submitted tasks", in the
+  service spec's words. A job that came back once is not half good; it
+  is a job that was not right the first time, and counting it as a
+  fraction would hide how often that happens.
+
+  The client's change rounds are deliberately out of it. A client who
+  changes their mind is not a fault in the work, and counting it as one
+  teaches designers either to argue with the client or to log our own
+  redo as theirs. Either way the number stops meaning anything.
+*/
+const qualityOf = (finishedJobs: number, firstPassJobs: number) =>
+  finishedJobs === 0 ? null : Math.round((firstPassJobs / finishedJobs) * 100)
+
+// Working days in a stretch of dates, Sundays left out. There is no
+// holiday calendar in the CRM, so this is as near the truth as the data
+// reaches.
+function workDays(fromIso: string, toIso: string) {
+  let n = 0
+  const d = new Date(`${fromIso}T00:00:00Z`)
+  const end = new Date(`${toIso}T00:00:00Z`)
+  while (d <= end) {
+    if (d.getUTCDay() !== 0) n += 1
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  return n
+}
+
 const effOf = (allowed: number, actual: number) =>
   actual < ENOUGH_MINS ? null : Math.round((allowed / actual) * 1000) / 10
 
@@ -244,13 +311,17 @@ export default function DesignPerformance() {
 
     const head = [
       'Task', 'Subject', 'Work', 'Qty', 'Unit', 'Designer', 'Stage', 'Done', 'In changes',
-      'Client changes', 'Our redos', 'Allowed (mins)', 'Original work (mins)', 'On changes (mins)',
+      'Client changes', 'Our redos', 'Gross points', 'Penalty points', 'Net points',
+      'Allowed (mins)', 'Original work (mins)', 'On changes (mins)',
       'Total (mins)', 'Over (mins)', 'On time',
       'Sittings', 'Interruptions', 'Started', 'Completed', 'Due',
     ]
     const body = ((data ?? []) as ReportRow[]).map((r) => [
       r.task_no, r.subject, r.work_type, r.qty, r.unit, r.designer, r.stage,
       r.is_done ? 'Yes' : 'No', r.in_changes ? 'Yes' : 'No', r.client_changes, r.our_changes,
+      r.allowed_mins === null ? '' : ptsOf(r.allowed_mins),
+      r.allowed_mins === null ? '' : ptsOf(r.over_mins ?? 0),
+      r.allowed_mins === null ? '' : Math.max(ptsOf(r.allowed_mins) - ptsOf(r.over_mins ?? 0), 0),
       r.allowed_mins ?? '', r.base_mins, r.change_mins, r.actual_mins, r.over_mins ?? '',
       r.on_time === null ? '' : r.on_time ? 'Yes' : 'No', r.sittings, r.breaks,
       day(r.started_on), day(r.completed_on), day(r.due_at),
@@ -297,6 +368,62 @@ export default function DesignPerformance() {
   const onTimePct = total.done > 0 ? Math.round((total.onTime / total.done) * 1000) / 10 : null
   const avgDone = total.done > 0 ? total.base / total.done : 0
 
+  // Zones come from zoneOf, the same rule sales runs on. Two copies of
+  // one rule means one of them is wrong by next month.
+  /*
+    Times the number of people being looked at.
+
+    Without this, "Everyone" added up the whole team's points and held
+    them against one person's target: five designers on 11,000 points
+    would have read as 430% of 2,550, and every one of them would have
+    looked like a star.
+
+    summary has a row per designer in scope, so it is the headcount of
+    exactly who the figure above covers.
+  */
+  const headcount = who ? 1 : Math.max(summary.length, 1)
+  const pointTarget = DAILY_POINTS * workDays(from, to) * headcount
+  /*
+    Gross, negative and net.
+
+        over time  = max(0, active time − allowed time)   · per task
+        penalty    = over time in hours × 20
+        net        = gross − penalty, never below zero
+
+    Worked out task by task and then added, never from the totals. One
+    job two hours early and another two hours late are not the same as
+    two jobs on the mark: added up first, the overrun cancels itself and
+    the designer who dragged one job for a day reads identically to one
+    who did not.
+
+    `base_mins` is the active time on the original brief — the hours
+    that follow a client's change round sit in `change_mins` and are not
+    in it. That is the spec's "approved waiting creates no penalty", and
+    it was already true here.
+
+    Finished work is settled. Open work carries a PROVISIONAL overrun,
+    kept apart, because a job still running can still come back inside
+    its time, and a penalty shown as final before the work is done is a
+    penalty argued about twice.
+  */
+  const finished = rows.filter((r) => r.is_done)
+  const grossPts = finished.reduce((n, r) => n + ptsOf(r.allowed_mins ?? 0), 0)
+  const penaltyPts = finished.reduce((n, r) => n + ptsOf(r.over_mins ?? 0), 0)
+  const netPts = Math.max(grossPts - penaltyPts, 0)
+  const provisionalPts = open.reduce((n, r) => n + ptsOf(r.over_mins ?? 0), 0)
+
+  const netPct = pctOf(netPts, pointTarget)
+  const netZone = zoneOf(netPct)
+  const netTone: 'good' | 'warn' | 'bad' =
+    netZone.key === 'green' ? 'good' : netZone.key === 'yellow' ? 'warn' : 'bad'
+
+  const firstPass = finished.filter((r) => r.our_changes === 0).length
+  const quality = qualityOf(finished.length, firstPass)
+  const qualityTone: 'good' | 'warn' | 'bad' =
+    (quality ?? 0) >= 90 ? 'good' : (quality ?? 0) >= 70 ? 'warn' : 'bad'
+  const effTone: 'good' | 'warn' | 'bad' | undefined =
+    eff === null ? undefined : eff >= 100 ? 'good' : eff >= 80 ? 'warn' : 'bad'
+
   const byType = useMemo(() => {
     const m = new Map<string, { n: number; onTime: number; actual: number; allowed: number }>()
     for (const r of rows) {
@@ -312,6 +439,30 @@ export default function DesignPerformance() {
       .map(([name, t]) => ({ name, n: t.n, pct: Math.round((t.onTime / t.n) * 100) }))
       .sort((a, b) => b.pct - a.pct || b.n - a.n)
       .slice(0, 8)
+  }, [rows])
+
+  /*
+    Per designer, the same task-by-task sum as the tiles.
+
+    `design_perf_summary` hands back totals, and a total hides each
+    job's overrun — two hours early on one job would quietly pay for two
+    hours late on another. So the task rows are grouped here instead.
+    Keyed on the designer's name because that is what the task report
+    returns; two people with the same name would merge, which is a
+    thing to fix in the report, not here.
+  */
+  const byDesigner = useMemo(() => {
+    const m = new Map<string, { gross: number; penalty: number; done: number; firstPass: number }>()
+    for (const r of rows) {
+      if (!r.is_done || !r.designer) continue
+      const t = m.get(r.designer) ?? { gross: 0, penalty: 0, done: 0, firstPass: 0 }
+      t.gross += ptsOf(r.allowed_mins ?? 0)
+      t.penalty += ptsOf(r.over_mins ?? 0)
+      t.done += 1
+      if (r.our_changes === 0) t.firstPass += 1
+      m.set(r.designer, t)
+    }
+    return m
   }, [rows])
 
   const shown = useMemo(() => {
@@ -399,10 +550,36 @@ export default function DesignPerformance() {
         <div>
           <h1 className="text-2xl font-semibold text-white">Design performance</h1>
           <p className="mt-1 text-sm text-gray-400">
-            The time a job was meant to take, against the time it took · {periodLabel}
+            How much work was done, and how fast it was done · {periodLabel}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        {/* Up here, because these pills set the days for EVERY figure on
+            the page — the points, the chart, the task list and the Excel.
+            Tucked away beside the task list they looked like a filter for
+            that list alone. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-1 rounded-lg border border-[#2a2a2a] bg-[#161616] p-1">
+            {PERIODS.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => pickPeriod(p.key)}
+                className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                  period === p.key ? 'bg-orange-500 font-medium text-black' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {period === 'custom' && (
+            <div className="flex items-center gap-2">
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${input} py-1.5 text-xs`} />
+              <span className="text-xs text-gray-600">to</span>
+              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${input} py-1.5 text-xs`} />
+            </div>
+          )}
+
           <button
             onClick={() => { setLoading(true); void load() }}
             className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 hover:border-[#3a3a3a] hover:text-white"
@@ -460,18 +637,38 @@ export default function DesignPerformance() {
       )}
 
       {/* ---- The five numbers ---- */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      {/* ---- Points: what was earned, what was lost, what is left ---- */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <Tile icon={Target} k="Daily target" v={DAILY_POINTS.toLocaleString('en-IN')}
+              sub={`Points per designer · ${DAILY_HOURS} hours`} />
+        <Tile icon={Award} k="Gross points" v={grossPts.toLocaleString('en-IN')}
+              sub={`${finished.length} finished job${finished.length === 1 ? '' : 's'}`} />
+        <Tile icon={TrendingDown} k="Negative points" v={penaltyPts > 0 ? `−${penaltyPts.toLocaleString('en-IN')}` : '0'}
+              sub={provisionalPts > 0 ? `${provisionalPts.toLocaleString('en-IN')} more running` : 'Time over the allowance'}
+              tone={penaltyPts > 0 ? 'bad' : undefined} />
+        {/* The one that counts. Everything either side of it explains it. */}
+        <Tile icon={CheckCircle2} k="Net points" v={netPts.toLocaleString('en-IN')}
+              sub={pointTarget > 0
+                ? `${Math.round(netPct)}% of ${pointTarget.toLocaleString('en-IN')}${who ? '' : ` · ${headcount} designers`}`
+                : undefined}
+              tone={pointTarget > 0 ? netTone : undefined} />
+        <Tile icon={TrendingUp} k="Time efficiency" v={effText(eff)}
+              sub="Allowed against actual" tone={effTone} />
+        <Tile icon={Award} k="Quality score" v={quality === null ? '—' : `${quality}%`}
+              sub={finished.length > 0 ? `${firstPass} of ${finished.length} right first time` : 'Nothing finished yet'}
+              tone={quality === null ? undefined : qualityTone} />
+      </div>
+
+      {/* ---- The work itself ---- */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Tile icon={CalendarDays} k="Tasks in hand" v={String(assigned)} sub={`${open.length} still open`} />
         <Tile icon={CheckCircle2} k="Finished" v={String(total.done)}
               sub={assigned > 0 ? `${Math.round((total.done / assigned) * 100)}% of them` : undefined} />
         <Tile icon={Clock} k="Still running" v={String(started.length)}
               sub={`${notStarted.length} not started`} />
-        <Tile icon={TrendingUp} k="Finished in time" v={onTimePct === null ? '—' : `${onTimePct}%`}
+        <Tile icon={Timer} k="Finished in time" v={onTimePct === null ? '—' : `${onTimePct}%`}
               sub={`${total.onTime} of ${total.done}`}
               tone={onTimePct === null ? undefined : onTimePct >= 70 ? 'good' : 'bad'} />
-        <Tile icon={RotateCcw} k="Time on changes" v={mins(total.change)}
-              sub={`${total.client} client · ${total.ours} ours · not counted against anyone`}
-              tone={total.change > 0 ? 'warn' : undefined} />
       </div>
 
       {/* ---- Trend, split, quick stats ---- */}
@@ -536,7 +733,11 @@ export default function DesignPerformance() {
           <section className={card}>
             <Stat first icon={Timer} k="Average time on a finished job" v={avgDone > 0 ? mins(avgDone) : '—'} />
             <Stat icon={Clock} k="Hours at work in these days" v={mins(total.worked)} />
-            <Stat icon={RotateCcw} k="Of that, on the client's changes" v={mins(total.change)} />
+            <Stat
+              icon={RotateCcw}
+              k={`On changes · ${total.client} client · ${total.ours} ours`}
+              v={mins(total.change)}
+            />
             <Stat
               icon={TrendingUp}
               k="Efficiency · allowed ÷ actual"
@@ -545,6 +746,10 @@ export default function DesignPerformance() {
           </section>
         </div>
       </div>
+
+      {/* Shows itself only to whoever may decide, and only when
+          something is waiting. */}
+      <ExtraTimeInbox onDecided={() => { setLoading(true); void load() }} />
 
       {/* ---- Every task, and what is running now ---- */}
       <div className="grid items-start gap-4 lg:grid-cols-3">
@@ -569,32 +774,10 @@ export default function DesignPerformance() {
               </button>
             </div>
 
+            {/* The days are set at the top of the page now. These only
+                narrow the list below. */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex gap-1">
-                {PERIODS.map((p) => (
-                  <button
-                    key={p.key}
-                    onClick={() => pickPeriod(p.key)}
-                    className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
-                      period === p.key
-                        ? 'bg-orange-500/15 font-medium text-orange-400'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-
-              {period === 'custom' && (
-                <div className="flex items-center gap-2">
-                  <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${input} py-1.5 text-xs`} />
-                  <span className="text-xs text-gray-600">to</span>
-                  <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${input} py-1.5 text-xs`} />
-                </div>
-              )}
-
-              <div className="ml-auto flex gap-1">
                 {([
                   ['all', `All ${rows.length}`],
                   ['done', `Finished ${total.done}`],
@@ -768,19 +951,21 @@ export default function DesignPerformance() {
           <div className="border-b border-[#242424] px-5 py-3">
             <h2 className="font-medium text-white">{who ? 'The rest of the team' : 'Each designer'}</h2>
             <p className="mt-0.5 text-xs text-gray-500">
-              Not a ranking. Read efficiency next to "Our redos" — a fast number beside work that had
-              to be done again is not a good number.
+              Net is gross less the time-over penalty. Quality is the share finished right the first
+              time; a client's change round is not counted against anyone.
             </p>
           </div>
           <div className={`max-h-[360px] overflow-auto ${scroll}`}>
-            <table className="w-full min-w-[520px] border-collapse text-sm">
+            <table className="w-full min-w-[700px] border-collapse text-sm">
               <thead className="sticky top-0 bg-[#151515]">
                 <tr style={{ borderBottom: `1px solid ${line}` }} className="text-left text-xs text-gray-500">
                   <th className="px-4 py-2.5 font-medium">Designer</th>
                   <th className="px-4 py-2.5 text-right font-medium">Finished</th>
-                  <th className="px-4 py-2.5 text-right font-medium">In time</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Gross</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Negative</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Net</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Quality</th>
                   <th className="px-4 py-2.5 text-right font-medium">Efficiency</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Our redos</th>
                 </tr>
               </thead>
               <tbody>
@@ -792,9 +977,31 @@ export default function DesignPerformance() {
                     className={`hover:bg-[#1a1a1a] ${seeAll ? 'cursor-pointer' : ''}`}
                   >
                     <td className="px-4 py-2.5 text-gray-200">{r.full_name ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-white">{r.done_tasks}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-300">{r.done_tasks}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-300">
-                      {r.on_time_pct === null ? '—' : `${r.on_time_pct}%`}
+                      {(byDesigner.get(r.full_name ?? '')?.gross ?? 0).toLocaleString('en-IN')}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums"
+                        style={{ color: (byDesigner.get(r.full_name ?? '')?.penalty ?? 0) > 0 ? bad : plain }}>
+                      {(byDesigner.get(r.full_name ?? '')?.penalty ?? 0) > 0
+                        ? `−${(byDesigner.get(r.full_name ?? '')?.penalty ?? 0).toLocaleString('en-IN')}`
+                        : '0'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-medium tabular-nums text-white"
+                        title={`${mins(r.allowed_mins)} of standard time`}>
+                      {Math.max(
+                        (byDesigner.get(r.full_name ?? '')?.gross ?? 0)
+                        - (byDesigner.get(r.full_name ?? '')?.penalty ?? 0), 0,
+                      ).toLocaleString('en-IN')}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums"
+                        title={`${r.our_changes} of our own redos`}
+                        style={{ color: r.our_changes > 0 ? warn : plain }}>
+                      {(() => {
+                        const d = byDesigner.get(r.full_name ?? '')
+                        const q = qualityOf(d?.done ?? 0, d?.firstPass ?? 0)
+                        return q === null ? '—' : `${q}%`
+                      })()}
                     </td>
                     <td
                       className="px-4 py-2.5 text-right font-medium tabular-nums"
@@ -809,15 +1016,11 @@ export default function DesignPerformance() {
                     >
                       {effText(effOf(r.allowed_mins, r.base_mins))}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums"
-                        style={{ color: r.our_changes > 0 ? warn : plain }}>
-                      {r.our_changes}
-                    </td>
                   </tr>
                 ))}
                 {summary.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-500">
+                    <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-500">
                       {loading ? 'Loading…' : 'Nothing finished in these days.'}
                     </td>
                   </tr>
@@ -829,7 +1032,12 @@ export default function DesignPerformance() {
       </div>
 
       <p className="text-xs text-gray-600">
-        Only design work with a work type set is counted. Efficiency is measured on the original work:
+        Gross points are the standard time of the work at 20 an hour — the same figure as "Allowed",
+        in the unit the All Services sheet uses. Every hour of active time beyond the allowance takes
+        20 points back off, worked out job by job, and net points cannot fall below zero. The target is
+        160 points for each working day in these dates, Sundays left out, times the number of designers
+        shown. Leave is not in the CRM yet, so somebody who was away still carries a full target.
+        Penalties on jobs still running are provisional and are shown apart from the settled ones. Only design work with a work type set is counted. Efficiency is measured on the original work:
         the hours that follow a client's change round are counted separately and held against nobody.
         A redo caused by our own mistake stays in the original work, because that is our own time to
         make up. "Open right now" lists every unfinished job, whenever it was started.

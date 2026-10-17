@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck, Printer } from 'lucide-react'
+import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck, Printer, Clock3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { DateField } from './DateField'
 
@@ -74,7 +74,7 @@ const ADMIN_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'HR Department', keys: ['mod_employees'] },
   { title: 'Productivity', keys: ['mod_tasks', 'mod_reminders', 'mod_notes'] },
   { title: 'Business', keys: ['mod_quotations', 'mod_customers'] },
-  { title: 'Designing Department', keys: ['mod_projects', 'timer_view_all', 'design_perf', 'work_types_edit', 'mod_print_jobs'] },
+  { title: 'Designing Department', keys: ['mod_projects', 'timer_view_all', 'design_perf', 'work_types_edit', 'mod_print_jobs', 'extra_time_approve'] },
   { title: 'Company', keys: ['mod_settings', 'mod_backup'] },
 ]
 
@@ -731,6 +731,51 @@ export default function StaffManager() {
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/*
+                Project coordinator.
+
+                There is no "project coordinator" role in this CRM, and
+                inventing one would mean every screen learning about it.
+                The job is really one decision — may this person grant a
+                designer more time on a job — so it is one switch. If
+                somebody else takes the job tomorrow, it moves with a
+                click rather than a migration.
+
+                Its own box, not a tick among "what they can open",
+                because it is a decision about someone's job. That is the
+                same mistake Printing Media was hidden by, once.
+              */}
+              {editingProfile && callerRole === 'super_admin' && !editingSelf && form.role === 'design_team' && (
+                <div className="border-t border-[#222] pt-4">
+                  <div className="rounded-xl border border-[#242424] bg-[#151515] p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 text-sm font-medium text-white">
+                          <Clock3 size={15} className="text-orange-400" /> Project coordinator
+                        </p>
+                        <p className="mt-1 text-xs text-gray-400">
+                          Decides when a designer may have more time on a job. Approved minutes are added
+                          to that one task, so its overrun penalty does not count them. They cannot
+                          approve their own request.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={effective('extra_time_approve')}
+                        aria-label="Approve extra time"
+                        onClick={() => togglePerm('extra_time_approve')}
+                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+                          effective('extra_time_approve') ? 'bg-orange-500' : 'bg-[#2a2a2a]'
+                        }`}
+                      >
+                        <span className={`h-5 w-5 rounded-full bg-white transition-transform ${effective('extra_time_approve') ? 'translate-x-5' : ''}`} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

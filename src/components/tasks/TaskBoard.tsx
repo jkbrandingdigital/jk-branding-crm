@@ -13,6 +13,7 @@ import { plainText } from '../RichText'
 import TaskModal from './TaskModal'
 import TaskDetail from './TaskDetail'
 import { TaskTimerButton } from './WorkTimer'
+import ExtraTimeInbox from './ExtraTimeInbox'
 import {
   currentAssignees, fmtTaskDT, isTaskOverdue, loadTaskCounts, loadTaskLabels, loadTaskStages, loadTasks,
   PRIORITIES, priorityOf, setAssignees, type Task, type TaskLabel, type TaskStage,
@@ -601,6 +602,18 @@ export default function TaskBoard() {
           </button>
         </div>
       </div>
+
+      {/*
+        Extra-time requests, right under the title.
+
+        A project coordinator lives on this board, not on the
+        performance page, and a request that waits two days is a
+        designer sitting on a penalty they already asked to be let off.
+        The panel shows itself only to whoever may decide and only when
+        something is actually waiting, so for everyone else this line
+        does not exist.
+      */}
+      <ExtraTimeInbox onDecided={load} />
 
       {filterOpen && (
         <div className="flex flex-wrap items-end gap-3 rounded-xl border border-[#242424] bg-[#151515] px-5 py-3">

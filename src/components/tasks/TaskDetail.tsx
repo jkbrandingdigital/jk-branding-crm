@@ -7,6 +7,7 @@ import { fmtDT, type Staff } from '../leads/leadUtils'
 import { RichHtml } from '../RichText'
 import { CHANGE_SOURCES, currentAssignees, fmtTaskDT, mins, priorityOf, type Task, type TaskLabel, type TaskStage, type TimeStatus } from './taskUtils'
 import { hhmm, TaskTimerButton } from './WorkTimer'
+import ExtraTimeRequest from './ExtraTimeRequest'
 
 type Tab = 'details' | 'comments' | 'files' | 'history'
 type TimeRow = { user_id: string; full_name: string | null; secs: number; sessions: number }
@@ -367,6 +368,15 @@ export default function TaskDetail({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {/* Next to the timer, because that is where someone looks the
+                moment the allowed time runs out. */}
+            <ExtraTimeRequest
+              taskId={task.id}
+              allowedMins={status?.allowed_mins ?? null}
+              spentMins={spentMins}
+              locked={locked}
+              onChanged={loadTime}
+            />
             {!locked && <TaskTimerButton taskId={task.id} size="md" onChanged={loadTime} />}
             {canEdit && (
               <button onClick={onEdit} aria-label="Edit task" title="Edit" className="rounded-md p-1.5 text-gray-400 hover:bg-[#222] hover:text-white">

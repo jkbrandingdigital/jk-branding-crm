@@ -8,7 +8,7 @@ import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import ProjectModal from '../projects/ProjectModal'
 import {
-  fmtDate, fmtDT, loadStages, missingOf, money, STAGE_CLS,
+  CONTACT_ROLE_LABEL, fmtDate, fmtDT, loadStages, missingOf, money, STAGE_CLS,
   type Customer, type ProjectRow, type ProjectStage,
 } from './customerUtils'
 
@@ -108,7 +108,12 @@ export default function CustomerDetail({
             <h3 className="truncate text-lg font-semibold text-white">{customer.company_name}</h3>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
               <span className="font-mono">{customer.customer_code}</span>
-              {customer.contact_person && <span>{customer.contact_person}</span>}
+              {customer.contact_person && (
+                <span>
+                  {customer.contact_person}
+                  {customer.contact_role && ` · ${CONTACT_ROLE_LABEL[customer.contact_role]}`}
+                </span>
+              )}
               {customer.branch_name && (
                 <span className="inline-flex items-center gap-1"><Building2 size={11} /> {customer.branch_name}</span>
               )}

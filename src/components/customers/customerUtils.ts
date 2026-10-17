@@ -14,6 +14,7 @@ export type Customer = {
   customer_code: string
   company_name: string
   contact_person: string | null
+  contact_role: 'owner' | 'manager' | 'other' | null
   phone: string | null
   whatsapp: string | null
   email: string | null
@@ -88,36 +89,50 @@ export type Field = {
   key: keyof Customer
   label: string
   need: Need
-  type?: 'text' | 'email' | 'tel' | 'area' | 'date'
+  // for type 'pick'
+  choices?: { value: string; label: string }[]
+  type?: 'text' | 'email' | 'tel' | 'area' | 'date' | 'pick'
   hint?: string
 }
 
 export const CLIENT_FIELDS: Field[] = [
   { key: 'company_name',       label: 'Company / Brand Name', need: 'must' },
   { key: 'contact_person',     label: 'Owner / Contact Person', need: 'must' },
+  {
+    key: 'contact_role', label: 'They are the', need: 'should', type: 'pick',
+    choices: [
+      { value: 'owner',   label: 'Owner' },
+      { value: 'manager', label: 'Manager' },
+      { value: 'other',   label: 'Other' },
+    ],
+  },
   { key: 'phone',              label: 'Mobile Number', need: 'must', type: 'tel' },
   { key: 'whatsapp',           label: 'WhatsApp Number', need: 'should', type: 'tel', hint: 'Same as mobile if there is only one' },
   { key: 'email',              label: 'Official Email ID', need: 'must', type: 'email' },
   { key: 'billing_address',    label: 'Billing Address', need: 'must', type: 'area' },
-  { key: 'approval_authority', label: 'Final Approval Authority', need: 'must', hint: 'Who signs off the design' },
   { key: 'gst_number',         label: 'GST Number', need: 'should', hint: 'If they are registered' },
   { key: 'website',            label: 'Website', need: 'maybe' },
-  { key: 'social_links',       label: 'Social Media Links', need: 'maybe', type: 'area' },
-  { key: 'brand_notes',        label: 'Brand Logo & Guidelines', need: 'maybe', type: 'area', hint: 'Colours, fonts, what to avoid' },
-  { key: 'reference_notes',    label: 'Reference Designs / Content', need: 'maybe', type: 'area' },
   // Not on the paper form. They are here because a greeting on the right
   // day is worth more than most of what is above, and this is the only
   // screen where anyone is already typing the client's details.
   { key: 'birth_date',         label: 'Birthday', need: 'maybe', type: 'date', hint: 'Of the contact person' },
-  { key: 'anniversary_date',   label: 'Anniversary', need: 'maybe', type: 'date', hint: 'Marriage, or the firm’s founding' },
+  { key: 'anniversary_date',   label: 'Anniversary', need: 'maybe', type: 'date', hint: 'Marriage, or the firm\u2019s founding' },
 ]
 
-// The six that decide `is_complete`. The database computes the flag; this
-// is only so the screen can say which ones are still empty.
+// The five that decide `is_complete`. The database computes the flag; this
+// is only so the screen can say which ones are still empty. Keep this and
+// the generated column in step — a field dropped from the form but left in
+// the column means nothing can ever read as Complete again.
 export const MUST_FIELDS = CLIENT_FIELDS.filter((f) => f.need === 'must')
 
 export const missingOf = (c: Partial<Customer>) =>
   MUST_FIELDS.filter((f) => !String(c[f.key] ?? '').trim()).map((f) => f.label)
+
+export const CONTACT_ROLE_LABEL: Record<string, string> = {
+  owner: 'Owner',
+  manager: 'Manager',
+  other: 'Other',
+}
 
 export const NEED_LABEL: Record<Need, string> = {
   must: 'Mandatory',

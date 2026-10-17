@@ -23,6 +23,8 @@ import { CLIENT_FIELDS, missingOf, NEED_LABEL, type Branch, type Customer } from
   customer with no name cannot be found again.
 */
 
+const ROLE_FIELD = CLIENT_FIELDS.find((f) => f.key === 'contact_role')
+
 export default function ClientMasterForm({
   customer, branches = [], onClose, onSaved,
 }: {
@@ -78,8 +80,12 @@ export default function ClientMasterForm({
     onSaved()
   }
 
-  const input =
-    'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none'
+  // The look, without a width. Two width classes on one element is a
+  // coin toss — which wins depends on where Tailwind put them in the
+  // stylesheet, not on the order they are written here.
+  const box =
+    'rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none'
+  const input = `w-full ${box}`
 
   return createPortal(
     <div
@@ -145,6 +151,12 @@ export default function ClientMasterForm({
           {CLIENT_FIELDS.map((f) => {
             const value = String(form[f.key] ?? '')
             const empty = !value.trim()
+
+            // The contact's role rides along inside the name's row — it is
+            // part of naming the person, not a question of its own. On its
+            // own line it read as a second field about something else.
+            if (f.key === 'contact_role') return null
+
             return (
               <div key={f.key as string}>
                 <label className="mb-1.5 flex flex-wrap items-center gap-2 text-xs">
@@ -161,10 +173,30 @@ export default function ClientMasterForm({
                   {f.hint && <span className="text-gray-600">{f.hint}</span>}
                 </label>
 
-                {/* The CRM's own picker, not the browser's. A form with two
-                    kinds of calendar in it looks like two different programs
-                    stitched together. */}
-                {f.type === 'date' ? (
+                {f.key === 'contact_person' ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={value}
+                      onChange={(e) => set(f.key, e.target.value)}
+                      className={`${box} min-w-0 flex-1`}
+                    />
+                    <select
+                      value={String(form.contact_role ?? '')}
+                      onChange={(e) => set('contact_role', e.target.value)}
+                      aria-label="They are the"
+                      className={`${box} w-32 shrink-0`}
+                    >
+                      <option value="">Role</option>
+                      {(ROLE_FIELD?.choices ?? []).map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : /* The CRM's own picker, not the browser's. A form with two
+                       kinds of calendar in it looks like two different
+                       programs stitched together. */
+                f.type === 'date' ? (
                   <DateField
                     value={value ? value.slice(0, 10) : ''}
                     onChange={(v) => set(f.key, v)}

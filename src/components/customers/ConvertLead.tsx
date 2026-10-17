@@ -40,27 +40,41 @@ export function projectNameFrom(requirement?: string | null): string {
 
   The first project's name starts as whatever the lead's requirement said.
   Sales already wrote that down; asking again throws their work away.
+
+  THE VALUE IS ASKED FOR, AND IS NOT OPTIONAL.
+
+  It used to be taken quietly from the lead's estimated amount, which is
+  often blank — so the project was created at zero and nobody found out.
+  Of the first four projects made this way, two were worth nothing on
+  paper and several lakh in fact, and the whole performance screen read
+  wrong because of it. A number that decides how someone's month looks
+  has to be typed by the person who knows it.
 */
 
-export async function convertLead(leadId: string, projectTitle: string): Promise<string> {
+export async function convertLead(leadId: string, projectTitle: string, value: number): Promise<string> {
   const { data, error } = await supabase.rpc('lead_to_customer', {
     p_lead_id: leadId,
     p_project_title: projectTitle.trim() || null,
+    p_value: value,
   })
   if (error) throw new Error(error.message)
   return data as string
 }
 
 export default function ConvertLead({
-  leadId, leadName, requirement, onClose, onDone,
+  leadId, leadName, requirement, estimated, onClose, onDone,
 }: {
   leadId: string
   leadName: string
   requirement?: string | null
+  /** The lead's estimated amount, if the caller already has it. Left
+   *  out, it is fetched here so no caller has to change. */
+  estimated?: number | null
   onClose: () => void
   onDone: (customerId: string) => void
 }) {
   const [title, setTitle] = useState(projectNameFrom(requirement))
+  const [value, setValue] = useState(estimated && estimated > 0 ? String(estimated) : '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -70,16 +84,37 @@ export default function ConvertLead({
     return () => window.removeEventListener('keydown', esc)
   }, [onClose])
 
+  // Prefill from the lead when the caller did not pass it. A guess the
+  // sales person can correct beats an empty box they have to fill from
+  // memory.
+  useEffect(() => {
+    if (estimated !== undefined) return
+    let dead = false
+    ;(async () => {
+      const { data } = await supabase.from('leads').select('estimated_amount').eq('id', leadId).maybeSingle()
+      const n = Number((data as { estimated_amount?: number } | null)?.estimated_amount ?? 0)
+      if (!dead && n > 0) setValue((v) => (v === '' ? String(n) : v))
+    })()
+    return () => { dead = true }
+  }, [leadId, estimated])
+
+  const amount = Number(value)
+  const ok = value.trim() !== '' && amount > 0
+
   async function go() {
+    if (!ok) return setErr('Enter what the deal is worth.')
     setBusy(true)
     setErr('')
     try {
-      onDone(await convertLead(leadId, title))
+      onDone(await convertLead(leadId, title, amount))
     } catch (e) {
       setErr((e as Error).message)
       setBusy(false)
     }
   }
+
+  const input =
+    'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none'
 
   return createPortal(
     <div
@@ -113,11 +148,27 @@ export default function ConvertLead({
               onKeyDown={(e) => { if (e.key === 'Enter') void go() }}
               placeholder="Logo design"
               autoFocus
-              className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
+              className={input}
             />
             <p className="mt-1.5 text-xs text-gray-600">
               More work for this client goes on the same customer later — a brochure, a website — each as its
               own project.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs text-gray-500">Deal value (₹)</label>
+            <input
+              type="number"
+              min={1}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void go() }}
+              placeholder="25000"
+              className={input}
+            />
+            <p className="mt-1.5 text-xs text-gray-600">
+              This is what counts towards the month’s target. It can be changed later on the project.
             </p>
           </div>
 
@@ -132,7 +183,7 @@ export default function ConvertLead({
           </button>
           <button
             onClick={go}
-            disabled={busy}
+            disabled={busy || !ok}
             className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
           >
             {busy && <Loader2 size={15} className="animate-spin" />}

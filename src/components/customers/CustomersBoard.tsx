@@ -7,7 +7,7 @@ import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import ClientMasterForm from './ClientMasterForm'
 import CustomerDetail from './CustomerDetail'
-import { downloadCsv, fmtDT, loadBranches, type Branch, type Customer } from './customerUtils'
+import { CONTACT_ROLE_LABEL, downloadCsv, fmtDT, loadBranches, type Branch, type Customer } from './customerUtils'
 
 /*
   Customers.
@@ -122,13 +122,14 @@ export default function CustomersBoard() {
   function toExcel() {
     downloadCsv(
       `customers-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Code', 'Company / Brand', 'Branch', 'Contact Person', 'Mobile', 'WhatsApp', 'Email', 'Billing Address',
-       'Approval Authority', 'GST', 'Website', 'Social', 'Projects', 'Client info', 'Rating',
-       'Status', 'Converted on', 'Converted by', 'Owner'],
+      ['Code', 'Company / Brand', 'Branch', 'Contact Person', 'They are the', 'Mobile', 'WhatsApp',
+       'Email', 'Billing Address', 'GST', 'Website', 'Birthday', 'Anniversary', 'Projects',
+       'Client info', 'Rating', 'Status', 'Converted on', 'Converted by', 'Owner'],
       shown.map((c) => [
-        c.customer_code, c.company_name, c.branch_name ?? '', c.contact_person ?? '', c.phone ?? '', c.whatsapp ?? '',
-        c.email ?? '', c.billing_address ?? '', c.approval_authority ?? '', c.gst_number ?? '',
-        c.website ?? '', c.social_links ?? '', c.project_count,
+        c.customer_code, c.company_name, c.branch_name ?? '', c.contact_person ?? '',
+        CONTACT_ROLE_LABEL[c.contact_role ?? ''] ?? '', c.phone ?? '', c.whatsapp ?? '',
+        c.email ?? '', c.billing_address ?? '', c.gst_number ?? '', c.website ?? '',
+        c.birth_date ?? '', c.anniversary_date ?? '', c.project_count,
         c.is_complete ? 'Complete' : 'Incomplete', c.rating, c.status,
         fmtDT(c.converted_at), c.converted_by_name ?? '', c.owner_name ?? '',
       ]),
@@ -250,7 +251,12 @@ export default function CustomersBoard() {
                   <td className="border-t border-[#202020] px-4 py-3">
                     <button onClick={() => setOpen(c)} className="text-left">
                       <span className="block font-medium text-white hover:text-orange-400">{c.company_name}</span>
-                      {c.contact_person && <span className="block text-xs text-gray-500">{c.contact_person}</span>}
+                      {c.contact_person && (
+                        <span className="block text-xs text-gray-500">
+                          {c.contact_person}
+                          {c.contact_role && <> · {CONTACT_ROLE_LABEL[c.contact_role]}</>}
+                        </span>
+                      )}
                     </button>
                   </td>
 
