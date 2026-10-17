@@ -193,6 +193,31 @@ const POINTS_PER_HOUR = 20
 const DAILY_HOURS = 8
 const DAILY_POINTS = POINTS_PER_HOUR * DAILY_HOURS   // 160
 
+/*
+  Working days per period — the company's figure, not the calendar's.
+
+  A month is 26 working days here, every month. The calendar disagrees:
+  October 2026 has 27 non-Sunday days, February would have 24. That
+  variation is real but it is not how the office counts, and a target
+  that moved every month would be a target nobody could plan against.
+
+  So these are fixed. A week is 6 (Monday to Saturday), a year is 26 × 12.
+
+      Daily    160 × 1   =    160
+      Weekly   160 × 6   =    960
+      Monthly  160 × 26  =  4,160
+      Yearly   160 × 312 = 49,920
+
+  A custom range has no convention to follow, so it falls back to
+  counting non-Sunday days between the two dates.
+*/
+const WORKING_DAYS: Record<Exclude<Period, 'custom'>, number> = {
+  today: 1,
+  week: 6,
+  month: 26,
+  year: 26 * 12,
+}
+
 const ptsOf = (allowedMins: number) => Math.round((allowedMins * POINTS_PER_HOUR) / 60)
 
 /*
@@ -417,7 +442,26 @@ export default function DesignPerformance() {
     exactly who the figure above covers.
   */
   const headcount = who ? 1 : Math.max(summary.length, 1)
-  const pointTarget = DAILY_POINTS * workDays(from, to) * headcount
+
+  /*
+    Two targets, and both are needed.
+
+    pointTarget is the whole period's — the month's 26 working days, the
+    year's 312. That is what "Monthly target" means and what the tile
+    shows.
+
+    expectedPts is what those days ask for up to today. Without it, a
+    designer exactly on pace on the 2nd of the month reads as 4% and the
+    page calls them "Well behind", which is a lie the maths tells. So the
+    gauge measures the real target and the status line measures the pace,
+    and the two are labelled apart.
+  */
+  const targetDays = period === 'custom' ? workDays(from, to) : WORKING_DAYS[period]
+  // Days actually gone by, never more than the period holds.
+  const elapsedDays = Math.min(workDays(from, to), targetDays)
+  const pointTarget = DAILY_POINTS * targetDays * headcount
+  const expectedPts = DAILY_POINTS * elapsedDays * headcount
+  const midPeriod = elapsedDays > 0 && elapsedDays < targetDays
   /*
     Gross, negative and net.
 
@@ -452,6 +496,12 @@ export default function DesignPerformance() {
   const netTone: 'good' | 'warn' | 'bad' =
     netZone.key === 'green' ? 'good' : netZone.key === 'yellow' ? 'warn' : 'bad'
 
+  // Against what the days gone by asked for, not the whole period. This
+  // is the number that answers "am I keeping up", and it is the only one
+  // the verdict line is allowed to use mid-period.
+  const pacePct = pctOf(netPts, expectedPts)
+  const paceZone = zoneOf(pacePct)
+
   /*
     One score out of a hundred, weighted the way the service spec
     weights it: productivity 30, quality 25, on-time 20, efficiency 15.
@@ -470,8 +520,14 @@ export default function DesignPerformance() {
   const effTone: 'good' | 'warn' | 'bad' | undefined =
     eff === null ? undefined : eff >= 100 ? 'good' : eff >= 80 ? 'warn' : 'bad'
 
+  /*
+    Productivity is measured against what the days GONE BY asked for, not
+    the whole period. Held against the full month, every score on the 2nd
+    would be near zero and the card would say "poor" to someone who is
+    exactly on time. Once the period is over the two are the same number.
+  */
   const kpi = [
-    { key: 'Productivity', weight: 30, value: Math.min(pointTarget > 0 ? (netPts / pointTarget) * 100 : 0, 100), hue: 'orange' },
+    { key: 'Productivity', weight: 30, value: Math.min(expectedPts > 0 ? (netPts / expectedPts) * 100 : 0, 100), hue: 'orange' },
     { key: 'Quality', weight: 25, value: quality ?? 0, hue: 'green' },
     { key: 'On time', weight: 20, value: onTimePct ?? 0, hue: 'teal' },
     { key: 'Efficiency', weight: 15, value: Math.min(eff ?? 0, 100), hue: 'blue' },
@@ -727,9 +783,34 @@ export default function DesignPerformance() {
             {/* Ahead or behind, in one line. No cheerleading when the
                 answer is no — a page that congratulates everybody stops
                 being read. */}
+            {/*
+                Mid-period this judges the PACE, not the whole target.
+                On the 2nd of the month nobody has 4,320 points and
+                saying "well behind" to someone exactly on schedule is
+                how a page loses its readers. Once the period is over,
+                pace and target are the same thing.
+            */}
             {pointTarget > 0 && finished.length > 0 && (
               <span className="mt-1 block text-sm">
-                {netPct >= 100 ? (
+                {midPeriod ? (
+                  pacePct >= 100 ? (
+                    <span style={{ color: good }}>
+                      Ahead of pace — {netPts.toLocaleString('en-IN')} points, {expectedPts.toLocaleString('en-IN')} asked for by today.
+                    </span>
+                  ) : pacePct >= 70 ? (
+                    <span style={{ color: good }}>
+                      Keeping up · {Math.round(pacePct)}% of the {expectedPts.toLocaleString('en-IN')} due by today.
+                    </span>
+                  ) : pacePct >= 30 ? (
+                    <span style={{ color: warn }}>
+                      {(expectedPts - netPts).toLocaleString('en-IN')} points behind where today should be.
+                    </span>
+                  ) : (
+                    <span style={{ color: bad }}>
+                      Well behind · {Math.round(pacePct)}% of the {expectedPts.toLocaleString('en-IN')} due by today.
+                    </span>
+                  )
+                ) : netPct >= 100 ? (
                   <span style={{ color: good }}>Past the target — {netPts.toLocaleString('en-IN')} of {pointTarget.toLocaleString('en-IN')} points.</span>
                 ) : netPct >= 70 ? (
                   <span style={{ color: good }}>On track · {Math.round(netPct)}% of {TARGET_LABEL[period].toLowerCase()}.</span>
@@ -798,7 +879,7 @@ export default function DesignPerformance() {
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Tile hue="purple" icon={Target} k={TARGET_LABEL[period]}
               v={pointTarget.toLocaleString('en-IN')}
-              sub={`${DAILY_POINTS} a day × ${workDays(from, to)} working day${workDays(from, to) === 1 ? '' : 's'}${who ? '' : ` × ${headcount}`}`} />
+              sub={`${DAILY_POINTS} a day × ${targetDays} working day${targetDays === 1 ? '' : 's'}${who ? '' : ` × ${headcount}`}`} />
         <Tile hue="blue" icon={Award} k="Gross points" v={grossPts.toLocaleString('en-IN')}
               sub={`${finished.length} finished job${finished.length === 1 ? '' : 's'}`} />
         <Tile hue="red" icon={TrendingDown} k="Negative points" v={penaltyPts > 0 ? `−${penaltyPts.toLocaleString('en-IN')}` : '0'}
@@ -821,7 +902,10 @@ export default function DesignPerformance() {
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <section className={`${card} p-5`}>
           <h2 className="font-medium text-white">Target achievement</h2>
-          <p className="mt-0.5 text-xs text-gray-500">Net points against {TARGET_LABEL[period].toLowerCase()}.</p>
+          <p className="mt-0.5 text-xs text-gray-500">
+            Net points against {TARGET_LABEL[period].toLowerCase()}.
+            {midPeriod && ` ${elapsedDays} of ${targetDays} working days gone.`}
+          </p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-6">
             <GaugeRing pct={netPct} colorClass={netZone.text} caption="of target" />
             <ul className="space-y-2.5 text-sm">
@@ -837,6 +921,18 @@ export default function DesignPerformance() {
                   {pointTarget > netPts ? (pointTarget - netPts).toLocaleString('en-IN') : '—'}
                 </span>
               </li>
+              {/* The honest reading of a half-finished month. Without it
+                  the ring alone says 55% and nobody can tell whether that
+                  is behind or exactly where it should be. */}
+              {midPeriod && (
+                <li>
+                  <span className="block text-xs text-gray-500">Due by today</span>
+                  <span className={`font-semibold tabular-nums ${paceZone.text}`}>
+                    {expectedPts.toLocaleString('en-IN')}
+                    <span className="ml-1.5 text-xs font-normal">({Math.round(pacePct)}%)</span>
+                  </span>
+                </li>
+              )}
               <li>
                 <span className="block text-xs text-gray-500">Lost to time over</span>
                 <span className="tabular-nums" style={{ color: penaltyPts > 0 ? bad : plain }}>

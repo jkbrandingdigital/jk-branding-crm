@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import {
@@ -6,6 +6,7 @@ import {
   Loader2, Target as TargetIcon, TrendingDown, TrendingUp, Users,
 } from 'lucide-react'
 import DonutChart from '../DonutChart'
+import GaugeRing from '../GaugeRing'
 import { useChartTheme } from '../../lib/chartTheme'
 import { inr, inrCompact, istDate, monthLabel } from '../../lib/format'
 import { pctOf, zoneOf, type Zone } from '../../lib/targets'
@@ -97,38 +98,6 @@ function Trend({ value }: { value: number | null }) {
       {up ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
       {up ? '+' : ''}{value}%
     </span>
-  )
-}
-
-/*
-  The ring. stroke="currentColor" rather than a hex, so the zone's own
-  text class decides the colour and theme.css can remap it for the light
-  theme like it does everywhere else.
-*/
-function GaugeRing({ pct, zone, caption }: { pct: number; zone: Zone; caption: string }) {
-  const chart = useChartTheme()
-  const size = 168
-  const stroke = 14
-  const r = (size - stroke) / 2
-  const circ = 2 * Math.PI * r
-  const shown = Math.min(Math.max(pct, 0), 100)
-
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className={zone.text}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={chart.grid} strokeWidth={stroke} />
-        <circle
-          cx={size / 2} cy={size / 2} r={r}
-          fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round"
-          strokeDasharray={`${(shown / 100) * circ} ${circ}`}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
-      </svg>
-      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <span className={`text-3xl font-bold tabular-nums ${zone.text}`}>{pct.toFixed(0)}%</span>
-        <span className="mt-0.5 text-[11px] text-gray-500">{caption}</span>
-      </div>
-    </div>
   )
 }
 
@@ -358,10 +327,13 @@ export default function TargetPerformance({
         />
       </div>
 
-      {/* ---------- overview strip ---------- */}
-      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+      {/* ---------- overview strip ----------
+          One person's own page has no team overview and no top performer —
+          both are team questions. Three columns there would leave two of
+          them empty, which is exactly the hole this grid used to show. */}
+      <div className={`mt-4 grid items-stretch gap-4 ${person ? '' : 'xl:grid-cols-3'}`}>
         {!person && (
-          <section className={`${CARD} xl:col-span-1`}>
+          <section className={`${CARD} flex flex-col xl:col-span-1`}>
             <h2 className="text-sm font-medium text-gray-300">Team overview</h2>
             <p className="mt-0.5 text-xs text-gray-500">Click a box to filter the table.</p>
             <div className="mt-4 grid grid-cols-3 gap-2">
@@ -397,36 +369,55 @@ export default function TargetPerformance({
           </section>
         )}
 
-        <section className={`${CARD} ${person ? 'xl:col-span-2' : 'xl:col-span-1'}`}>
+        <section className={`${CARD} flex flex-col`}>
           <h2 className="text-sm font-medium text-gray-300">Target achievement</h2>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-6">
-            <GaugeRing pct={totPct} zone={totZone} caption="of target" />
-            <ul className="space-y-2.5 text-sm">
+          {/*
+            On one person's page this card has the whole width to itself,
+            so the ring sits to the left and the figures spread out beside
+            it rather than huddling in the middle of an empty card.
+          */}
+          <div
+            className={`flex flex-1 flex-wrap items-center gap-8 py-4 ${
+              person ? 'justify-start sm:gap-12 sm:px-4' : 'justify-center gap-6'
+            }`}
+          >
+            <GaugeRing pct={totPct} colorClass={totZone.text} caption="of target" size={person ? 190 : 168} />
+            <ul className={person ? 'flex flex-wrap gap-10 text-sm' : 'space-y-2.5 text-sm'}>
               <li>
                 <span className="block text-xs text-gray-500">Achieved</span>
-                <span className="font-semibold tabular-nums text-green-400">{inr(totGot)}</span>
+                <span className={`font-semibold tabular-nums text-green-400 ${person ? 'text-xl' : ''}`}>
+                  {inr(totGot)}
+                </span>
               </li>
               <li>
                 <span className="block text-xs text-gray-500">Still to go</span>
-                <span className="font-semibold tabular-nums">
+                <span className={`font-semibold tabular-nums ${person ? 'text-xl' : ''}`}>
                   {totTarget > totGot ? inr(totTarget - totGot) : '—'}
                 </span>
               </li>
               <li>
                 <span className="block text-xs text-gray-500">Target</span>
-                <span className="tabular-nums text-gray-400">{totTarget > 0 ? inr(totTarget) : 'Not set'}</span>
+                <span className={`tabular-nums text-gray-400 ${person ? 'text-xl' : ''}`}>
+                  {totTarget > 0 ? inr(totTarget) : 'Not set'}
+                </span>
               </li>
+              {person && totDeals > 0 && (
+                <li>
+                  <span className="block text-xs text-gray-500">Deals</span>
+                  <span className="text-xl font-semibold tabular-nums">{totDeals}</span>
+                </li>
+              )}
             </ul>
           </div>
           {totTarget === 0 && (
-            <p className="mt-4 text-center text-xs text-gray-500">
+            <p className="text-center text-xs text-gray-500">
               No target set for this period, so the ring has nothing to measure against.
             </p>
           )}
         </section>
 
         {!person && (
-          <section className={CARD}>
+          <section className={`${CARD} flex flex-col`}>
             <h2 className="flex items-center gap-2 text-sm font-medium text-gray-300">
               <Award size={15} className="text-orange-400" /> Top performer
             </h2>
@@ -567,39 +558,58 @@ export default function TargetPerformance({
       )}
 
       {/* ---------- service split + the long view ---------- */}
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <section className={CARD}>
+      <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-2">
+        <section className={`${CARD} flex flex-col`}>
           <h2 className="text-sm font-medium text-gray-300">Revenue by service</h2>
+          {/*
+            This always reads confirmed projects, because a daily report
+            carries no service. With the toggle on Daily reports the total
+            here will not match the Achieved tile, so it says why rather
+            than leaving two different figures staring at each other.
+          */}
           <p className="mt-0.5 mb-4 text-xs text-gray-500">
-            From the service set on each project. Work with none set shows as “Not set”.
+            From the service set on each project. Work with none set shows as "Not set".
+            {source === 'reported' && ' Confirmed projects only, so this will not match Achieved above.'}
           </p>
-          <DonutChart data={serviceSlices} format={inr} centerLabel="Total" empty="No confirmed work in this period." />
+          <div className="flex flex-1 items-center justify-center">
+            {serviceSlices.length === 0 ? (
+              <p className="py-10 text-center text-sm text-gray-500">No confirmed work in this period.</p>
+            ) : (
+              <DonutChart data={serviceSlices} format={inr} centerLabel="Total" empty="No confirmed work in this period." />
+            )}
+          </div>
         </section>
 
-        <section className={CARD}>
+        <section className={`${CARD} flex flex-col`}>
           <h2 className="text-sm font-medium text-gray-300">Last six months</h2>
           <p className="mt-0.5 mb-4 text-xs text-gray-500">
             Always six months, whatever period is picked above.
           </p>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trend} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
-                <CartesianGrid stroke={chart.grid} vertical={false} />
-                <XAxis dataKey="ym" tickFormatter={monthLabel} tick={{ fill: chart.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: chart.grid }} />
-                <YAxis tickFormatter={inrCompact} tick={{ fill: chart.axis, fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
-                <Tooltip
-                  contentStyle={chart.tooltip}
-                  itemStyle={chart.tooltipItem}
-                  cursor={{ fill: chart.cursor }}
-                  labelFormatter={(v) => monthLabel(String(v))}
-                  formatter={(v, n) => [inr(Number(v)), String(n)]}
-                />
-                <Legend wrapperStyle={{ fontSize: 11, color: chart.axis }} />
-                <Bar dataKey="target" name="Target" fill={chart.series[3]} radius={[4, 4, 0, 0]} />
-                <Bar dataKey={source} name={SOURCE_LABEL[source]} fill={chart.series[0]} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {trend.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center py-10">
+              <p className="text-sm text-gray-500">No data yet for the past six months.</p>
+            </div>
+          ) : (
+            <div className="h-56 flex-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={trend} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
+                  <CartesianGrid stroke={chart.grid} vertical={false} />
+                  <XAxis dataKey="ym" tickFormatter={monthLabel} tick={{ fill: chart.axis, fontSize: 11 }} tickLine={false} axisLine={{ stroke: chart.grid }} />
+                  <YAxis tickFormatter={inrCompact} tick={{ fill: chart.axis, fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
+                  <Tooltip
+                    contentStyle={chart.tooltip}
+                    itemStyle={chart.tooltipItem}
+                    cursor={{ fill: chart.cursor }}
+                    labelFormatter={(v) => monthLabel(String(v))}
+                    formatter={(v, n) => [inr(Number(v)), String(n)]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: chart.axis }} />
+                  <Bar dataKey="target" name="Target" fill={chart.series[3]} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={source} name={SOURCE_LABEL[source]} fill={chart.series[0]} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </section>
       </div>
     </div>
