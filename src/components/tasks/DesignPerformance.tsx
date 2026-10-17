@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import {
-  AlertCircle, Award, CalendarDays, CheckCircle2, Clock, Download, Loader2, RefreshCw, RotateCcw,
+  AlertCircle, Award, CheckCircle2, Clock, Download, Loader2, RefreshCw, RotateCcw,
   Target, Timer, TrendingDown, TrendingUp,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -11,6 +11,8 @@ import { usePermissions } from '../../lib/permissions'
 import { useChartTheme } from '../../lib/chartTheme'
 import { useAuth } from '../../contexts/AuthContext'
 import DonutChart from '../DonutChart'
+import { DateField } from '../DateField'
+import GaugeRing from '../GaugeRing'
 import { loadStaff, type Staff } from '../leads/leadUtils'
 import { pctOf, zoneOf } from '../../lib/targets'
 import ExtraTimeInbox from './ExtraTimeInbox'
@@ -104,6 +106,16 @@ type Person = {
   Excel — is about the same days.
 */
 type Period = 'today' | 'week' | 'month' | 'year' | 'custom'
+
+// The target box says which stretch it is for. "Daily target" sitting
+// above a month's figure was the page contradicting itself.
+const TARGET_LABEL: Record<Period, string> = {
+  today: 'Daily target',
+  week: 'Weekly target',
+  month: 'Monthly target',
+  year: 'Yearly target',
+  custom: 'Target for these days',
+}
 
 const PERIODS: { key: Period; label: string; grain: Grain }[] = [
   { key: 'today', label: 'Daily', grain: 'day' },
@@ -221,6 +233,27 @@ const effOf = (allowed: number, actual: number) =>
 const effText = (v: number | null) =>
   v === null ? '—' : v > MAX_SHOWN ? `${MAX_SHOWN}%+` : `${v}%`
 
+/*
+  One colour per tile.
+
+  Every tile wearing the same orange chip made the row read as one
+  undifferentiated block — the eye had to read six labels to find the
+  number it wanted. Colour does that work instead, and the colours stay
+  the same from one visit to the next so people learn them.
+
+  Written as "r,g,b" so the same value serves both the faint chip and
+  the solid glyph, and both hold up on cream as well as on black.
+*/
+const HUE: Record<string, string> = {
+  orange: '255,94,0',
+  green: '16,163,113',
+  blue: '59,130,246',
+  teal: '13,148,136',
+  amber: '217,119,6',
+  red: '220,70,70',
+  purple: '147,97,207',
+}
+
 const initials = (name: string | null) =>
   (name ?? '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
 
@@ -231,9 +264,11 @@ export default function DesignPerformance() {
   const { can, isSuper, ready } = usePermissions()
   const chart = useChartTheme()
 
-  const [period, setPeriod] = useState<Period>('month')
+  // Daily. A designer's day is the thing anyone actually asks about;
+  // a month-to-date figure on open is a number nobody wanted yet.
+  const [period, setPeriod] = useState<Period>('today')
   const [grain, setGrain] = useState<Grain>('day')
-  const [from, setFrom] = useState(startOf('month'))
+  const [from, setFrom] = useState(startOf('today'))
   const [to, setTo] = useState(today())
   const [who, setWho] = useState('')          // '' = everyone
 
@@ -417,12 +452,33 @@ export default function DesignPerformance() {
   const netTone: 'good' | 'warn' | 'bad' =
     netZone.key === 'green' ? 'good' : netZone.key === 'yellow' ? 'warn' : 'bad'
 
+  /*
+    One score out of a hundred, weighted the way the service spec
+    weights it: productivity 30, quality 25, on-time 20, efficiency 15.
+
+    The spec has a fifth part — accuracy and communication, worth 10 —
+    which is a manager's written rating, and nobody records one in this
+    CRM. Rather than invent it, or quietly give everybody a flat ten, it
+    is left out and the other four are scaled back up to a hundred. The
+    card says so out loud: a score whose make-up is hidden is a score
+    people argue with instead of acting on.
+  */
   const firstPass = finished.filter((r) => r.our_changes === 0).length
   const quality = qualityOf(finished.length, firstPass)
   const qualityTone: 'good' | 'warn' | 'bad' =
     (quality ?? 0) >= 90 ? 'good' : (quality ?? 0) >= 70 ? 'warn' : 'bad'
   const effTone: 'good' | 'warn' | 'bad' | undefined =
     eff === null ? undefined : eff >= 100 ? 'good' : eff >= 80 ? 'warn' : 'bad'
+
+  const kpi = [
+    { key: 'Productivity', weight: 30, value: Math.min(pointTarget > 0 ? (netPts / pointTarget) * 100 : 0, 100), hue: 'orange' },
+    { key: 'Quality', weight: 25, value: quality ?? 0, hue: 'green' },
+    { key: 'On time', weight: 20, value: onTimePct ?? 0, hue: 'teal' },
+    { key: 'Efficiency', weight: 15, value: Math.min(eff ?? 0, 100), hue: 'blue' },
+  ] as const
+  const kpiWeight = kpi.reduce((n, k) => n + k.weight, 0)
+  const kpiScore = Math.round(kpi.reduce((n, k) => n + k.value * k.weight, 0) / kpiWeight)
+  const kpiReady = finished.length > 0
 
   const byType = useMemo(() => {
     const m = new Map<string, { n: number; onTime: number; actual: number; allowed: number }>()
@@ -465,6 +521,16 @@ export default function DesignPerformance() {
     return m
   }, [rows])
 
+  // Rows for the bar. Biggest first and capped at eight, so the chart
+  // stays readable as the team grows — the table below has everyone.
+  const byPerson = useMemo(
+    () => [...byDesigner.entries()]
+      .map(([name, t]) => ({ name, Net: Math.max(t.gross - t.penalty, 0), Lost: t.penalty }))
+      .sort((x, y) => (y.Net + y.Lost) - (x.Net + x.Lost))
+      .slice(0, 8),
+    [byDesigner],
+  )
+
   const shown = useMemo(() => {
     if (filter === 'done') return rows.filter((r) => r.is_done)
     if (filter === 'open') return rows.filter((r) => !r.is_done)
@@ -472,13 +538,23 @@ export default function DesignPerformance() {
     return rows
   }, [rows, filter])
 
-  const data = series.map((p) => ({
+  const dataRaw = series.map((p) => ({
     label: axisLabel(p.period, grain),
     Allowed: Math.round(p.allowed_mins / 6) / 10,
     Actual: Math.round(p.actual_mins / 6) / 10,
     Changes: Math.round(p.change_mins / 6) / 10,
     Tasks: p.done_tasks,
   }))
+
+  /*
+    All zeros is not a chart.
+
+    The buckets come back even on a day with nothing finished, so the
+    area chart drew a flat line along the floor and the panel read as
+    broken rather than empty. If there is nothing in it, say so.
+  */
+  const anyHours = dataRaw.some((d) => d.Allowed > 0 || d.Actual > 0)
+  const data = anyHours ? dataRaw : []
 
   // Green and red that hold up on cream as well as on black
   const good = chart.dark ? '#6ee7b7' : '#047857'
@@ -500,7 +576,9 @@ export default function DesignPerformance() {
   const line = chart.dark ? '#1f1f1f' : 'rgba(23,18,14,0.09)'
   const rule = { borderTop: `1px solid ${line}` }
 
-  const card = 'rounded-lg border border-[#242424] bg-[#151515]'
+  // The same shell the sales screens use. Two pages of one product
+  // should not disagree about the radius of a box.
+  const card = 'rounded-2xl border border-[#242424] bg-[#151515]'
   const input =
     'rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none'
 
@@ -509,13 +587,23 @@ export default function DesignPerformance() {
   }
 
   const Tile = ({
-    icon: Icon, k, v, sub, tone,
-  }: { icon: typeof Clock; k: string; v: string; sub?: string; tone?: 'good' | 'bad' | 'warn' }) => (
+    icon: Icon, k, v, sub, tone, hue = 'orange',
+  }: {
+    icon: typeof Clock
+    k: string
+    v: string
+    sub?: string
+    tone?: 'good' | 'bad' | 'warn'
+    hue?: keyof typeof HUE
+  }) => (
     <div className={`${card} px-4 py-3.5`}>
       <div className="flex items-start gap-3">
         <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-          style={{ background: 'rgba(255,94,0,0.12)', color: '#FF5E00' }}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+          style={{
+            backgroundImage: `linear-gradient(135deg, rgba(${HUE[hue]},${chart.dark ? 0.30 : 0.24}) 0%, rgba(${HUE[hue]},${chart.dark ? 0.10 : 0.08}) 100%)`,
+            color: `rgb(${HUE[hue]})`,
+          }}
         >
           <Icon className="h-4.5 w-4.5" size={18} />
         </span>
@@ -574,9 +662,9 @@ export default function DesignPerformance() {
 
           {period === 'custom' && (
             <div className="flex items-center gap-2">
-              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${input} py-1.5 text-xs`} />
+              <DateField value={from} onChange={setFrom} placeholder="From" />
               <span className="text-xs text-gray-600">to</span>
-              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${input} py-1.5 text-xs`} />
+              <DateField value={to} onChange={setTo} placeholder="To" />
             </div>
           )}
 
@@ -590,11 +678,40 @@ export default function DesignPerformance() {
         </div>
       </div>
 
-      <div className={`${card} flex flex-wrap items-center gap-x-6 gap-y-4 px-5 py-4`}>
+      {/*
+        The band at the top.
+
+        A faint wash of brand orange across it, so the page opens on
+        something that looks made rather than assembled, and the name
+        sits where the eye lands first. The line under it is the one
+        sentence a person actually wants: am I ahead or behind, right
+        now.
+      */}
+      <div
+        className={`${card} flex flex-wrap items-center gap-x-6 gap-y-4 px-5 py-5`}
+        /*
+          The wash runs the whole width.
+
+          It used to fade out at 70% and leave the right-hand third
+          plainly darker, so the band read as two pieces joined badly
+          rather than one surface. Every stop now carries colour, and
+          the last one still has some in it.
+        */
+        style={{
+          backgroundImage: chart.dark
+            ? 'linear-gradient(100deg, rgba(255,94,0,0.20) 0%, rgba(255,94,0,0.09) 42%, rgba(255,94,0,0.05) 75%, rgba(255,94,0,0.08) 100%)'
+            : 'linear-gradient(100deg, rgba(255,94,0,0.16) 0%, rgba(255,94,0,0.07) 42%, rgba(255,94,0,0.04) 75%, rgba(255,94,0,0.07) 100%)',
+        }}
+      >
         <div className="flex min-w-0 items-center gap-3">
+          {/* Solid, not a tint. On a band that is itself washed orange a
+              faint orange square disappeared into it. */}
           <span
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
-            style={{ background: 'rgba(255,94,0,0.15)', color: '#FF5E00' }}
+            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-base font-semibold text-white"
+            style={{
+              backgroundImage: 'linear-gradient(135deg, #FF7A2B 0%, #FF5E00 55%, #C94400 100%)',
+              boxShadow: '0 6px 16px rgba(255,94,0,0.28)',
+            }}
           >
             {who ? initials(person?.full_name ?? null) : '👥'}
           </span>
@@ -607,7 +724,47 @@ export default function DesignPerformance() {
                 ? [person?.designation, person?.emp_code].filter(Boolean).join(' · ') || 'Design team'
                 : `${summary.length} designer${summary.length === 1 ? '' : 's'}`}
             </span>
+            {/* Ahead or behind, in one line. No cheerleading when the
+                answer is no — a page that congratulates everybody stops
+                being read. */}
+            {pointTarget > 0 && finished.length > 0 && (
+              <span className="mt-1 block text-sm">
+                {netPct >= 100 ? (
+                  <span style={{ color: good }}>Past the target — {netPts.toLocaleString('en-IN')} of {pointTarget.toLocaleString('en-IN')} points.</span>
+                ) : netPct >= 70 ? (
+                  <span style={{ color: good }}>On track · {Math.round(netPct)}% of {TARGET_LABEL[period].toLowerCase()}.</span>
+                ) : netPct >= 30 ? (
+                  <span style={{ color: warn }}>{(pointTarget - netPts).toLocaleString('en-IN')} points still to go.</span>
+                ) : (
+                  <span style={{ color: bad }}>Well behind · {Math.round(netPct)}% of {TARGET_LABEL[period].toLowerCase()}.</span>
+                )}
+              </span>
+            )}
           </span>
+        </div>
+
+        {/*
+          The four counts that used to sit in a second row of boxes.
+
+          Four more cards for four small integers was the page getting
+          wider instead of clearer — the reference layout has one row of
+          tiles and then charts, and it is denser for it. Here they read
+          as one sentence about the workload, next to whose workload it
+          is.
+        */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-l border-[#242424] pl-6 text-sm">
+          {([
+            ['In hand', String(assigned), plain],
+            ['Finished', String(total.done), good],
+            ['Running', String(started.length), warn],
+            ['In time', onTimePct === null ? '—' : `${onTimePct}%`,
+              onTimePct === null ? plain : onTimePct >= 70 ? good : bad],
+          ] as [string, string, string][]).map(([k, v, c]) => (
+            <span key={k}>
+              <span className="block text-[11px] text-gray-500">{k}</span>
+              <span className="block text-lg font-semibold tabular-nums" style={{ color: c }}>{v}</span>
+            </span>
+          ))}
         </div>
 
         {who && person?.date_of_joining && (
@@ -638,46 +795,158 @@ export default function DesignPerformance() {
 
       {/* ---- The five numbers ---- */}
       {/* ---- Points: what was earned, what was lost, what is left ---- */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <Tile icon={Target} k="Daily target" v={DAILY_POINTS.toLocaleString('en-IN')}
-              sub={`Points per designer · ${DAILY_HOURS} hours`} />
-        <Tile icon={Award} k="Gross points" v={grossPts.toLocaleString('en-IN')}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <Tile hue="purple" icon={Target} k={TARGET_LABEL[period]}
+              v={pointTarget.toLocaleString('en-IN')}
+              sub={`${DAILY_POINTS} a day × ${workDays(from, to)} working day${workDays(from, to) === 1 ? '' : 's'}${who ? '' : ` × ${headcount}`}`} />
+        <Tile hue="blue" icon={Award} k="Gross points" v={grossPts.toLocaleString('en-IN')}
               sub={`${finished.length} finished job${finished.length === 1 ? '' : 's'}`} />
-        <Tile icon={TrendingDown} k="Negative points" v={penaltyPts > 0 ? `−${penaltyPts.toLocaleString('en-IN')}` : '0'}
+        <Tile hue="red" icon={TrendingDown} k="Negative points" v={penaltyPts > 0 ? `−${penaltyPts.toLocaleString('en-IN')}` : '0'}
               sub={provisionalPts > 0 ? `${provisionalPts.toLocaleString('en-IN')} more running` : 'Time over the allowance'}
               tone={penaltyPts > 0 ? 'bad' : undefined} />
         {/* The one that counts. Everything either side of it explains it. */}
-        <Tile icon={CheckCircle2} k="Net points" v={netPts.toLocaleString('en-IN')}
+        <Tile hue="orange" icon={CheckCircle2} k="Net points" v={netPts.toLocaleString('en-IN')}
               sub={pointTarget > 0
                 ? `${Math.round(netPct)}% of ${pointTarget.toLocaleString('en-IN')}${who ? '' : ` · ${headcount} designers`}`
                 : undefined}
               tone={pointTarget > 0 ? netTone : undefined} />
-        <Tile icon={TrendingUp} k="Time efficiency" v={effText(eff)}
+        <Tile hue="teal" icon={TrendingUp} k="Time efficiency" v={effText(eff)}
               sub="Allowed against actual" tone={effTone} />
-        <Tile icon={Award} k="Quality score" v={quality === null ? '—' : `${quality}%`}
+        <Tile hue="green" icon={Award} k="Quality score" v={quality === null ? '—' : `${quality}%`}
               sub={finished.length > 0 ? `${firstPass} of ${finished.length} right first time` : 'Nothing finished yet'}
               tone={quality === null ? undefined : qualityTone} />
       </div>
 
-      {/* ---- The work itself ---- */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Tile icon={CalendarDays} k="Tasks in hand" v={String(assigned)} sub={`${open.length} still open`} />
-        <Tile icon={CheckCircle2} k="Finished" v={String(total.done)}
-              sub={assigned > 0 ? `${Math.round((total.done / assigned) * 100)}% of them` : undefined} />
-        <Tile icon={Clock} k="Still running" v={String(started.length)}
-              sub={`${notStarted.length} not started`} />
-        <Tile icon={Timer} k="Finished in time" v={onTimePct === null ? '—' : `${onTimePct}%`}
-              sub={`${total.onTime} of ${total.done}`}
-              tone={onTimePct === null ? undefined : onTimePct >= 70 ? 'good' : 'bad'} />
+      {/* ---- How the month is going ---- */}
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <section className={`${card} p-5`}>
+          <h2 className="font-medium text-white">Target achievement</h2>
+          <p className="mt-0.5 text-xs text-gray-500">Net points against {TARGET_LABEL[period].toLowerCase()}.</p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-6">
+            <GaugeRing pct={netPct} colorClass={netZone.text} caption="of target" />
+            <ul className="space-y-2.5 text-sm">
+              <li>
+                <span className="block text-xs text-gray-500">Net</span>
+                <span className="font-semibold tabular-nums" style={{ color: good }}>
+                  {netPts.toLocaleString('en-IN')}
+                </span>
+              </li>
+              <li>
+                <span className="block text-xs text-gray-500">Still to go</span>
+                <span className="font-semibold tabular-nums text-white">
+                  {pointTarget > netPts ? (pointTarget - netPts).toLocaleString('en-IN') : '—'}
+                </span>
+              </li>
+              <li>
+                <span className="block text-xs text-gray-500">Lost to time over</span>
+                <span className="tabular-nums" style={{ color: penaltyPts > 0 ? bad : plain }}>
+                  {penaltyPts > 0 ? `−${penaltyPts.toLocaleString('en-IN')}` : '0'}
+                </span>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <section className={`${card} flex flex-col p-5`}>
+          <h2 className="font-medium text-white">Performance score</h2>
+          <p className="mt-0.5 text-xs text-gray-500">Four parts, weighted, out of 100.</p>
+
+          {!kpiReady ? (
+            <p className="flex h-full min-h-[180px] flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
+              <CheckCircle2 size={22} className="opacity-25" />
+              {loading ? 'Loading…' : <>Nothing finished in these days.<br /><span className="text-xs text-gray-600">Try Weekly or Monthly above.</span></>}
+            </p>
+          ) : (
+            <>
+              <div className="mt-4 flex justify-center">
+                <GaugeRing pct={kpiScore} colorClass={zoneOf(kpiScore).text} caption="out of 100" size={132} stroke={11} />
+              </div>
+              <ul className="mt-4 space-y-2.5">
+                {kpi.map((k) => (
+                  <li key={k.key}>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-400">
+                        {k.key} <span className="text-gray-600">{k.weight}%</span>
+                      </span>
+                      <span className="tabular-nums text-gray-300">{Math.round(k.value)}</span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full" style={{ background: rail }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${Math.min(k.value, 100)}%`, background: `rgb(${HUE[k.hue]})` }}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              {/* Said plainly, so nobody has to work out why it is not five parts. */}
+              <p className="mt-3 text-[11px] text-gray-600">
+                A fifth part — accuracy and communication — is a manager's rating the CRM does not
+                collect, so it is left out and these four are scaled up.
+              </p>
+            </>
+          )}
+        </section>
+
+        {/*
+          Points per designer, stacked.
+
+          The whole bar is what the work was worth; the red tail is what
+          the overrun took back. Two numbers in one shape, and the gap
+          between a long bar and a long red tail is the thing worth
+          talking to someone about.
+        */}
+        <section className={`${card} flex flex-col p-5 lg:col-span-2`}>
+          <h2 className="font-medium text-white">Points by designer</h2>
+          <p className="mt-0.5 mb-4 text-xs text-gray-500">
+            Net earned, with anything lost to time over the allowance beside it.
+          </p>
+          {byPerson.length === 0 ? (
+            <p className="flex h-full min-h-[180px] flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
+              <CheckCircle2 size={22} className="opacity-25" />
+              {loading ? 'Loading…' : <>Nothing finished in these days.<br /><span className="text-xs text-gray-600">Try Weekly or Monthly above.</span></>}
+            </p>
+          ) : (
+            <div style={{ height: Math.max(byPerson.length * 44, 140) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={byPerson} layout="vertical" margin={{ top: 0, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={chart.grid} horizontal={false} />
+                  <XAxis type="number" tick={{ fill: chart.axis, fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <YAxis type="category" dataKey="name" width={120}
+                         tick={{ fill: chart.axisStrong, fontSize: 12 }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={chart.tooltip}
+                    itemStyle={chart.tooltipItem}
+                    cursor={{ fill: chart.cursor }}
+                    formatter={(v, n) => [Number(v).toLocaleString('en-IN'), String(n)]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="Net" stackId="p" radius={[0, 0, 0, 0]}>
+                    {byPerson.map((d, i) => (
+                      <Cell key={d.name} fill={i === 0 ? chart.series[0] : chart.series[1]} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="Lost" stackId="p" fill={bad} radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </section>
       </div>
 
       {/* ---- Trend, split, quick stats ---- */}
-      <div className="grid items-start gap-4 lg:grid-cols-3">
-        <section className={`${card} p-4 lg:col-span-2`}>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <section className={`${card} flex flex-col p-4 lg:col-span-2`}>
           <div className="mb-3">
             <h2 className="font-medium text-white">Hours — allowed against actual</h2>
             <p className="mt-0.5 text-xs text-gray-500">{periodLabel}</p>
           </div>
+          {data.length === 0 ? (
+            <p className="flex h-full min-h-[220px] flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
+              <CheckCircle2 size={22} className="opacity-25" />
+              {loading ? 'Loading…' : <>No finished design work in these days.<br /><span className="text-xs text-gray-600">Try Weekly or Monthly above.</span></>}
+            </p>
+          ) : (
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -707,10 +976,6 @@ export default function DesignPerformance() {
               </AreaChart>
             </ResponsiveContainer>
           </div>
-          {data.length === 0 && (
-            <p className="py-4 text-center text-sm text-gray-500">
-              {loading ? 'Loading…' : 'No finished design work in these days.'}
-            </p>
           )}
         </section>
 
@@ -752,7 +1017,7 @@ export default function DesignPerformance() {
       <ExtraTimeInbox onDecided={() => { setLoading(true); void load() }} />
 
       {/* ---- Every task, and what is running now ---- */}
-      <div className="grid items-start gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         <section className={`${card} overflow-hidden lg:col-span-2`}>
           <div className="space-y-3 border-b border-[#242424] px-5 py-3.5">
             {/* Which days, and the Excel of exactly those days. Both live here
@@ -774,10 +1039,45 @@ export default function DesignPerformance() {
               </button>
             </div>
 
-            {/* The days are set at the top of the page now. These only
-                narrow the list below. */}
             <div className="flex flex-wrap items-center gap-3">
+              {/*
+                The same days as the top of the page, not a second
+                setting — both sets read and write one piece of state, so
+                they can never fall out of step.
+
+                Repeated here because the page is long. By the time
+                somebody has scrolled to the task list, the control at
+                the top is off the screen, and the one thing they want
+                next is usually a different stretch of days.
+              */}
               <div className="flex gap-1">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p.key}
+                    onClick={() => pickPeriod(p.key)}
+                    className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
+                      period === p.key
+                        ? 'bg-orange-500/15 font-medium text-orange-400'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {period === 'custom' && (
+                <div className="flex items-center gap-2">
+                  {/* The CRM's own picker, not the browser's. A page with
+                      two kinds of calendar on it looks like two programs
+                      stitched together — and the browser's is white. */}
+                  <DateField value={from} onChange={setFrom} placeholder="From" />
+                  <span className="text-xs text-gray-600">to</span>
+                  <DateField value={to} onChange={setTo} placeholder="To" />
+                </div>
+              )}
+
+              <div className="ml-auto flex gap-1">
                 {([
                   ['all', `All ${rows.length}`],
                   ['done', `Finished ${total.done}`],
@@ -799,7 +1099,7 @@ export default function DesignPerformance() {
           </div>
 
           <div className={`max-h-[420px] overflow-auto ${scroll}`}>
-            <table className="w-full min-w-[640px] border-collapse text-sm">
+            <table className="w-full min-w-[780px] border-collapse text-sm">
               <thead className="sticky top-0 bg-[#151515]">
                 <tr style={{ borderBottom: `1px solid ${line}` }} className="text-left text-xs text-gray-500">
                   <th className="px-4 py-2.5 font-medium">#</th>
@@ -808,6 +1108,7 @@ export default function DesignPerformance() {
                   {!who && <th className="px-4 py-2.5 font-medium">Designer</th>}
                   <th className="px-4 py-2.5 text-right font-medium">Allowed</th>
                   <th className="px-4 py-2.5 text-right font-medium">Actual</th>
+                  <th className="px-4 py-2.5 font-medium">Progress</th>
                   <th className="px-4 py-2.5 font-medium">Stage</th>
                 </tr>
               </thead>
@@ -849,9 +1150,32 @@ export default function DesignPerformance() {
                         </span>
                       )}
                     </td>
+                    {/* How far through its allowed time. Past the line it
+                        turns red, which is the moment worth seeing on a
+                        list rather than in a report afterwards. */}
+                    <td className="w-[15%] px-4 py-2.5">
+                      {r.allowed_mins && r.allowed_mins > 0 ? (
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: rail }}>
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${Math.min((r.base_mins / r.allowed_mins) * 100, 100)}%`,
+                                background: r.base_mins > r.allowed_mins ? bad : chart.series[0],
+                              }}
+                            />
+                          </div>
+                          <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-gray-500">
+                            {Math.round((r.base_mins / r.allowed_mins) * 100)}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-gray-600">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5">
-                      <span className={`rounded px-1.5 py-0.5 text-[11px] ${r.is_done ? '' : 'text-gray-400'}`}
-                            style={r.is_done ? { background: 'rgba(5,150,105,0.14)', color: good } : undefined}>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] ${r.is_done ? '' : 'text-gray-400'}`}
+                            style={r.is_done ? { background: 'rgba(5,150,105,0.14)', color: good } : { background: 'rgba(255,255,255,0.05)' }}>
                         {r.stage ?? '—'}
                       </span>
                     </td>
@@ -859,7 +1183,7 @@ export default function DesignPerformance() {
                 ))}
                 {shown.length === 0 && (
                   <tr>
-                    <td colSpan={who ? 6 : 7} className="px-4 py-10 text-center text-sm text-gray-500">
+                    <td colSpan={who ? 7 : 8} className="px-4 py-10 text-center text-sm text-gray-500">
                       {loading ? 'Loading…' : 'Nothing here.'}
                     </td>
                   </tr>
@@ -916,7 +1240,7 @@ export default function DesignPerformance() {
       </div>
 
       {/* ---- By kind of work, and the team ---- */}
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         <section className={`${card} p-5`}>
           <h2 className="font-medium text-white">Which work goes best</h2>
           <p className="mb-4 mt-0.5 text-xs text-gray-500">

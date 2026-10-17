@@ -272,7 +272,18 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                     <option value="">Not set</option>
                     {workTypes.map((w) => (
                       <option key={w.id} value={w.id}>
-                        {w.name} · {mins(w.minutes)}{w.per_unit ? ` per ${w.unit}` : ''}
+                        {/*
+                          "per" needs BOTH a unit and the per-unit flag.
+                          A row with the flag on and no unit read as
+                          "3h per null", which is the database talking to
+                          itself in front of the user.
+
+                          No minutes at all is said plainly rather than
+                          shown as 0m — a job that looks like it takes no
+                          time is a job somebody picks by mistake.
+                        */}
+                        {w.name} · {w.minutes ? mins(w.minutes) : 'time not set'}
+                        {w.per_unit && w.unit ? ` per ${w.unit}` : ''}
                       </option>
                     ))}
                   </select>
