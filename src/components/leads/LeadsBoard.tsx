@@ -694,10 +694,17 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
     if (e) { setError(e.message); refresh() }
   }
 
+  // Transfer goes through an RPC, not a plain update.
+  //
+  // A lead sent to another branch moves to that branch, and the manager
+  // who sent it can no longer see it. Postgres checks the NEW row against
+  // the read policy, so a plain update is refused: it will not let you
+  // write a row you would not be allowed to read back. The RPC runs as
+  // the owner and does the same checks itself.
   async function transfer(leadId: string, userId: string | null) {
     setMenu(null)
     patchLead(leadId, { assigned_to: userId })
-    const { error: e } = await supabase.from('leads').update({ assigned_to: userId }).eq('id', leadId)
+    const { error: e } = await supabase.rpc('transfer_lead', { p_lead: leadId, p_to: userId })
     if (e) setError(e.message)
     refresh()
   }

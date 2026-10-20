@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Bookmark, Check, Clock, LayoutGrid, List, Loader2, MessageSquare, Paperclip, Pencil, Plus,
   Save, Search, SlidersHorizontal, Tag, Trash2, TrendingUp, User, UserCog, X,
@@ -75,6 +76,26 @@ export default function TaskBoard() {
   const { user } = useAuth()
   const { can } = usePermissions()
   const me = user?.id ?? ''
+
+  // Opened from a project card, this page shows that project's tasks
+  // and nothing else. The link carried the project all along; until now
+  // the board ignored it and showed everything, which looked like the
+  // link was broken.
+  const [params, setParams] = useSearchParams()
+  const projectId = params.get('project')
+  const [projectName, setProjectName] = useState('')
+
+  // Read through project_board(), not the projects table: a designer is
+  // not given a direct read on projects, and this banner should work for
+  // them too.
+  useEffect(() => {
+    if (!projectId) { setProjectName(''); return }
+    void (async () => {
+      const { data } = await supabase.rpc('project_board', { p_customer: null, p_open_only: false })
+      const row = (data ?? []).find((p: { id: string }) => p.id === projectId) as { title?: string } | undefined
+      setProjectName(row?.title ?? '')
+    })()
+  }, [projectId])
 
   const [tasks, setTasks] = useState<Task[]>([])
   const [stages, setStages] = useState<TaskStage[]>([])
@@ -201,6 +222,7 @@ export default function TaskBoard() {
     const fromMs = from ? new Date(from).getTime() : null
     const tillMs = till ? new Date(till).getTime() + 86400000 : null
     return tasks.filter((t) => {
+      if (projectId && t.project_id !== projectId) return false
       const to = currentAssignees(t)
       if (scope === 'mine' && !to.includes(me)) return false
       if (scope === 'created' && t.created_by !== me) return false
@@ -220,7 +242,7 @@ export default function TaskBoard() {
         .toLowerCase()
         .includes(term)
     })
-  }, [tasks, q, scope, priority, labelF, creator, assignee, from, till, me, nameOf])
+  }, [tasks, q, scope, priority, labelF, creator, assignee, from, till, me, nameOf, projectId])
 
   const sorted = useMemo(() => {
     const far = Number.MAX_SAFE_INTEGER
@@ -543,6 +565,24 @@ export default function TaskBoard() {
 
   return (
     <div className="space-y-4">
+      {/* Narrowed to one project — say so, and give a way back. A filtered
+          board that will not admit it is filtered is how people decide
+          their work has disappeared. */}
+      {projectId && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-sm text-orange-300">
+          <span>
+            Showing only the tasks on {projectName || 'this project'}
+            {filtered.length === 0 && <span className="text-orange-200/70"> — there are none yet.</span>}
+          </span>
+          <button
+            onClick={() => { params.delete('project'); setParams(params) }}
+            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs hover:bg-orange-500/20"
+          >
+            <X size={13} /> Show all tasks
+          </button>
+        </div>
+      )}
+
       {/* Title bar */}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#242424] bg-[#151515] px-5 py-4">
         <h1 className="mr-auto text-xl font-semibold text-white">Tasks</h1>

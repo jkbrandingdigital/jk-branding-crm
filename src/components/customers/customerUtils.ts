@@ -53,15 +53,30 @@ export type ProjectRow = {
   customer_id: string
   customer_name: string
   customer_code: string
+  customer_phone?: string | null
   stage_id: string | null
   stage_name: string | null
   stage_color: string | null
   is_done: boolean | null
-  value_amount: number
+  // Rejected is kept apart from Completed on purpose: both mean the work
+  // is over, but only one of them brought money in.
+  is_rejected?: boolean | null
+  reject_reason?: string | null
+  // What work the job needs. A client may order a logo and a brochure
+  // as one project, so this is a list. The money still counts under the
+  // first one — see Projects_P2_Board.sql for why it is not split.
+  service_keys?: string[] | null
+  // null, not 0, when the reader is not allowed to see the money.
+  // Zero would say "this job is free", which is a different and untrue
+  // thing. A designer gets null and the screen shows no figure at all.
+  value_amount: number | null
   start_date: string | null
   due_date: string | null
   owner_id: string | null
   owner_name: string | null
+  // Who sold it — the coordinator needs to know who to go back to.
+  created_by?: string | null
+  created_name?: string | null
   notes: string | null
   created_at: string
   task_count: number
@@ -69,7 +84,7 @@ export type ProjectRow = {
 
 export type ProjectStage = {
   id: string; name: string; color: string; sort_order: number
-  is_done: boolean; is_active: boolean
+  is_done: boolean; is_rejected?: boolean; is_active: boolean
 }
 
 /*

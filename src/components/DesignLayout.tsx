@@ -13,7 +13,10 @@ const NAV: { title: string; items: NavItem[] }[] = [
   {
     title: 'Work',
     items: [
-      { label: 'Projects', path: '/design/projects', icon: FolderKanban, perm: 'mod_projects' },
+      // Only the project co-ordinator, not the whole design team. The
+      // board carries every client's work, what it sold for and who sold
+      // it; a designer needs their own tasks, which is the next line down.
+      { label: 'Projects', path: '/design/projects', icon: FolderKanban, perm: 'mod_project_board' },
       { label: 'Tasks', path: '/design/tasks', icon: ListTodo, perm: 'mod_tasks' },
       { label: 'To-Do', path: '/design/todos', icon: ListChecks, perm: 'mod_todos' },
       { label: 'Reminders', path: '/design/reminders', icon: AlarmClock, perm: 'mod_reminders' },

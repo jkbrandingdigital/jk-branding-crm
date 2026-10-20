@@ -11,6 +11,28 @@ import ExtraTimeRequest from './ExtraTimeRequest'
 
 type Tab = 'details' | 'comments' | 'files' | 'history'
 type TimeRow = { user_id: string; full_name: string | null; secs: number; sessions: number }
+
+/*
+  One piece of the job: an option, or a round of changes.
+
+  Three options of a festival greeting are three pieces of work, each with
+  its own allowance. Held as one total, "47m over 18 sittings" cannot say
+  whether option 2 ran over or option 1 saved the day.
+
+  part_kind null is an older sitting, recorded before the pieces existed.
+  Those show as "Option not set" rather than being guessed into option 1 —
+  that time probably covered several options, and putting it on one of them
+  would make that option look bad for no reason.
+*/
+type Part = {
+  part_kind: 'option' | 'change' | null
+  part_no: number | null
+  label: string
+  allowed_mins: number
+  spent_secs: number
+  sittings: number
+  running: boolean
+}
 type Sitting = { id: string; user_id: string; started_at: string; ended_at: string | null; end_reason: string | null; end_note: string | null }
 type Comment = { id: string; user_id: string; body: string; created_at: string }
 type FileRow = { id: string; file_path: string; file_name: string; file_size: number | null; uploaded_by: string; created_at: string }
@@ -67,6 +89,10 @@ export default function TaskDetail({
   const [time, setTime] = useState<TimeRow[]>([])
   const [status, setStatus] = useState<TimeStatus | null>(null)
   const [sittings, setSittings] = useState<Sitting[]>([])
+  const [parts, setParts] = useState<Part[]>([])
+  // Just the options, for the line under the title. Change rounds and the
+  // old unassigned time have their own places and would only crowd it.
+  const optionParts = parts.filter((p0) => p0.part_kind === 'option')
   const [adding, setAdding] = useState(false)
   const [changeOpen, setChangeOpen] = useState(false)
   const [changeNote, setChangeNote] = useState('')
@@ -76,12 +102,14 @@ export default function TaskDetail({
   const [error, setError] = useState('')
 
   const loadTime = useCallback(async () => {
-    const [t, st] = await Promise.all([
+    const [t, st, pt] = await Promise.all([
       supabase.rpc('task_time', { p_task_id: task.id }),
       supabase.from('task_time_status').select('*').eq('task_id', task.id).maybeSingle(),
+      supabase.rpc('task_parts', { p_task: task.id }),
     ])
     setTime((t.data ?? []) as TimeRow[])
     setStatus((st.data ?? null) as TimeStatus | null)
+    setParts((pt.data ?? []) as Part[])
   }, [task.id])
 
   // Records that the job came back. A client's change buys more allowed
@@ -355,11 +383,35 @@ export default function TaskDetail({
                 <span className="text-gray-400">
                   · {status.work_type}
                   {status.per_unit && <> · {status.work_qty} {status.unit}{status.work_qty === 1 ? '' : 's'}</>}
-                  {' · '}
-                  <span style={{ color: over ? (dark ? '#fca5a5' : '#991b1b') : (dark ? '#6ee7b7' : '#065f46') }}>
-                    {mins(spentMins)} of {mins(status.allowed_mins ?? 0)}
-                    {over && <> · over by {mins(spentMins - (status.allowed_mins ?? 0))}</>}
-                  </span>
+                  {/* One figure per option, not one for all of them.
+
+                      "25m of 9h" is three options added up, and added up it
+                      answers nothing: it cannot say whether option 1 ran
+                      over or option 3 was never started. Each option is its
+                      own piece of work with its own allowance, so each gets
+                      its own figure here, the same as in the list below. */}
+                  {optionParts.length > 1 ? (
+                    optionParts.map((pt) => {
+                      const ov = pt.allowed_mins > 0 && pt.spent_secs / 60 > pt.allowed_mins
+                      return (
+                        <span key={pt.part_no}>
+                          {' · '}
+                          <span className="text-gray-500">Opt {pt.part_no} </span>
+                          <span style={{ color: ov ? (dark ? '#fca5a5' : '#991b1b') : (dark ? '#6ee7b7' : '#065f46') }}>
+                            {hhmm(pt.spent_secs)} of {mins(pt.allowed_mins)}
+                          </span>
+                        </span>
+                      )
+                    })
+                  ) : (
+                    <>
+                      {' · '}
+                      <span style={{ color: over ? (dark ? '#fca5a5' : '#991b1b') : (dark ? '#6ee7b7' : '#065f46') }}>
+                        {mins(spentMins)} of {mins(status.allowed_mins ?? 0)}
+                        {over && <> · over by {mins(spentMins - (status.allowed_mins ?? 0))}</>}
+                      </span>
+                    </>
+                  )}
                   {status.change_secs > 0 && (
                     <span className="text-gray-500"> · +{mins(status.change_secs / 60)} on changes</span>
                   )}
@@ -416,6 +468,74 @@ export default function TaskDetail({
 
           {tab === 'details' && (
             <div>
+              {/* The pieces of the job, each with its own clock.
+
+                  The timer runs against one option at a time, so "option 1
+                  took 10m of its 15m and option 2 took 8m" is a thing the
+                  screen can actually say. Starting one option pauses
+                  whatever was running — the database sees to that, the same
+                  way it always has. */}
+              {parts.length > 0 && (
+                <div className="mb-5 overflow-hidden rounded-lg border border-[#242424]">
+                  <div className="border-b border-[#242424] bg-[#171717] px-4 py-2">
+                    <p className="text-xs font-medium text-gray-300">Where the time went</p>
+                    <p className="mt-0.5 text-[11px] text-gray-500">
+                      Start the option you are working on, so each one carries its own time.
+                    </p>
+                  </div>
+                  <ul>
+                    {parts.map((pt) => {
+                      const spent = pt.spent_secs / 60
+                      const partOver = pt.allowed_mins > 0 && spent > pt.allowed_mins
+                      return (
+                        <li
+                          key={`${pt.part_kind ?? 'none'}-${pt.part_no ?? 0}`}
+                          className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[#1f1f1f] px-4 py-2.5 last:border-b-0"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-sm text-gray-200">
+                            {pt.label}
+                            {pt.running && (
+                              <span className="ml-2 text-xs text-orange-400">running</span>
+                            )}
+                          </span>
+                          <span className="shrink-0 text-sm tabular-nums">
+                            <span
+                              style={{
+                                color: partOver
+                                  ? (dark ? '#fca5a5' : '#991b1b')
+                                  : (dark ? '#d1d5db' : '#4b4536'),
+                              }}
+                            >
+                              {hhmm(pt.spent_secs)}
+                            </span>
+                            {/* An allowance of zero means there is nothing to
+                                measure against — our own change round, or old
+                                time with no option. Showing "of 0m" there
+                                would read as a failure that never happened. */}
+                            {pt.allowed_mins > 0 && (
+                              <span className="text-gray-500"> of {mins(pt.allowed_mins)}</span>
+                            )}
+                          </span>
+                          {pt.sittings > 0 && (
+                            <span className="shrink-0 text-xs text-gray-500">
+                              {pt.sittings} sitting{pt.sittings === 1 ? '' : 's'}
+                            </span>
+                          )}
+                          {/* Old unassigned time has no option to start. */}
+                          {!locked && pt.part_kind && (
+                            <TaskTimerButton
+                              taskId={task.id}
+                              part={{ kind: pt.part_kind, no: pt.part_no ?? 1 }}
+                              onChanged={loadTime}
+                            />
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
+
               {row('Stage',
                 canEdit ? (
                   <select

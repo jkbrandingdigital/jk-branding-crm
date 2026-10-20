@@ -20,6 +20,22 @@ import { useChartTheme } from '../../lib/chartTheme'
   the top of the screen straight away.
 */
 
+/*
+  Which part of a task a sitting belongs to.
+
+  Design work comes in options — three options of a festival greeting are
+  three pieces of work, each with its own allowance — and then in rounds of
+  client changes. Without this, all of it lands in one pile and "47m, 18
+  sittings" cannot answer "how long did option 2 take".
+
+  null means an older sitting, from before the parts existed. Those stay
+  unassigned rather than being guessed into option 1.
+*/
+export type TaskPartRef = { kind: 'option' | 'change'; no: number }
+
+export const samePart = (a: TaskPartRef | null | undefined, b: TaskPartRef | null | undefined) =>
+  (a?.kind ?? null) === (b?.kind ?? null) && (a?.no ?? null) === (b?.no ?? null)
+
 export type RunningTask = {
   session_id: string
   task_id: string
@@ -27,6 +43,8 @@ export type RunningTask = {
   subject: string
   started_at: string
   today_secs: number
+  part_kind: 'option' | 'change' | null
+  part_no: number | null
 }
 
 // Why the timer stopped. The reason matters: a lot of "Urgent work came" is
@@ -99,8 +117,13 @@ export const hhmm = (secs: number) => {
   return h > 0 ? `${h}h ${m % 60}m` : `${m}m`
 }
 
-export async function startTask(taskId: string, reason = 'switched') {
-  const { error } = await supabase.rpc('task_timer_start', { p_task_id: taskId, p_reason: reason })
+export async function startTask(taskId: string, reason = 'switched', part?: TaskPartRef | null) {
+  const { error } = await supabase.rpc('task_timer_start', {
+    p_task_id: taskId,
+    p_reason: reason,
+    p_part_kind: part?.kind ?? null,
+    p_part_no: part?.no ?? null,
+  })
   tellEveryone()
   if (error) throw new Error(error.message)
 }
@@ -260,6 +283,15 @@ export function WorkTimerBar() {
         <span className="text-orange-300">Working on</span>
         <span className="min-w-0 flex-1 truncate font-medium text-white">
           #{running.task_no} · {running.subject}
+          {/* Which piece, so the strip says the same thing the task screen
+              does. A designer with three options open needs to know which
+              one the clock is on. */}
+          {running.part_kind === 'option' && (
+            <span className="ml-2 font-normal text-orange-300">Option {running.part_no}</span>
+          )}
+          {running.part_kind === 'change' && (
+            <span className="ml-2 font-normal text-orange-300">Changes · round {running.part_no}</span>
+          )}
         </span>
         <span className="tabular-nums text-orange-300">{sinceExact(running.started_at)}</span>
         {/* The day's total was read a moment ago, so the time since that read
@@ -289,11 +321,18 @@ export function WorkTimerBar() {
 // =====================================================================
 export function TaskTimerButton({
   taskId,
+  part,
   size = 'sm',
+  label,
   onChanged,
 }: {
   taskId: string
+  // Which option or change round this button starts. Left out on the board
+  // and in the header, where the button means "this task" and the sitting
+  // is recorded without a part.
+  part?: TaskPartRef | null
   size?: 'sm' | 'md'
+  label?: string
   onChanged?: () => void
 }) {
   const { can, ready: permsReady } = usePermissions()
@@ -303,7 +342,13 @@ export function TaskTimerButton({
   const [asking, setAsking] = useState(false)
   const [, tick] = useState(0)
 
-  const isThisOne = running?.task_id === taskId
+  // A button that names a part is only "the running one" when that same part
+  // is running. Without this every option on the task would light up together.
+  const runningPart: TaskPartRef | null = running?.part_kind
+    ? { kind: running.part_kind, no: running.part_no ?? 1 }
+    : null
+  const isThisOne =
+    running?.task_id === taskId && (part === undefined || samePart(runningPart, part))
   const somethingElse = !!running && !isThisOne
 
   // Only the card that is actually running keeps a one-second clock, and only
@@ -328,7 +373,7 @@ export function TaskTimerButton({
     try {
       // Pressing ▶ while another task runs is the normal case, not a mistake:
       // that other one is paused as "urgent", which is what actually happened.
-      await startTask(taskId, somethingElse ? 'urgent' : 'switched')
+      await startTask(taskId, somethingElse ? 'urgent' : 'switched', part ?? null)
       onChanged?.()
     } catch (e2) {
       setErr((e2 as Error).message)
@@ -373,7 +418,7 @@ export function TaskTimerButton({
         ) : (
           <Play className={icon} />
         )}
-        {isThisOne ? sinceExact(running.started_at) : 'Start'}
+        {isThisOne ? sinceExact(running.started_at) : label ?? 'Start'}
       </button>
 
       {asking && <PausePrompt onPause={pause} onCancel={() => setAsking(false)} busy={busy} />}

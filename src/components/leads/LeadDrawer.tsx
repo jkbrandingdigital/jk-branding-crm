@@ -148,6 +148,23 @@ export default function LeadDrawer({
     onChanged()
   }
 
+  // Transfer goes through an RPC, not a plain update.
+  //
+  // A lead sent to another branch moves to that branch, and the manager
+  // who sent it can no longer see it. Postgres checks the NEW row against
+  // the read policy, so a plain update is refused: it will not let you
+  // write a row you would not be allowed to read back. The RPC runs as
+  // the owner and does the same checks itself.
+  async function transfer(userId: string | null) {
+    setBusy(true)
+    const { error } = await supabase.rpc('transfer_lead', { p_lead: leadId, p_to: userId })
+    setBusy(false)
+    if (error) return setMsg({ type: 'error', text: error.message })
+    setMsg({ type: 'success', text: 'Lead transferred.' })
+    await load()
+    onChanged()
+  }
+
   async function addActivity() {
     if (!actText.trim()) return setMsg({ type: 'error', text: 'Write what happened.' })
     if (!actFollow) return setMsg({ type: 'error', text: 'Pick the next follow-up date and time.' })
@@ -371,11 +388,11 @@ export default function LeadDrawer({
                 })}
               {menu === 'assign' && (
                 <>
-                  <button onClick={() => { setMenu(null); update({ assigned_to: null }, 'Lead unassigned.') }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
+                  <button onClick={() => { setMenu(null); transfer(null) }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white">
                     Unassigned
                   </button>
                   {assignable.map((s) => (
-                    <button key={s.id} onClick={() => { setMenu(null); update({ assigned_to: s.id }, 'Lead transferred.') }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
+                    <button key={s.id} onClick={() => { setMenu(null); transfer(s.id) }} className="block w-full px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-[#222] hover:text-white">
                       {s.full_name}
                     </button>
                   ))}
@@ -492,7 +509,7 @@ export default function LeadDrawer({
                         <select
                           value={lead.assigned_to ?? ''}
                           disabled={!can('lead_assign') || busy}
-                          onChange={(e) => update({ assigned_to: e.target.value || null }, 'Lead transferred.')}
+                          onChange={(e) => transfer(e.target.value || null)}
                           className={inputCls}
                         >
                           <option value="">Unassigned</option>

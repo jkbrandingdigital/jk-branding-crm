@@ -63,7 +63,16 @@ const ROLE_MODULES: Record<string, string[]> = {
   // Printing Media is not in this list for a designer. It gets a box of
   // its own below, because picking who handles printing is a decision
   // about a person's job, not one more thing they are allowed to open.
-  design_team: ['mod_tasks', 'mod_reminders', 'mod_notes', 'mod_projects'],
+  // `mod_project_board`, not `mod_projects`: the board is one person's
+  // job on this team, not the whole team's. Switch it on for the project
+  // co-ordinator and the Projects line appears for them alone.
+  // `project_coordinate` is the other half of that job — moving cards
+  // between stages and taking an unclaimed one on.
+  //
+  // It is a toggle rather than something worked out from a job title,
+  // because a title is typed by hand: one spelling slip and the right
+  // silently never arrives, with nothing on screen to say why.
+  design_team: ['mod_tasks', 'mod_reminders', 'mod_notes', 'mod_project_board', 'project_coordinate'],
 }
 
 // Everything the admin area holds, grouped the way its sidebar groups it.
@@ -73,8 +82,10 @@ const ADMIN_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'Sales Department', keys: ['mod_leads', 'mod_lead_assignment', 'mod_performance', 'mod_reports', 'mod_evolution', 'mod_questions', 'mod_targets'] },
   { title: 'HR Department', keys: ['mod_employees'] },
   { title: 'Productivity', keys: ['mod_tasks', 'mod_reminders', 'mod_notes'] },
-  { title: 'Business', keys: ['mod_quotations', 'mod_customers'] },
-  { title: 'Designing Department', keys: ['mod_projects', 'timer_view_all', 'design_perf', 'work_types_edit', 'mod_print_jobs', 'extra_time_approve'] },
+  // Projects sit with the customer and the quotation they came from,
+  // which is where the sidebar puts them too.
+  { title: 'Business', keys: ['mod_quotations', 'mod_customers', 'mod_projects', 'mod_project_board', 'project_coordinate', 'project_view_money'] },
+  { title: 'Designing Department', keys: ['timer_view_all', 'design_perf', 'work_types_edit', 'mod_print_jobs', 'extra_time_approve'] },
   { title: 'Company', keys: ['mod_settings', 'mod_backup'] },
 ]
 

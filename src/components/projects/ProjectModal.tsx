@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Loader2, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import CustomerPicker, { type PickedCustomer } from './CustomerPicker'
+import { DateField } from '../DateField'
 import type { ProjectRow, ProjectStage } from '../customers/customerUtils'
 
 /*
@@ -37,8 +38,21 @@ export default function ProjectModal({
   const [due, setDue] = useState(project?.due_date ?? '')
   const [owner, setOwner] = useState(project?.owner_id ?? '')
   const [notes, setNotes] = useState(project?.notes ?? '')
+  const [services, setServices] = useState<string[]>(project?.service_keys ?? [])
+  const [allServices, setAllServices] = useState<{ key: string; name: string }[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase
+        .from('sales_services')
+        .select('key, name')
+        .eq('is_active', true)
+        .order('sort_order')
+      setAllServices((data ?? []) as { key: string; name: string }[])
+    })()
+  }, [])
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -61,6 +75,10 @@ export default function ProjectModal({
       due_date: due || null,
       owner_id: owner || null,
       notes: notes.trim() || null,
+      // The money counts under the first one. A trigger keeps the
+      // single `service` column in step, so the sales donut and the
+      // revenue figures carry on reading what they always read.
+      service_keys: services,
     }
 
     const { error } = project
@@ -117,6 +135,46 @@ export default function ProjectModal({
             />
           </div>
 
+          {/* What work this job needs. A client may order a logo and a
+              brochure together, so more than one can be on. The order
+              matters: the money counts under the first, because splitting
+              one amount across three services would be a number nobody
+              gave us. */}
+          <div>
+            <label className={label}>Services</label>
+            <div className="flex flex-wrap gap-1.5 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] p-2">
+              {allServices.length === 0 && (
+                <span className="px-1 py-0.5 text-xs text-gray-600">No services set up yet.</span>
+              )}
+              {allServices.map((s) => {
+                const on = services.includes(s.key)
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() =>
+                      setServices((cur) =>
+                        cur.includes(s.key) ? cur.filter((k) => k !== s.key) : [...cur, s.key],
+                      )
+                    }
+                    className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                      on
+                        ? 'bg-orange-500/15 text-orange-300'
+                        : 'text-gray-400 hover:bg-[#232323] hover:text-white'
+                    }`}
+                  >
+                    {s.name}
+                  </button>
+                )
+              })}
+            </div>
+            {services.length > 1 && (
+              <p className="mt-1.5 text-xs text-gray-600">
+                The value counts under {allServices.find((s) => s.key === services[0])?.name ?? services[0]}.
+              </p>
+            )}
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className={label}>Stage</label>
@@ -131,13 +189,17 @@ export default function ProjectModal({
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
+            {/* The CRM's own picker, not the browser's. Chrome's box
+                follows the machine's locale and reads dd-----yyyy here,
+                while every other date in the app is picked the same way.
+                One habit, one look. */}
             <div>
               <label className={label}>Start</label>
-              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={input} />
+              <DateField value={start} onChange={setStart} placeholder="Not set" />
             </div>
             <div>
               <label className={label}>Due</label>
-              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={input} />
+              <DateField value={due} onChange={setDue} placeholder="Not set" />
             </div>
           </div>
 

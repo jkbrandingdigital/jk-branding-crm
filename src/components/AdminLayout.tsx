@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, CalendarClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Briefcase as BriefcaseIcon, type LucideIcon,
+  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -14,6 +14,16 @@ import { getCurrentUser, getUserProfile } from '../lib/auth'
 type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
 type NavGroup = { key: string; label: string; icon: LucideIcon; items: NavItem[] }
 
+/*
+  One colour for every department icon.
+
+  A colour each was tried and it read as decoration: nine hues down one
+  column, none of them meaning anything, so the eye had nothing to rest
+  on. One amber across all of them keeps the icons warm and visible and
+  leaves orange free to mean the one thing it should — you are here.
+*/
+const NAV_TINT = '#f97316'
+
 // Departments grow here: add items to a group, add the route in App.tsx, set ready: true
 //
 // Every ready item needs a `perm`. Without one it would show to every sub
@@ -22,7 +32,7 @@ const GROUPS: NavGroup[] = [
   {
     key: 'sales',
     label: 'Sales Department',
-    icon: Briefcase,
+    icon: Megaphone,
     items: [
       { label: 'Leads', path: '/admin/leads', icon: Filter, ready: true, perm: 'mod_leads' },
       { label: 'Lead Assignment', path: '/admin/lead-assignment', icon: Shuffle, ready: true, perm: 'mod_lead_assignment' },
@@ -46,7 +56,7 @@ const GROUPS: NavGroup[] = [
   {
     key: 'productivity',
     label: 'Productivity',
-    icon: CalendarClock,
+    icon: Timer,
     items: [
       { label: 'Tasks', path: '/admin/tasks', icon: ListTodo, ready: true, perm: 'mod_tasks' },
       { label: 'Task Settings', path: '/admin/tasks/settings', icon: Settings, ready: true, perm: 'task_settings' },
@@ -58,11 +68,14 @@ const GROUPS: NavGroup[] = [
   {
     key: 'business',
     label: 'Business',
-    icon: BriefcaseIcon,
+    icon: Briefcase,
     items: [
       { label: 'Create Quotation', path: '/admin/quotations/new', icon: Plus, ready: true, perm: 'quote_create' },
       { label: 'All Quotations', path: '/admin/quotations', icon: FileText, ready: true, perm: 'mod_quotations' },
       { label: 'Customers', path: '/admin/customers', icon: Users, ready: true, perm: 'mod_customers' },
+      // A project is what a client bought, not a thing the design team
+      // owns. It sits beside the customer and the quotation it came from.
+      { label: 'Projects', path: '/admin/projects', icon: FolderKanban, ready: true, perm: 'mod_projects' },
       { label: 'Quotation Settings', path: '/admin/quotations/settings', icon: Settings, ready: true, perm: 'quote_settings' },
     ],
   },
@@ -73,7 +86,6 @@ const GROUPS: NavGroup[] = [
     label: 'Designing Department',
     icon: Palette,
     items: [
-      { label: 'Projects', path: '/admin/projects', icon: FolderKanban, ready: true, perm: 'mod_projects' },
       { label: 'Team activity', path: '/admin/activity', icon: Activity, ready: true, perm: 'timer_view_all' },
       { label: 'Design performance', path: '/admin/design-performance', icon: TrendingUp, ready: true, perm: 'design_perf' },
       { label: 'Work Types', path: '/admin/work-types', icon: Timer, ready: true, perm: 'work_types_edit' },
@@ -111,6 +123,25 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const activeGroup = GROUPS.find((g) => g.items.some((i) => isActive(i.path)))?.key ?? null
   const [open, setOpen] = useState<string | null>(activeGroup)
 
+  /*
+    Narrowed sidebar.
+
+    Most of the day a person is reading a board, not the menu, and 256px
+    of department names is 256px the board does not get. Narrowed, the
+    menu keeps only its icons; pressing one opens the sidebar again on
+    that department, so nothing is reached by memory alone.
+
+    The choice is remembered per browser — somebody who works narrow
+    should not have to say so every morning.
+  */
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('jk_sidebar_collapsed') === '1' } catch { return false }
+  })
+
+  useEffect(() => {
+    try { localStorage.setItem('jk_sidebar_collapsed', collapsed ? '1' : '0') } catch { /* private window */ }
+  }, [collapsed])
+
   useEffect(() => {
     ;(async () => {
       try {
@@ -144,14 +175,49 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         .filter((g) => g.items.length > 0 || isSuper)
     : []
 
-  const sidebar = (
+  const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
-      <div className="flex-1 space-y-1 overflow-y-auto px-3 py-5 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
+      {/* Narrow or wide. Only on the desktop rail — the mobile drawer is
+          already a thing you open and close. */}
+      {/* The same button in both states, in the same place. A pair of
+          arrows that flip direction asks people to read them; a menu
+          icon is one thing everybody already knows, and leaving it put
+          means the way back is where the way out was. */}
+      <div className={`hidden pt-3 lg:flex ${narrow ? 'justify-center px-2' : 'justify-end px-3'}`}>
+        <button
+          onClick={() => setCollapsed(!narrow)}
+          title={narrow ? 'Open the menu' : 'Narrow the menu'}
+          aria-label={narrow ? 'Open the menu' : 'Narrow the menu'}
+          aria-expanded={!narrow}
+          className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-[#1a1a1a] hover:text-white"
+        >
+          <Menu size={20} />
+        </button>
+      </div>
+
+      <div
+        className={`flex-1 space-y-1 overflow-y-auto py-3 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin] ${
+          narrow ? 'px-2' : 'px-3'
+        }`}
+      >
         {/* Dashboard — company-wide numbers, so super admin only */}
         {isSuper && (
-          <Link to="/admin" className={linkCls(pathname === '/admin')}>
-            <LayoutDashboard size={18} />
-            Dashboard
+          <Link
+            to="/admin"
+            title={narrow ? 'Dashboard' : undefined}
+            className={`${linkCls(pathname === '/admin')} ${narrow ? 'justify-center px-0' : ''}`}
+          >
+            <span
+              className={`grid shrink-0 place-items-center rounded-lg ${narrow ? 'h-9 w-9' : 'h-8 w-8'}`}
+              style={
+                pathname === '/admin'
+                  ? { background: 'rgba(249,115,22,0.15)', color: '#fb923c' }
+                  : { background: `${NAV_TINT}1f`, color: NAV_TINT }
+              }
+            >
+              <LayoutDashboard size={narrow ? 20 : 18} strokeWidth={2} />
+            </span>
+            {!narrow && 'Dashboard'}
           </Link>
         )}
 
@@ -164,23 +230,51 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           return (
             <div key={g.key}>
               <button
-                onClick={() => !soon && setOpen(isOpen ? null : g.key)}
+                onClick={() => {
+                  if (soon) return
+                  // Narrow: the icon is the way back. Opening the menu on
+                  // the department you pressed beats opening it on
+                  // whatever happened to be open last.
+                  if (narrow) { setCollapsed(false); setOpen(g.key); return }
+                  setOpen(isOpen ? null : g.key)
+                }}
                 disabled={soon}
-                aria-expanded={isOpen}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                aria-expanded={narrow ? undefined : isOpen}
+                title={narrow ? g.label : undefined}
+                className={`flex w-full items-center rounded-lg py-2 text-left text-sm transition-colors ${
+                  narrow ? 'justify-center px-0' : 'gap-3 px-3'
+                } ${
                   soon ? 'cursor-not-allowed text-gray-600' : hasActive ? 'text-white' : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
                 }`}
               >
-                <GIcon size={18} className={hasActive ? 'text-orange-400' : ''} />
-                <span className="flex-1">{g.label}</span>
-                {soon ? (
-                  <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
-                ) : (
-                  <ChevronDown size={16} className={`text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                {/* The icon sits in its own tinted square. On its own a
+                    line icon against a dark panel is thin and easy to
+                    miss; the square gives it a body, and the department's
+                    colour gives it a name you can aim at. */}
+                <span
+                  className={`grid shrink-0 place-items-center rounded-lg transition-colors ${
+                    narrow ? 'h-9 w-9' : 'h-8 w-8'
+                  }`}
+                  style={{
+                    background: hasActive ? 'rgba(249,115,22,0.15)' : `${NAV_TINT}1f`,
+                    color: hasActive ? '#fb923c' : soon ? '#4b5563' : NAV_TINT,
+                  }}
+                >
+                  <GIcon size={narrow ? 20 : 18} strokeWidth={2} />
+                </span>
+                {!narrow && (
+                  <>
+                    <span className="flex-1">{g.label}</span>
+                    {soon ? (
+                      <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
+                    ) : (
+                      <ChevronDown size={16} className={`text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                    )}
+                  </>
                 )}
               </button>
 
-              {isOpen && !soon && (
+              {isOpen && !soon && !narrow && (
                 <ul className="mb-1 ml-5 mt-0.5 space-y-0.5 border-l border-[#232323] pl-2">
                   {g.items.map((item) => {
                     const Icon = item.icon
@@ -211,10 +305,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         })}
       </div>
 
-      <div className="border-t border-[#222] px-5 py-4">
-        <p className="truncate text-sm font-medium">{userName || (isSuper ? 'Super Admin' : 'Sub Admin')}</p>
-        <p className="text-xs text-orange-400">{isSuper ? 'Super Admin' : 'Sub Admin'}</p>
-      </div>
+      {narrow ? (
+        <div className="border-t border-[#222] px-2 py-3" title={userName || undefined}>
+          <p className="truncate text-center text-xs font-medium text-orange-400">
+            {(userName || 'Admin').trim().slice(0, 2).toUpperCase()}
+          </p>
+        </div>
+      ) : (
+        <div className="border-t border-[#222] px-5 py-4">
+          <p className="truncate text-sm font-medium">{userName || (isSuper ? 'Super Admin' : 'Sub Admin')}</p>
+          <p className="text-xs text-orange-400">{isSuper ? 'Super Admin' : 'Sub Admin'}</p>
+        </div>
+      )}
     </nav>
   )
 
@@ -225,8 +327,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
       <div className="flex">
         {/* Desktop sidebar */}
-        <aside className="hidden w-64 shrink-0 border-r border-[#1f1f1f] bg-[#121212] lg:block">
-          <div className="sticky top-0 h-screen">{sidebar}</div>
+        <aside
+          className={`hidden shrink-0 border-r border-[#1f1f1f] bg-[#121212] transition-[width] duration-200 lg:block ${
+            collapsed ? 'w-16' : 'w-64'
+          }`}
+        >
+          <div className="sticky top-0 h-screen">{sidebarFor(collapsed)}</div>
         </aside>
 
         {/* Mobile drawer */}
@@ -239,7 +345,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   <X size={20} />
                 </button>
               </div>
-              <div className="h-[calc(100%-52px)]">{sidebar}</div>
+              {/* The drawer is already something you open and close, so it
+                  is never narrowed. */}
+              <div className="h-[calc(100%-52px)]">{sidebarFor(false)}</div>
             </aside>
           </div>
         )}
