@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, type LucideIcon } from 'lucide-react'
+import { Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, QrCode, CalendarCheck, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
+import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 import { istDate } from '../lib/format'
 
 export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
-type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'customers' | 'projects' | 'greetings'
+type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'customers' | 'projects' | 'greetings' | 'scan' | 'attendance'
 const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   reminders: '/sales/reminders',
   tasks: '/sales/tasks',
@@ -21,6 +22,10 @@ const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   notes: '/sales/notes',
   quotations: '/sales/quotations',
   'quote-new': '/sales/quotations/new',
+  // /scan has no layout of its own: it is a thing you do at a gate in ten
+  // seconds, not a page you browse.
+  scan: '/scan',
+  attendance: '/sales/attendance',
 }
 
 type NavItem = { label: string; hint?: string; page?: SalesNav; icon: LucideIcon; perm?: string }
@@ -66,7 +71,16 @@ const NAV: { title: string; items: NavItem[] }[] = [
     ],
   },
   { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp }] },
-  { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
+  {
+    title: 'Me',
+    items: [
+      // No perm: your own attendance is not a privilege, it is what your
+      // pay is worked out from.
+      { label: 'Scan attendance', page: 'scan', icon: QrCode },
+      { label: 'My attendance', page: 'attendance', icon: CalendarCheck },
+      { label: 'Leave', icon: CalendarOff },
+    ],
+  },
 ]
 
 export default function SalesLayout({ active, children }: { active: SalesNav; children: ReactNode }) {
@@ -77,6 +91,7 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
   const [name, setName] = useState('')
   const [branch, setBranch] = useState('')
   const [done, setDone] = useState<{ evolution: boolean; report: boolean }>({ evolution: false, report: false })
+  const [collapsed, setCollapsed] = useCollapsedSidebar()
   const [shut, setShut] = useState<string[]>(FOLDABLE)
 
   const loadStatus = useCallback(async () => {
@@ -128,15 +143,21 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, ready])
 
-  const sidebar = (
+  const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
-      <div className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
+      <SidebarToggle narrow={narrow} onToggle={() => setCollapsed(!narrow)} />
+      <div className={`flex-1 overflow-y-auto py-3 ${narrow ? 'space-y-3 px-2' : 'space-y-6 px-3'}`}>
         {sections.map((section) => {
           const foldable = FOLDABLE.includes(section.title)
           const openSection = !foldable || !shut.includes(section.title)
           return (
           <div key={section.title}>
-            {foldable ? (
+            {/* Narrowed there is no room for a heading, and a folded
+                section would hide its icons with nothing left to say so.
+                A rule between the groups carries what it can. */}
+            {narrow ? (
+              <div className="mb-2 border-t border-[#222] first:border-0" />
+            ) : foldable ? (
               <button
                 onClick={() =>
                   setShut((list) =>
@@ -152,17 +173,26 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
             ) : (
               <p className="mb-2 px-3 text-xs text-gray-500">{section.title}</p>
             )}
-            <ul className={`space-y-0.5 ${openSection ? '' : 'hidden'}`}>
+            <ul className={`space-y-0.5 ${openSection || narrow ? '' : 'hidden'}`}>
               {section.items.map((item) => {
                 const Icon = item.icon
-                const base = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors'
+                const base = `flex items-center rounded-lg py-2 text-sm transition-colors ${
+                  narrow ? 'justify-center px-0' : 'gap-3 px-3'
+                }`
                 if (!item.page) {
                   return (
                     <li key={item.label}>
-                      <span className={`${base} cursor-not-allowed text-gray-600`}>
-                        <Icon size={17} />
-                        <span className="flex-1">{item.label}</span>
-                        <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
+                      <span
+                        className={`${base} cursor-not-allowed text-gray-600`}
+                        title={narrow ? `${item.label} — soon` : undefined}
+                      >
+                        <NavIcon icon={Icon} narrow={narrow} muted />
+                        {!narrow && (
+                          <>
+                            <span className="flex-1">{item.label}</span>
+                            <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
+                          </>
+                        )}
                       </span>
                     </li>
                   )
@@ -173,18 +203,34 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
                   <li key={item.label}>
                     <Link
                       to={OWN_ROUTE[item.page] ?? `/sales?page=${item.page}`}
+                      title={narrow ? item.label : undefined}
                       className={`${base} focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                         isActive
                           ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]'
                           : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
                       }`}
                     >
-                      <Icon size={17} />
-                      <span className="flex-1">
-                        {item.label}
-                        {item.hint && <span className="block text-[11px] font-normal text-gray-500">{item.hint}</span>}
+                      <span className="relative">
+                        <NavIcon icon={Icon} narrow={narrow} active={isActive} />
+                        {/* Narrowed, the tick has nowhere to sit at the end
+                            of a row, so it rides the icon instead. Today's
+                            report being in is the one thing a sales person
+                            checks this menu for. */}
+                        {narrow && isDone && (
+                          <span className="absolute -right-0.5 -top-0.5 grid h-3.5 w-3.5 place-items-center rounded-full bg-[#121212]">
+                            <CheckCircle2 size={12} className="text-green-500" aria-label="Submitted today" />
+                          </span>
+                        )}
                       </span>
-                      {isDone && <CheckCircle2 size={16} className="text-green-500" aria-label="Submitted today" />}
+                      {!narrow && (
+                        <>
+                          <span className="flex-1">
+                            {item.label}
+                            {item.hint && <span className="block text-[11px] font-normal text-gray-500">{item.hint}</span>}
+                          </span>
+                          {isDone && <CheckCircle2 size={16} className="text-green-500" aria-label="Submitted today" />}
+                        </>
+                      )}
                     </Link>
                   </li>
                 )
@@ -195,10 +241,18 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
         })}
       </div>
 
-      <div className="border-t border-[#222] px-5 py-4">
-        <p className="truncate text-sm font-medium">{name || 'Sales'}</p>
-        <p className="text-xs text-orange-400">Sales{branch && ` · ${branch}`}</p>
-      </div>
+      {narrow ? (
+        <div className="border-t border-[#222] px-2 py-3" title={name || 'Sales'}>
+          <p className="truncate text-center text-xs font-medium text-orange-400">
+            {(name || 'Sales').trim().slice(0, 2).toUpperCase()}
+          </p>
+        </div>
+      ) : (
+        <div className="border-t border-[#222] px-5 py-4">
+          <p className="truncate text-sm font-medium">{name || 'Sales'}</p>
+          <p className="text-xs text-orange-400">Sales{branch && ` · ${branch}`}</p>
+        </div>
+      )}
     </nav>
   )
 
@@ -207,8 +261,12 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
       <Header />
       <WorkTimerBar />
       <div className="flex">
-        <aside className="hidden w-60 shrink-0 border-r border-[#1f1f1f] bg-[#121212] lg:block">
-          <div className="sticky top-0 h-screen">{sidebar}</div>
+        <aside
+          className={`hidden shrink-0 border-r border-[#1f1f1f] bg-[#121212] transition-[width] duration-200 lg:block ${
+            collapsed ? SIDEBAR_W.narrow : SIDEBAR_W.wide
+          }`}
+        >
+          <div className="sticky top-0 h-screen">{sidebarFor(collapsed)}</div>
         </aside>
 
         {open && (
@@ -220,7 +278,9 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
                   <X size={20} />
                 </button>
               </div>
-              <div className="h-[calc(100%-52px)]">{sidebar}</div>
+              {/* The drawer is already something you open and close, so
+                  it is never narrowed. */}
+              <div className="h-[calc(100%-52px)]">{sidebarFor(false)}</div>
             </aside>
           </div>
         )}

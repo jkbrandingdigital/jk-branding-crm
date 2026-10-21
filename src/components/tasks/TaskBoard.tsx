@@ -125,6 +125,40 @@ export default function TaskBoard() {
   const [openTab, setOpenTab] = useState<'details' | 'comments' | 'files'>('details')
   const [dragId, setDragId] = useState<string | null>(null)
   const [timeOf, setTimeOf] = useState<Record<string, TimeStatus>>({})
+
+  /*
+    Who has a timer running, by task.
+
+    A coordinator looking at the board wants one thing before asking
+    anybody anything: is this being worked on right now, and by whom.
+    Without it the only way to know is to open the task or go to Team
+    activity, and nobody does that for twenty cards.
+
+    `team_activity()` already answers it and already decides who may
+    ask: a super admin, or anybody with `timer_view_all` switched on.
+    A designer without it gets an empty list and sees no badges —
+    their own running task is marked by the timer button anyway.
+  */
+  const [liveOn, setLiveOn] = useState<Record<string, string>>({})
+
+  const loadLive = useCallback(async () => {
+    const { data } = await supabase.rpc('team_activity')
+    const next: Record<string, string> = {}
+    for (const r of (data ?? []) as { task_id: string | null; full_name: string | null }[]) {
+      if (!r.task_id) continue
+      next[r.task_id] = next[r.task_id] ? `${next[r.task_id]}, ${r.full_name ?? '?'}` : r.full_name ?? '?'
+    }
+    setLiveOn(next)
+  }, [])
+
+  useEffect(() => {
+    void loadLive()
+    // Somebody starting or stopping elsewhere should show up here
+    // without a reload, but a board is read, not watched — a minute is
+    // soon enough and costs one small query.
+    const t = setInterval(loadLive, 60000)
+    return () => clearInterval(t)
+  }, [loadLive])
   const [bumping, setBumping] = useState('')
   const { dark } = useChartTheme()   // the colours below have to follow the Light/Dark switch
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'stage' | 'assign' } | null>(null)
@@ -428,6 +462,19 @@ export default function TaskBoard() {
           {label && <span className="rounded bg-[#232323] px-1.5 py-0.5 text-[11px] text-gray-300">{label.name}</span>}
           {late && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[11px] text-red-400">Overdue</span>}
 
+          {/* Somebody's clock is running on this one, right now. The
+              name is the point: "being worked on" without saying by
+              whom still leaves you asking. */}
+          {liveOn[t.id] && (
+            <span
+              className="inline-flex items-center gap-1 rounded bg-green-500/15 px-1.5 py-0.5 text-[11px] font-medium text-green-400"
+              title={`${liveOn[t.id]} is working on this now`}
+            >
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" aria-hidden />
+              Active · {liveOn[t.id]}
+            </span>
+          )}
+
           {/* A job that has come back. Set from the task itself, so nobody has
               to remember to put a label on it. */}
           {ts?.in_changes && (
@@ -459,7 +506,9 @@ export default function TaskBoard() {
               on your own open ones. Clicking it must not open the card. */}
           {currentAssignees(t).includes(me) && !isClosed(t) && (
             <span className="ml-auto" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-              <TaskTimerButton taskId={t.id} />
+              {/* Starting or stopping your own timer redraws the badge
+                  at once, rather than waiting for the next minute. */}
+              <TaskTimerButton taskId={t.id} onChanged={loadLive} />
             </span>
           )}
         </div>

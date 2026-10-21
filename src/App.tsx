@@ -77,6 +77,15 @@ import ManagerQuotationView from './pages/manager/QuotationView'
 import SalesQuotations from './pages/sales/Quotations'
 import SalesQuotationEdit from './pages/sales/QuotationEdit'
 import SalesQuotationView from './pages/sales/QuotationView'
+// Attendance: one scan page for everybody, and each role's own register.
+import Scan from './pages/Scan'
+import AdminScanSetup from './pages/admin/ScanSetup'
+import HrScanSetup from './pages/hr/ScanSetup'
+import AdminMyAttendance from './pages/admin/MyAttendance'
+import HrAttendance from './pages/hr/Attendance'
+import ManagerAttendance from './pages/manager/Attendance'
+import SalesAttendance from './pages/sales/Attendance'
+import DesignAttendance from './pages/design/Attendance'
 
 // Where a sub admin lands, in order. The first one they are allowed to
 // open becomes their home page.
@@ -151,6 +160,12 @@ function AppRoutes() {
           different layout. */}
       <GreetingsPopup />
     <Routes>
+      {/* Everybody scans, whatever their role, and this page has no
+          sidebar — it is a thing you do at a gate in ten seconds. Above
+          the role blocks because each of those ends in a catch-all
+          (/hr/*, /admin/*) and the first match wins. */}
+      <Route path="/scan" element={<Scan />} />
+
       {adminArea && (
         <>
           <Route path="/admin/leads" element={<Guard ok={may('mod_leads')}><AdminLeads /></Guard>} />
@@ -159,6 +174,9 @@ function AppRoutes() {
           <Route path="/admin/reports" element={<Guard ok={may('mod_reports')}><AdminReports /></Guard>} />
           <Route path="/admin/evolution" element={<Guard ok={may('mod_evolution')}><AdminEvolution /></Guard>} />
           <Route path="/admin/employees" element={<Guard ok={may('mod_employees')}><AdminEmployees /></Guard>} />
+          <Route path="/admin/scan-setup" element={<Guard ok={may('scan_setup')}><AdminScanSetup /></Guard>} />
+          {/* Their own days — open to anyone who reached the admin area. */}
+          <Route path="/admin/my-attendance" element={<AdminMyAttendance />} />
           <Route path="/admin/questions" element={<Guard ok={may('mod_questions')}><AdminEvolutionQuestions /></Guard>} />
           <Route path="/admin/employee/:id" element={<Guard ok={may('mod_performance')}><AdminEmployeeReport /></Guard>} />
           <Route path="/admin/lead-assignment" element={<Guard ok={may('mod_lead_assignment')}><AdminLeadAssignment /></Guard>} />
@@ -194,6 +212,7 @@ function AppRoutes() {
           <Route path="/manager/targets" element={<ManagerTargets />} />
           <Route path="/manager/reports" element={<ManagerReports />} />
           <Route path="/manager/employee/:id" element={<ManagerEmployeeReport />} />
+          <Route path="/manager/my-attendance" element={<ManagerAttendance />} />
           <Route path="/manager/reminders" element={<ManagerReminders />} />
           <Route path="/manager/tasks" element={<ManagerTasks />} />
           <Route path="/manager/notes" element={<ManagerNotes />} />
@@ -211,6 +230,7 @@ function AppRoutes() {
       )}
       {role === 'sales' && (
         <>
+          <Route path="/sales/attendance" element={<SalesAttendance />} />
           <Route path="/sales/reminders" element={<SalesReminders />} />
           <Route path="/sales/tasks" element={<SalesTasks />} />
           <Route path="/sales/notes" element={<SalesNotes />} />
@@ -229,6 +249,8 @@ function AppRoutes() {
         <>
           <Route path="/hr/leads" element={<HrLeads />} />
           <Route path="/hr/employees" element={<HrEmployees />} />
+          <Route path="/hr/scan-setup" element={<HrScanSetup />} />
+          <Route path="/hr/my-attendance" element={<HrAttendance />} />
           <Route path="/hr/reminders" element={<HrReminders />} />
           <Route path="/hr/tasks" element={<HrTasks />} />
           <Route path="/hr/notes" element={<HrNotes />} />
@@ -239,6 +261,7 @@ function AppRoutes() {
       )}
       {role === 'design_team' && (
         <>
+          <Route path="/design/attendance" element={<DesignAttendance />} />
           <Route path="/design/reminders" element={<DesignReminders />} />
           <Route path="/design/tasks" element={<DesignTasks />} />
           <Route path="/design/notes" element={<DesignNotes />} />

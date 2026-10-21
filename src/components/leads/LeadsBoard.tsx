@@ -134,6 +134,20 @@ const nextDay = (d: string) => {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LeadQuery = any
 
+// What lead_lookup() gives back about a lead that is not yours: enough
+// to know it is taken and who to ask, and nothing you could work with.
+type LeadElsewhere = {
+  lead_no: number
+  name: string | null
+  company: string | null
+  phone_tail: string | null
+  stage_name: string | null
+  stage_color: string | null
+  owner_name: string | null
+  branch_name: string | null
+  created_at: string
+}
+
 // Narrows a leads query exactly the way the Filter panel reads, so the
 // board, the list, the counts, the export and the bulk delete all agree.
 function applyLeadFilters(query: LeadQuery, f: Filters, text: string, openStageIds: string[]): LeadQuery {
@@ -651,6 +665,48 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
     for (const l of rows) seen.set(l.id, l)
     return [...seen.values()].slice(0, 3)
   }, [q, cols, rows])
+
+  /*
+    Leads the search found that are NOT this person's.
+
+    The board reads `leads` directly, so RLS decides what comes back: a
+    sales person searching a number that belongs to a colleague gets
+    nothing, and the screen looks like the lead does not exist. Two
+    people then ring the same party, who concludes we do not talk to
+    each other.
+
+    `lead_lookup()` answers the one question worth answering there —
+    taken, and by whom. It runs outside RLS and returns only that: no
+    lead id, no requirement, no amount, and only the last four digits
+    of the phone. Enough to stop a second call, not enough to work the
+    lead.
+
+    Nobody with `lead_view_all` ever sees the strip. They already get
+    the full card, which names the owner — the strip would repeat it in
+    smaller type and make a search answer itself twice.
+  */
+  const [elsewhere, setElsewhere] = useState<LeadElsewhere[]>([])
+  const seesEveryLead = can('lead_view_all')
+
+  useEffect(() => {
+    const term = q.trim()
+    // Not even the query runs for them: there is nothing it could add.
+    if (seesEveryLead || term.length < 3) { setElsewhere([]); return }
+
+    let alive = true
+    const t = setTimeout(async () => {
+      const { data } = await supabase.rpc('lead_lookup', { p_query: term })
+      if (alive) setElsewhere((data ?? []) as LeadElsewhere[])
+    }, 350)
+
+    return () => { alive = false; clearTimeout(t) }
+  }, [q, seesEveryLead])
+
+  // Anything already on screen is not "elsewhere"
+  const elsewhereOnly = useMemo(() => {
+    const mine = new Set(found.map((l) => l.lead_no))
+    return elsewhere.filter((l) => !mine.has(l.lead_no))
+  }, [elsewhere, found])
 
   const owners = useMemo(() => [...staff].sort((a, b) => a.full_name.localeCompare(b.full_name)), [staff])
   const shown = summary.shown
@@ -1358,6 +1414,42 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
             />
           ))}
         </div>
+      )}
+
+      {/* Already with somebody else. Shown whether or not the search
+          also turned up leads of your own — one of each is exactly the
+          case worth catching. */}
+      {elsewhereOnly.length > 0 && (
+        <section className="mt-4 overflow-hidden rounded-xl border border-amber-700/40 bg-amber-950/20">
+          <p className="border-b border-amber-700/30 px-4 py-2.5 text-sm text-amber-300">
+            {elsewhereOnly.length === 1 ? 'This one is already with' : `${elsewhereOnly.length} of these are already with`}{' '}
+            someone else — check before you call.
+          </p>
+          <ul className="divide-y divide-amber-700/20">
+            {elsewhereOnly.map((l) => (
+              <li key={l.lead_no} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm">
+                <span className="font-mono text-xs text-gray-500">#{l.lead_no}</span>
+                <span className="min-w-0 flex-1 truncate text-gray-200">
+                  {l.name || '—'}
+                  {l.company && <span className="text-gray-500"> · {l.company}</span>}
+                </span>
+                {l.phone_tail && <span className="shrink-0 tabular-nums text-xs text-gray-500">{l.phone_tail}</span>}
+                {l.stage_name && (
+                  <span
+                    className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
+                    style={{ background: l.stage_color ?? '#4b5563' }}
+                  >
+                    {l.stage_name}
+                  </span>
+                )}
+                <span className="shrink-0 text-xs text-amber-300">
+                  {l.owner_name}
+                  {l.branch_name && <span className="text-amber-300/60"> · {l.branch_name}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {/* Board */}

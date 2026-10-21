@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Menu, X, type LucideIcon } from 'lucide-react'
+import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Menu, X, QrCode, CalendarCheck, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
+import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 type NavItem = { label: string; path?: string; icon: LucideIcon; perm?: string }
@@ -27,13 +28,24 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: 'Printing Media', path: '/design/print', icon: Printer, perm: 'mod_print_jobs' },
     ],
   },
-  { title: 'Me', items: [{ label: 'Leave', icon: CalendarOff }] },
+  {
+    title: 'Me',
+    items: [
+      // Your own attendance carries no permission. It is what your pay is
+      // worked out from; somebody who cannot check it has to take HR's
+      // word for it.
+      { label: 'Scan attendance', path: '/scan', icon: QrCode },
+      { label: 'My attendance', path: '/design/attendance', icon: CalendarCheck },
+      { label: 'Leave', icon: CalendarOff },
+    ],
+  },
 ]
 
 export default function DesignLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const { can, ready } = usePermissions()
   const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useCollapsedSidebar()
   const [name, setName] = useState('')
   const [designation, setDesignation] = useState('')
 
@@ -60,23 +72,38 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
 
   const isActive = (path: string) => (path === '/design' ? pathname === '/design' : pathname.startsWith(path))
 
-  const sidebar = (
+  const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
-      <div className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
+      <SidebarToggle narrow={narrow} onToggle={() => setCollapsed(!narrow)} />
+
+      <div className={`flex-1 overflow-y-auto py-3 ${narrow ? 'space-y-3 px-2' : 'space-y-6 px-3'}`}>
         {sections.map((section) => (
           <div key={section.title}>
-            <p className="mb-2 px-3 text-xs text-gray-500">{section.title}</p>
+            {/* Narrowed, the headings would be three letters of nothing.
+                A line between the groups says the same thing in the
+                space there is. */}
+            {narrow ? (
+              <div className="mb-2 border-t border-[#222] first:border-0" />
+            ) : (
+              <p className="mb-2 px-3 text-xs text-gray-500">{section.title}</p>
+            )}
             <ul className="space-y-0.5">
               {section.items.map((item) => {
                 const Icon = item.icon
-                const base = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors'
+                const base = `flex items-center rounded-lg py-2 text-sm transition-colors ${
+                  narrow ? 'justify-center px-0' : 'gap-3 px-3'
+                }`
                 if (!item.path) {
                   return (
                     <li key={item.label}>
-                      <span className={`${base} cursor-not-allowed text-gray-600`}>
-                        <Icon size={17} />
-                        <span className="flex-1">{item.label}</span>
-                        <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
+                      <span className={`${base} cursor-not-allowed text-gray-600`} title={narrow ? `${item.label} — soon` : undefined}>
+                        <NavIcon icon={Icon} narrow={narrow} muted />
+                        {!narrow && (
+                          <>
+                            <span className="flex-1">{item.label}</span>
+                            <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
+                          </>
+                        )}
                       </span>
                     </li>
                   )
@@ -85,14 +112,15 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
                   <li key={item.path}>
                     <Link
                       to={item.path}
+                      title={narrow ? item.label : undefined}
                       className={`${base} focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                         isActive(item.path)
                           ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]'
                           : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
                       }`}
                     >
-                      <Icon size={17} />
-                      {item.label}
+                      <NavIcon icon={Icon} narrow={narrow} active={isActive(item.path)} />
+                      {!narrow && item.label}
                     </Link>
                   </li>
                 )
@@ -102,10 +130,18 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
         ))}
       </div>
 
-      <div className="border-t border-[#222] px-5 py-4">
-        <p className="truncate text-sm font-medium">{name || 'Design Team'}</p>
-        <p className="text-xs text-orange-400">Design Team{designation && ` · ${designation}`}</p>
-      </div>
+      {narrow ? (
+        <div className="border-t border-[#222] px-2 py-3" title={name || 'Design Team'}>
+          <p className="truncate text-center text-xs font-medium text-orange-400">
+            {(name || 'Design Team').trim().slice(0, 2).toUpperCase()}
+          </p>
+        </div>
+      ) : (
+        <div className="border-t border-[#222] px-5 py-4">
+          <p className="truncate text-sm font-medium">{name || 'Design Team'}</p>
+          <p className="text-xs text-orange-400">Design Team{designation && ` · ${designation}`}</p>
+        </div>
+      )}
     </nav>
   )
 
@@ -114,8 +150,12 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
       <Header />
       <WorkTimerBar />
       <div className="flex">
-        <aside className="hidden w-60 shrink-0 border-r border-[#1f1f1f] bg-[#121212] lg:block">
-          <div className="sticky top-0 h-screen">{sidebar}</div>
+        <aside
+          className={`hidden shrink-0 border-r border-[#1f1f1f] bg-[#121212] transition-[width] duration-200 lg:block ${
+            collapsed ? SIDEBAR_W.narrow : SIDEBAR_W.wide
+          }`}
+        >
+          <div className="sticky top-0 h-screen">{sidebarFor(collapsed)}</div>
         </aside>
 
         {open && (
@@ -127,7 +167,9 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
                   <X size={20} />
                 </button>
               </div>
-              <div className="h-[calc(100%-52px)]">{sidebar}</div>
+              {/* The drawer is already something you open and close, so
+                  it is never narrowed. */}
+              <div className="h-[calc(100%-52px)]">{sidebarFor(false)}</div>
             </aside>
           </div>
         )}

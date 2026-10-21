@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  Activity, Cake, FolderKanban, Users2, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, type LucideIcon,
+  Activity, Cake, FolderKanban, Users2, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, QrCode, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
+import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
@@ -52,12 +53,23 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
       { label: 'Leave Requests', path: '/manager/leaves', icon: CalendarOff, ready: false },
     ],
   },
+  // Its own section, not inside Team. Team > Attendance is everybody's
+  // register; this is the manager's own days. Side by side under one
+  // heading they would read as the same thing.
+  {
+    title: 'Me',
+    items: [
+      { label: 'Scan attendance', path: '/scan', icon: QrCode, ready: true },
+      { label: 'My attendance', path: '/manager/my-attendance', icon: CalendarCheck, ready: true },
+    ],
+  },
 ]
 
 export default function ManagerLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const { can, ready: permsReady } = usePermissions()
   const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useCollapsedSidebar()
   const [shut, setShut] = useState<string[]>(FOLDABLE)
   const [name, setName] = useState('')
   const [branch, setBranch] = useState('')
@@ -100,15 +112,21 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, permsReady])
 
-  const sidebar = (
+  const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
-      <div className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
+      <SidebarToggle narrow={narrow} onToggle={() => setCollapsed(!narrow)} />
+      <div className={`flex-1 overflow-y-auto py-3 ${narrow ? 'space-y-3 px-2' : 'space-y-6 px-3'}`}>
         {sections.map((section) => {
           const foldable = FOLDABLE.includes(section.title)
           const openSection = !foldable || !shut.includes(section.title)
           return (
           <div key={section.title}>
-            {foldable ? (
+            {/* Narrowed there is no room for a heading, and a folded
+                section would hide its icons with nothing left to say so.
+                A rule between the groups carries what it can. */}
+            {narrow ? (
+              <div className="mb-2 border-t border-[#222] first:border-0" />
+            ) : foldable ? (
               <button
                 onClick={() =>
                   setShut((list) =>
@@ -124,17 +142,26 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
             ) : (
               <p className="mb-2 px-3 text-xs text-gray-500">{section.title}</p>
             )}
-            <ul className={`space-y-0.5 ${openSection ? '' : 'hidden'}`}>
+            <ul className={`space-y-0.5 ${openSection || narrow ? '' : 'hidden'}`}>
               {section.items.map((item) => {
                 const Icon = item.icon
-                const base = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors'
+                const base = `flex items-center rounded-lg py-2 text-sm transition-colors ${
+                  narrow ? 'justify-center px-0' : 'gap-3 px-3'
+                }`
                 if (!item.ready) {
                   return (
                     <li key={item.path}>
-                      <span className={`${base} cursor-not-allowed text-gray-600`}>
-                        <Icon size={17} />
-                        <span className="flex-1">{item.label}</span>
-                        <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
+                      <span
+                        className={`${base} cursor-not-allowed text-gray-600`}
+                        title={narrow ? `${item.label} — soon` : undefined}
+                      >
+                        <NavIcon icon={Icon} narrow={narrow} muted />
+                        {!narrow && (
+                          <>
+                            <span className="flex-1">{item.label}</span>
+                            <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-500">Soon</span>
+                          </>
+                        )}
                       </span>
                     </li>
                   )
@@ -143,14 +170,15 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
                   <li key={item.path}>
                     <Link
                       to={item.path}
+                      title={narrow ? item.label : undefined}
                       className={`${base} focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                         isActive(item.path)
                           ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]'
                           : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
                       }`}
                     >
-                      <Icon size={17} />
-                      {item.label}
+                      <NavIcon icon={Icon} narrow={narrow} active={isActive(item.path)} />
+                      {!narrow && item.label}
                     </Link>
                   </li>
                 )
@@ -161,10 +189,18 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
         })}
       </div>
 
-      <div className="border-t border-[#222] px-5 py-4">
-        <p className="truncate text-sm font-medium">{name || 'Branch Manager'}</p>
-        <p className="text-xs text-orange-400">Branch Manager{branch && ` · ${branch}`}</p>
-      </div>
+      {narrow ? (
+        <div className="border-t border-[#222] px-2 py-3" title={name || 'Branch Manager'}>
+          <p className="truncate text-center text-xs font-medium text-orange-400">
+            {(name || 'Branch Manager').trim().slice(0, 2).toUpperCase()}
+          </p>
+        </div>
+      ) : (
+        <div className="border-t border-[#222] px-5 py-4">
+          <p className="truncate text-sm font-medium">{name || 'Branch Manager'}</p>
+          <p className="text-xs text-orange-400">Branch Manager{branch && ` · ${branch}`}</p>
+        </div>
+      )}
     </nav>
   )
 
@@ -173,8 +209,12 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
       <Header />
       <WorkTimerBar />
       <div className="flex">
-        <aside className="hidden w-60 shrink-0 border-r border-[#1f1f1f] bg-[#121212] lg:block">
-          <div className="sticky top-0 h-screen">{sidebar}</div>
+        <aside
+          className={`hidden shrink-0 border-r border-[#1f1f1f] bg-[#121212] transition-[width] duration-200 lg:block ${
+            collapsed ? SIDEBAR_W.narrow : SIDEBAR_W.wide
+          }`}
+        >
+          <div className="sticky top-0 h-screen">{sidebarFor(collapsed)}</div>
         </aside>
 
         {open && (
@@ -186,7 +226,9 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
                   <X size={20} />
                 </button>
               </div>
-              <div className="h-[calc(100%-52px)]">{sidebar}</div>
+              {/* The drawer is already something you open and close, so
+                  it is never narrowed. */}
+              <div className="h-[calc(100%-52px)]">{sidebarFor(false)}</div>
             </aside>
           </div>
         )}

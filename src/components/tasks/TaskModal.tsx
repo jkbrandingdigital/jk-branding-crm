@@ -68,11 +68,22 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   const [error, setError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Everyone the task can be handed to
+  /*
+    Who the task can be handed to: the design team.
+
+    Design work goes to designers. A list with every sales person and
+    every HR person on it is a list you scroll past, and one stray tick
+    puts a logo on somebody who will never see the design board.
+
+    Two exceptions, and both are about not losing what is already true:
+    anyone already ticked stays on the list, so re-opening an older task
+    cannot quietly drop an assignee; and a person who has left stays
+    visible while they are still on the task.
+  */
   const options = useMemo(
     () =>
       staff
-        .filter((s) => s.is_active || to.has(s.id))
+        .filter((s) => (s.role === 'design_team' || to.has(s.id)) && (s.is_active || to.has(s.id)))
         .sort((a, b) => (a.id === me ? -1 : b.id === me ? 1 : a.full_name.localeCompare(b.full_name))),
     [staff, me, to],
   )

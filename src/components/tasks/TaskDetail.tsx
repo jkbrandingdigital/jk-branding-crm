@@ -32,6 +32,10 @@ type Part = {
   spent_secs: number
   sittings: number
   running: boolean
+  // Who actually worked it, most time first. A task can change hands
+  // half way through, and the option carries that — the points follow
+  // the clock, not the name on the task.
+  workers: string | null
 }
 type Sitting = { id: string; user_id: string; started_at: string; ended_at: string | null; end_reason: string | null; end_note: string | null }
 type Comment = { id: string; user_id: string; body: string; created_at: string }
@@ -492,10 +496,17 @@ export default function TaskDetail({
                           key={`${pt.part_kind ?? 'none'}-${pt.part_no ?? 0}`}
                           className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[#1f1f1f] px-4 py-2.5 last:border-b-0"
                         >
-                          <span className="min-w-0 flex-1 truncate text-sm text-gray-200">
-                            {pt.label}
-                            {pt.running && (
-                              <span className="ml-2 text-xs text-orange-400">running</span>
+                          <span className="min-w-0 flex-1 leading-tight">
+                            <span className="block truncate text-sm text-gray-200">
+                              {pt.label}
+                              {pt.running && (
+                                <span className="ml-2 text-xs text-orange-400">running</span>
+                              )}
+                            </span>
+                            {/* Who did it. The option's points go to this
+                                person, whoever the task is on now. */}
+                            {pt.workers && (
+                              <span className="block truncate text-[11px] text-gray-500">{pt.workers}</span>
                             )}
                           </span>
                           <span className="shrink-0 text-sm tabular-nums">

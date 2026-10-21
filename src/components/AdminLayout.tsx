@@ -4,25 +4,17 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, type LucideIcon,
+  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, QrCode, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
+import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
 type NavGroup = { key: string; label: string; icon: LucideIcon; items: NavItem[] }
 
-/*
-  One colour for every department icon.
-
-  A colour each was tried and it read as decoration: nine hues down one
-  column, none of them meaning anything, so the eye had nothing to rest
-  on. One amber across all of them keeps the icons warm and visible and
-  leaves orange free to mean the one thing it should — you are here.
-*/
-const NAV_TINT = '#f97316'
 
 // Departments grow here: add items to a group, add the route in App.tsx, set ready: true
 //
@@ -49,6 +41,10 @@ const GROUPS: NavGroup[] = [
     icon: UserCog,
     items: [
       { label: 'Employees', path: '/admin/employees', icon: Users, ready: true, perm: 'mod_employees' },
+      { label: 'Scan setup', path: '/admin/scan-setup', icon: QrCode, ready: true, perm: 'scan_setup' },
+      // These two carry no perm on purpose — see the filter below.
+      { label: 'Scan attendance', path: '/scan', icon: QrCode, ready: true },
+      { label: 'My attendance', path: '/admin/my-attendance', icon: CalendarCheck, ready: true },
       { label: 'Attendance', path: '/admin/attendance', icon: CalendarCheck, ready: false },
       { label: 'Leave Requests', path: '/admin/leaves', icon: CalendarOff, ready: false },
     ],
@@ -123,24 +119,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const activeGroup = GROUPS.find((g) => g.items.some((i) => isActive(i.path)))?.key ?? null
   const [open, setOpen] = useState<string | null>(activeGroup)
 
-  /*
-    Narrowed sidebar.
-
-    Most of the day a person is reading a board, not the menu, and 256px
-    of department names is 256px the board does not get. Narrowed, the
-    menu keeps only its icons; pressing one opens the sidebar again on
-    that department, so nothing is reached by memory alone.
-
-    The choice is remembered per browser — somebody who works narrow
-    should not have to say so every morning.
-  */
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem('jk_sidebar_collapsed') === '1' } catch { return false }
-  })
-
-  useEffect(() => {
-    try { localStorage.setItem('jk_sidebar_collapsed', collapsed ? '1' : '0') } catch { /* private window */ }
-  }, [collapsed])
+  const [collapsed, setCollapsed] = useCollapsedSidebar()
 
   useEffect(() => {
     ;(async () => {
@@ -169,9 +148,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   // What this person may see. Nothing is shown until the rights have
   // arrived, so a sub admin never catches a glimpse of someone else's
   // department. "Soon" placeholders are for the super admin only.
+  //
+  // `!i.perm || can(i.perm)`: an item with no perm is for everybody. The
+  // rule used to be `i.perm && can(i.perm)` — no perm meant hide it —
+  // which was right when every admin page belonged to a department. Your
+  // own attendance is the first one that genuinely belongs to all.
   const visible = permsReady
     ? GROUPS
-        .map((g) => ({ ...g, items: g.items.filter((i) => (i.ready ? i.perm && can(i.perm) : isSuper)) }))
+        .map((g) => ({ ...g, items: g.items.filter((i) => (i.ready ? !i.perm || can(i.perm) : isSuper)) }))
         .filter((g) => g.items.length > 0 || isSuper)
     : []
 
@@ -179,21 +163,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     <nav className="flex h-full flex-col">
       {/* Narrow or wide. Only on the desktop rail — the mobile drawer is
           already a thing you open and close. */}
-      {/* The same button in both states, in the same place. A pair of
-          arrows that flip direction asks people to read them; a menu
-          icon is one thing everybody already knows, and leaving it put
-          means the way back is where the way out was. */}
-      <div className={`hidden pt-3 lg:flex ${narrow ? 'justify-center px-2' : 'justify-end px-3'}`}>
-        <button
-          onClick={() => setCollapsed(!narrow)}
-          title={narrow ? 'Open the menu' : 'Narrow the menu'}
-          aria-label={narrow ? 'Open the menu' : 'Narrow the menu'}
-          aria-expanded={!narrow}
-          className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-[#1a1a1a] hover:text-white"
-        >
-          <Menu size={20} />
-        </button>
-      </div>
+      <SidebarToggle narrow={narrow} onToggle={() => setCollapsed(!narrow)} />
 
       <div
         className={`flex-1 space-y-1 overflow-y-auto py-3 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin] ${
@@ -207,16 +177,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             title={narrow ? 'Dashboard' : undefined}
             className={`${linkCls(pathname === '/admin')} ${narrow ? 'justify-center px-0' : ''}`}
           >
-            <span
-              className={`grid shrink-0 place-items-center rounded-lg ${narrow ? 'h-9 w-9' : 'h-8 w-8'}`}
-              style={
-                pathname === '/admin'
-                  ? { background: 'rgba(249,115,22,0.15)', color: '#fb923c' }
-                  : { background: `${NAV_TINT}1f`, color: NAV_TINT }
-              }
-            >
-              <LayoutDashboard size={narrow ? 20 : 18} strokeWidth={2} />
-            </span>
+            <NavIcon icon={LayoutDashboard} narrow={narrow} active={pathname === '/admin'} />
             {!narrow && 'Dashboard'}
           </Link>
         )}
@@ -247,21 +208,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   soon ? 'cursor-not-allowed text-gray-600' : hasActive ? 'text-white' : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
                 }`}
               >
-                {/* The icon sits in its own tinted square. On its own a
-                    line icon against a dark panel is thin and easy to
-                    miss; the square gives it a body, and the department's
-                    colour gives it a name you can aim at. */}
-                <span
-                  className={`grid shrink-0 place-items-center rounded-lg transition-colors ${
-                    narrow ? 'h-9 w-9' : 'h-8 w-8'
-                  }`}
-                  style={{
-                    background: hasActive ? 'rgba(249,115,22,0.15)' : `${NAV_TINT}1f`,
-                    color: hasActive ? '#fb923c' : soon ? '#4b5563' : NAV_TINT,
-                  }}
-                >
-                  <GIcon size={narrow ? 20 : 18} strokeWidth={2} />
-                </span>
+                <NavIcon icon={GIcon} narrow={narrow} active={hasActive} muted={soon} />
                 {!narrow && (
                   <>
                     <span className="flex-1">{g.label}</span>
@@ -329,7 +276,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         {/* Desktop sidebar */}
         <aside
           className={`hidden shrink-0 border-r border-[#1f1f1f] bg-[#121212] transition-[width] duration-200 lg:block ${
-            collapsed ? 'w-16' : 'w-64'
+            collapsed ? SIDEBAR_W.narrow : SIDEBAR_W.wide
           }`}
         >
           <div className="sticky top-0 h-screen">{sidebarFor(collapsed)}</div>
