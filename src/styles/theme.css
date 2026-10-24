@@ -562,3 +562,121 @@ html[data-theme='light'] a.bg-orange-500 { color: #ffffff; }
 [class*="scrollbar-color:"] {
   scrollbar-color: rgba(255, 94, 0, 0.45) transparent;
 }
+/* =====================================================================
+   Menu icons — "you are here", in both themes
+   ---------------------------------------------------------------------
+   NavIcon paints its square with these four names instead of fixed
+   colours, because a style attribute cannot be re-painted by this sheet
+   the way a class name can. Naming them here is what lets the open
+   page's icon be read on black AND on cream.
+
+   Dark keeps what it had: a brighter square, a paler icon.
+
+   Light cannot work that way. A pale icon on a faint orange wash is the
+   first thing to disappear on paper, so the open page is given a FILLED
+   orange square with white artwork — the strongest mark in the column,
+   and the one that still reads in the narrow rail where there is no
+   label to fall back on.
+   ===================================================================== */
+
+:root {
+  --nav-ico-bg-on: rgba(255, 94, 0, 0.30);   /* open page, square   */
+  --nav-ico-on:    #ffd9c2;                  /* open page, artwork  */
+  --nav-ico-bg:    rgba(255, 94, 0, 0.12);   /* every other square  */
+  --nav-ico:       var(--brand-orange);      /* every other artwork */
+  --nav-ico-off:   #4b5563;                  /* not yet built       */
+  --nav-ico-ring:  none;
+}
+
+html[data-theme='light'] {
+  --nav-ico-bg-on: var(--brand-orange);
+  --nav-ico-on:    #ffffff;
+  --nav-ico-bg:    rgba(255, 94, 0, 0.11);
+  --nav-ico:       #d44e00;
+  --nav-ico-off:   var(--ink-6);
+  --nav-ico-ring:  0 1px 2px rgba(120, 44, 0, 0.25),
+                   0 6px 14px -8px rgba(255, 94, 0, 0.85);
+}
+
+/* The row behind the icon.
+
+   The open row is written in the layouts as bg-orange-500/10 with
+   text-orange-400. On cream both of those are already handled further
+   up this sheet, but the row needs a little more than a wash to hold
+   the filled square without looking like it is floating on nothing. */
+html[data-theme='light'] aside a.bg-orange-500\/10,
+html[data-theme='light'] aside button.bg-orange-500\/10 {
+  background-color: #fff1e6;
+  box-shadow: inset 2px 0 0 var(--brand-orange);
+}
+
+/* Narrow rail: no label, no stripe — so the square carries it alone,
+   and the row itself stays out of the way. */
+html[data-theme='light'] aside.w-16 a.bg-orange-500\/10,
+html[data-theme='light'] aside.w-16 button.bg-orange-500\/10 {
+  background-color: transparent;
+  box-shadow: none;
+}
+/* =====================================================================
+   The words of a policy
+   ---------------------------------------------------------------------
+   Tailwind strips the browser's own styling from headings and lists, so
+   HTML written in the policy editor would come out as one flat
+   paragraph — bullets with no bullet, headings the same size as the
+   body. These few rules give it back, and only inside .policy-body, so
+   nothing else on the page is touched.
+
+   The same class is used by the editor and by the reader, which is what
+   makes "write it as you want people to read it" true.
+   ===================================================================== */
+
+.policy-body h1,
+.policy-body h2,
+.policy-body h3 {
+  margin: 1.25em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #ffffff;
+}
+.policy-body h1 { font-size: 1.25rem; }
+.policy-body h2 { font-size: 1.1rem; }
+.policy-body h3 { font-size: 1rem; }
+.policy-body h1:first-child,
+.policy-body h2:first-child,
+.policy-body h3:first-child { margin-top: 0; }
+
+html[data-theme='light'] .policy-body h1,
+html[data-theme='light'] .policy-body h2,
+html[data-theme='light'] .policy-body h3 { color: var(--ink); }
+
+.policy-body p { margin: 0 0 0.85em; }
+.policy-body p:last-child { margin-bottom: 0; }
+
+.policy-body ul,
+.policy-body ol {
+  margin: 0 0 0.85em;
+  padding-left: 1.4em;
+}
+.policy-body ul { list-style: disc; }
+.policy-body ol { list-style: decimal; }
+.policy-body li { margin: 0.25em 0; }
+
+.policy-body strong { font-weight: 600; color: #ffffff; }
+html[data-theme='light'] .policy-body strong { color: var(--ink); }
+
+.policy-body em { font-style: italic; }
+
+.policy-body a {
+  color: var(--brand-orange);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* An empty editor should say what to do, not sit there blank. */
+.policy-body[contenteditable]:empty::before {
+  content: 'Write the policy here…';
+  color: #4b5563;
+}
+html[data-theme='light'] .policy-body[contenteditable]:empty::before {
+  color: var(--ink-6);
+}

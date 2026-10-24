@@ -86,6 +86,40 @@ import HrAttendance from './pages/hr/Attendance'
 import ManagerAttendance from './pages/manager/Attendance'
 import SalesAttendance from './pages/sales/Attendance'
 import DesignAttendance from './pages/design/Attendance'
+import HrAttendanceAll from './pages/hr/AttendanceAll'
+import AdminAttendanceAll from './pages/admin/AttendanceAll'
+import HrMyLeavePage from './pages/hr/MyLeave'
+import HrLeavesPage from './pages/hr/Leaves'
+import HrSetupPage from './pages/hr/Setup'
+import HrPayrollPage from './pages/hr/Payroll'
+import AdminLeavesPage from './pages/admin/Leaves'
+import AdminPayrollPage from './pages/admin/Payroll'
+import AdminSetupPage from './pages/admin/Setup'
+import AdminAssetsPage from './pages/admin/Assets'
+import AdminEmployeePayrollPage from './pages/admin/EmployeePayroll'
+import HrEmployeePayrollPage from './pages/hr/EmployeePayroll'
+import HrAssetsPage from './pages/hr/Assets'
+import HrMyPayslips from './pages/hr/MyPayslips'
+import AdminMyPayslips from './pages/admin/MyPayslips'
+import ManagerMyPayslips from './pages/manager/MyPayslips'
+import SalesMyPayslips from './pages/sales/MyPayslips'
+import DesignMyPayslips from './pages/design/MyPayslips'
+// Company policy. Reading is open to everyone, so those five routes carry
+// no Guard; writing is gated on policy_edit, and PolicyManager also
+// checks for itself — the route decides what is reachable, the screen
+// decides what is allowed.
+import HrPolicies from './pages/hr/Policies'
+import HrPoliciesManage from './pages/hr/PoliciesManage'
+import AdminPolicies from './pages/admin/Policies'
+import AdminPoliciesManage from './pages/admin/PoliciesManage'
+import ManagerPolicies from './pages/manager/Policies'
+import SalesPolicies from './pages/sales/Policies'
+import DesignPolicies from './pages/design/Policies'
+import AdminMyLeave from './pages/admin/MyLeave'
+import ManagerMyLeave from './pages/manager/MyLeave'
+import ManagerAttendancePage from './pages/manager/Attendance'
+import SalesMyLeave from './pages/sales/MyLeave'
+import DesignMyLeave from './pages/design/MyLeave'
 
 // Where a sub admin lands, in order. The first one they are allowed to
 // open becomes their home page.
@@ -199,6 +233,16 @@ function AppRoutes() {
           <Route path="/admin/quotations/new" element={<Guard ok={may('quote_create')}><AdminQuotationEdit /></Guard>} />
           <Route path="/admin/quotations/:id/preview" element={<Guard ok={may('mod_quotations')}><AdminQuotationView /></Guard>} />
           <Route path="/admin/quotations/:id" element={<Guard ok={may('quote_edit')}><AdminQuotationEdit /></Guard>} />
+          <Route path="/admin/attendance" element={<Guard ok={may('attendance_view_all')}><AdminAttendanceAll /></Guard>} />
+          <Route path="/admin/my-leave" element={<AdminMyLeave />} />
+          <Route path="/admin/my-payslips" element={<AdminMyPayslips />} />
+          <Route path="/admin/leaves" element={<Guard ok={may('leave_approve')}><AdminLeavesPage /></Guard>} />
+          <Route path="/admin/payroll" element={<Guard ok={may('mod_payroll')}><AdminPayrollPage /></Guard>} />
+          <Route path="/admin/payroll/:id" element={<Guard ok={may('mod_payroll')}><AdminEmployeePayrollPage /></Guard>} />
+          <Route path="/admin/setup" element={<Guard ok={may('attendance_edit')}><AdminSetupPage /></Guard>} />
+          <Route path="/admin/assets" element={<Guard ok={may('mod_assets')}><AdminAssetsPage /></Guard>} />
+          <Route path="/admin/policies" element={<AdminPolicies />} />
+          <Route path="/admin/policies-manage" element={<Guard ok={may('policy_edit')}><AdminPoliciesManage /></Guard>} />
           <Route
             path="/admin/*"
             element={isSuper ? <AdminDashboard /> : subHome ? <Navigate to={subHome} replace /> : <NoAdminAccess />}
@@ -213,6 +257,10 @@ function AppRoutes() {
           <Route path="/manager/reports" element={<ManagerReports />} />
           <Route path="/manager/employee/:id" element={<ManagerEmployeeReport />} />
           <Route path="/manager/my-attendance" element={<ManagerAttendance />} />
+          <Route path="/manager/attendance" element={<ManagerAttendancePage />} />
+          <Route path="/manager/my-leave" element={<ManagerMyLeave />} />
+          <Route path="/manager/my-payslips" element={<ManagerMyPayslips />} />
+          <Route path="/manager/policies" element={<ManagerPolicies />} />
           <Route path="/manager/reminders" element={<ManagerReminders />} />
           <Route path="/manager/tasks" element={<ManagerTasks />} />
           <Route path="/manager/notes" element={<ManagerNotes />} />
@@ -242,6 +290,9 @@ function AppRoutes() {
           <Route path="/sales/quotations/new" element={<SalesQuotationEdit />} />
           <Route path="/sales/quotations/:id/preview" element={<SalesQuotationView />} />
           <Route path="/sales/quotations/:id" element={<SalesQuotationEdit />} />
+          <Route path="/sales/my-leave" element={<SalesMyLeave />} />
+          <Route path="/sales/my-payslips" element={<SalesMyPayslips />} />
+          <Route path="/sales/policies" element={<SalesPolicies />} />
           <Route path="/sales/*" element={<SalesDashboard />} />
         </>
       )}
@@ -256,6 +307,16 @@ function AppRoutes() {
           <Route path="/hr/notes" element={<HrNotes />} />
           <Route path="/hr/todos" element={<HrTodos />} />
           <Route path="/hr/design-performance" element={<HrDesignPerformance />} />
+          <Route path="/hr/attendance" element={<HrAttendanceAll />} />
+          <Route path="/hr/my-leave" element={<HrMyLeavePage />} />
+          <Route path="/hr/leaves" element={<HrLeavesPage />} />
+          <Route path="/hr/setup" element={<HrSetupPage />} />
+          <Route path="/hr/payroll" element={<HrPayrollPage />} />
+          <Route path="/hr/payroll/:id" element={<HrEmployeePayrollPage />} />
+          <Route path="/hr/assets" element={<HrAssetsPage />} />
+          <Route path="/hr/my-payslips" element={<HrMyPayslips />} />
+          <Route path="/hr/policies" element={<HrPolicies />} />
+          <Route path="/hr/policies-manage" element={<HrPoliciesManage />} />
           <Route path="/hr/*" element={<HRDashboard />} />
         </>
       )}
@@ -270,6 +331,9 @@ function AppRoutes() {
           <Route path="/design/performance" element={<DesignPerformancePage />} />
           <Route path="/design/print" element={<DesignPrintRegister />} />
           <Route path="/design/projects" element={<DesignProjects />} />
+          <Route path="/design/my-leave" element={<DesignMyLeave />} />
+          <Route path="/design/my-payslips" element={<DesignMyPayslips />} />
+          <Route path="/design/policies" element={<DesignPolicies />} />
           <Route path="/design/*" element={<DesignDashboard />} />
         </>
       )}

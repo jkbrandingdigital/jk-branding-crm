@@ -139,8 +139,16 @@ export default function AdminDashboard() {
       const [r, d, a, l] = await Promise.all([
         rq,
         dq,
-        supabase.from('attendance').select('user_id').eq('work_date', istToday()).not('check_in_time', 'is', null),
-        supabase.from('leave_applications').select('user_id').eq('status', 'pending'),
+        // `check_in`, not `check_in_time`. The attendance table was
+        // rebuilt in Hr_HR1f and the column carries a full timestamptz
+        // now rather than a bare clock time. Only the name matters here
+        // — this asks whether it is null, never what time it says.
+        supabase.from('attendance').select('user_id').eq('work_date', istToday()).not('check_in', 'is', null),
+        // leave_requests / 'Waiting', not leave_applications / 'pending'.
+        // The old table is from before the leave module existed, so this
+        // tile has been counting a table nothing writes to — it would
+        // have read 0 for ever and looked like good news.
+        supabase.from('leave_requests').select('user_id').eq('state', 'Waiting'),
       ])
 
       const firstError = r.error ?? d.error ?? a.error ?? l.error

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, QrCode, CalendarCheck, type LucideIcon } from 'lucide-react'
+import { Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
@@ -11,7 +11,7 @@ import { istDate } from '../lib/format'
 
 export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
-type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'customers' | 'projects' | 'greetings' | 'scan' | 'attendance'
+type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'customers' | 'projects' | 'greetings' | 'scan' | 'attendance' | 'my-leave' |'my-payslips' | 'policies'
 const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   reminders: '/sales/reminders',
   tasks: '/sales/tasks',
@@ -25,7 +25,10 @@ const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   // /scan has no layout of its own: it is a thing you do at a gate in ten
   // seconds, not a page you browse.
   scan: '/scan',
-  attendance: '/sales/attendance',
+    attendance: '/sales/attendance',
+  'my-leave': '/sales/my-leave',
+  'my-payslips': '/sales/my-payslips',
+  policies: '/sales/policies',
 }
 
 type NavItem = { label: string; hint?: string; page?: SalesNav; icon: LucideIcon; perm?: string }
@@ -78,7 +81,9 @@ const NAV: { title: string; items: NavItem[] }[] = [
       // pay is worked out from.
       { label: 'Scan attendance', page: 'scan', icon: QrCode },
       { label: 'My attendance', page: 'attendance', icon: CalendarCheck },
-      { label: 'Leave', icon: CalendarOff },
+      { label: 'My leave', page: 'my-leave', icon: CalendarOff },
+      { label: 'My payslips', page: 'my-payslips', icon: Wallet },
+      { label: 'Policies', page: 'policies', icon: BookOpen },
     ],
   },
 ]
@@ -206,7 +211,7 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
                       title={narrow ? item.label : undefined}
                       className={`${base} focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                         isActive
-                          ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]'
+                          ? `bg-orange-500/10 font-medium text-orange-400 ${narrow ? '' : 'shadow-[inset_3px_0_0_#f97316]'}`
                           : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
                       }`}
                     >

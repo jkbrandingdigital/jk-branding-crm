@@ -11,11 +11,13 @@
 // branch, the approved phone, which kind of scan this is — is answered by
 // the database, where a modified app cannot reach it.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  Camera, Check, X, Loader2, RefreshCw, Zap, ZapOff, LogOut, Coffee, Clock,
+  Camera, Check, X, Loader2, RefreshCw, Zap, ZapOff, QrCode, MapPin,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { says, BUTTON_WORDS } from './words'
+import { istDate } from '../../lib/format'
 
 // ── the device key ───────────────────────────────────────────────────────
 
@@ -84,6 +86,19 @@ const clock = (iso: string | null) =>
       })
     : null
 
+const longDate = () =>
+  new Date().toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata', weekday: 'long', day: 'numeric', month: 'long',
+  })
+
+const initials = (name?: string) =>
+  (name ?? '')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('') || '—'
+
 const hhmm = (mins: number) => `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`
 
 function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number) {
@@ -97,19 +112,40 @@ function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number) {
   )
 }
 
-/** What the big button should say, from the day so far. */
-function nextKind(t: Today | null): { kind: Kind; label: string } {
+/**
+ * What this person could scan next, best guess first.
+ *
+ * This used to answer with ONE kind, and after 'In' that one kind was
+ * always 'Out' — so the second scan of the day sent everybody home at
+ * lunchtime. The lunch kinds existed in the database and record_scan()
+ * accepted them; the phone simply never asked for one.
+ *
+ * A normal day is four scans: in, out for lunch, back, home. So after
+ * 'In' the first guess is lunch — but leaving early is a real thing, so
+ * the other choices are on the screen too rather than hidden behind a
+ * guess. Nobody should have to fight a default at a gate.
+ */
+function choices(t: Today | null): { kind: Kind; label: string }[] {
   const last = t?.lastKind ?? null
-  if (!last) return { kind: 'In', label: 'Scan in' }
-  if (last === 'In' || last === 'Lunch in' || last === 'Back') return { kind: 'Out', label: 'Scan out' }
-  if (last === 'Lunch out') return { kind: 'Lunch in', label: 'Back from lunch' }
-  if (last === 'Step out') return { kind: 'Back', label: 'Back' }
-  return { kind: 'Out', label: 'Scan out' }
+  if (!last) return [{ kind: 'In', label: BUTTON_WORDS.In }]
+  if (last === 'Lunch out') return [{ kind: 'Lunch in', label: BUTTON_WORDS['Lunch in'] }]
+  if (last === 'Step out') return [{ kind: 'Back', label: BUTTON_WORDS.Back }]
+
+  const out = { kind: 'Out' as Kind, label: BUTTON_WORDS.Out }
+  const step = { kind: 'Step out' as Kind, label: BUTTON_WORDS['Step out'] }
+  const lunch = { kind: 'Lunch out' as Kind, label: BUTTON_WORDS['Lunch out'] }
+
+  // Lunch is only offered once a day, and only before it has been taken.
+  const lunchDone = Boolean(t?.lunchOut)
+  if (last === 'In' && !lunchDone) return [lunch, step, out]
+  return [out, step]
 }
 
 // ── the page ─────────────────────────────────────────────────────────────
 
 export default function ScanPage() {
+  const [pick, setPick] = useState<Kind | null>(null)
+  const pickRef = useRef<Kind>('In')
   const video = useRef<HTMLVideoElement | null>(null)
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const stream = useRef<MediaStream | null>(null)
@@ -136,13 +172,24 @@ export default function ScanPage() {
 
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ScanResult | null>(null)
-  const [reason, setReason] = useState('')
-  const [saved, setSaved] = useState(false)
-  const [pending, setPending] = useState<{ id: string; kind: string; late_by_min: number } | null>(null)
   const [wait, setWait] = useState<string | null>(null)
+  // The camera is a sheet over the card, opened by the button, so it is
+  // not running while somebody is only looking at their times.
+  const [scanning, setScanning] = useState(false)
+  const [now, setNow] = useState(new Date())
 
-  const want = nextKind(today)
+  const opts = choices(today)
+  const want = opts.find((o) => o.kind === pick) ?? opts[0]
+  // send() is called from the decoder, whose closure may be several
+  // renders old. It must read the choice from a ref, not from `want`.
+  useEffect(() => { pickRef.current = want.kind }, [want.kind])
   const dayDone = today?.lastKind === 'Out'
+  const hasDetector = typeof (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector !== 'undefined'
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
 
   // ── who am I, and what has today been so far ───────────────────────────
 
@@ -151,17 +198,22 @@ export default function ScanPage() {
     const uid = u?.user?.id
     if (!uid) return
 
-    const [p, s, scans, month, nag] = await Promise.all([
+    const [p, s, scans, month] = await Promise.all([
       supabase.from('profiles').select('full_name, emp_code').eq('id', uid).maybeSingle(),
       supabase.from('branch_sites').select('id, name, lat, lng, radius_m, accuracy_max_m').eq('is_active', true),
+      // Today by the office calendar, not "the last twenty hours".
+      //
+      // A rolling window made yesterday evening's Out still count this
+      // morning, so the app decided the day was already finished and
+      // would not open the camera at all. work_date is set by the
+      // database in Asia/Kolkata and is the only thing that means today.
       supabase
         .from('attendance_scans')
         .select('kind, scanned_at')
         .eq('user_id', uid).eq('ok', true)
-        .gte('scanned_at', new Date(Date.now() - 20 * 3600 * 1000).toISOString())
+        .eq('work_date', istDate())
         .order('scanned_at'),
       supabase.from('attendance').select('work_date, minutes_worked').eq('user_id', uid),
-      supabase.rpc('my_pending_reason'),
     ])
     if (!alive.current) return
 
@@ -171,10 +223,30 @@ export default function ScanPage() {
     const rows = (scans.data ?? []) as { kind: Kind; scanned_at: string }[]
     const first = (k: Kind) => rows.find((r) => r.kind === k)?.scanned_at ?? null
     const last = (k: Kind) => [...rows].reverse().find((r) => r.kind === k)?.scanned_at ?? null
+    // Time actually INSIDE, not the gap between the first scan and the
+    // last. This used to be `now − In`, which on a day with a four-hour
+    // lunch still read as if the whole four hours had been worked —
+    // somebody could scan out for lunch and watch the number keep
+    // climbing. The database never believed it (attendance_apply has
+    // taken lunch and step-outs off since Hr_HR1d); only this card did.
+    //
+    // So walk the day: every 'In', 'Lunch in' and 'Back' opens a
+    // stretch, every 'Lunch out', 'Step out' and 'Out' closes it. A
+    // stretch still open counts up to now.
     const mins = (() => {
-      const i = first('In'), o = last('Out')
-      if (!i) return 0
-      return Math.max(0, Math.round(((o ? new Date(o) : new Date()).getTime() - new Date(i).getTime()) / 60000))
+      let total = 0
+      let openFrom: number | null = null
+      for (const r of rows) {
+        const t = new Date(r.scanned_at).getTime()
+        if (r.kind === 'In' || r.kind === 'Lunch in' || r.kind === 'Back') {
+          if (openFrom === null) openFrom = t
+        } else if (openFrom !== null) {
+          total += t - openFrom
+          openFrom = null
+        }
+      }
+      if (openFrom !== null) total += Date.now() - openFrom
+      return Math.max(0, Math.round(total / 60000))
     })()
 
     const nowMonth = new Date().toISOString().slice(0, 7)
@@ -190,9 +262,6 @@ export default function ScanPage() {
       lastKind: rows.length ? rows[rows.length - 1].kind : null,
       daysThisMonth: days,
     })
-
-    const n = nag.data as { id?: string; kind?: string; late_by_min?: number } | null
-    if (n?.id) setPending({ id: n.id, kind: n.kind ?? '', late_by_min: n.late_by_min ?? 0 })
   }, [])
 
   // ── arriving with the code already in hand ─────────────────────────────
@@ -216,6 +285,7 @@ export default function ScanPage() {
     // Take it out of the address bar: a reload should not re-fire a scan,
     // and the code has no business sitting in the phone's history.
     window.history.replaceState({}, '', '/scan')
+    setScanning(true)     // so the sheet is up while it sends
     send(code)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [today])
@@ -279,11 +349,25 @@ export default function ScanPage() {
   }, [])
 
   useEffect(() => {
-    // The day is finished — no camera. Nothing good comes of a scanner
-    // that is still hunting after the last scan of the day.
-    if (dayDone || result) return
+    // The camera runs only while the sheet is open, and never once the
+    // day is finished: a scanner still hunting after the last scan of
+    // the day is a hot phone and nothing else.
+    if (!scanning || dayDone || result) return
     startCamera()
-  }, [dayDone, result, startCamera])
+  }, [scanning, dayDone, result, startCamera])
+
+  function openScanner() {
+    setResult(null)
+    sent.current = false
+    setScanning(true)
+  }
+
+  function closeScanner() {
+    setScanning(false)
+    stream.current?.getTracks().forEach((t) => t.stop())
+    stream.current = null
+    setCamState('asking')
+  }
 
   async function flipTorch() {
     const track = stream.current?.getVideoTracks()[0]
@@ -307,7 +391,7 @@ export default function ScanPage() {
   // worth making on purpose, not by accident.
 
   useEffect(() => {
-    if (camState !== 'on' || busy || result) return
+    if (!scanning || camState !== 'on' || busy || result) return
     const Detector = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => { detect(s: CanvasImageSource): Promise<{ rawValue: string }[]> } }).BarcodeDetector
     if (!Detector) return
 
@@ -330,7 +414,7 @@ export default function ScanPage() {
     const id = window.setInterval(tick, 300)
     return () => { stop = true; window.clearInterval(id) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camState, busy, result])
+  }, [scanning, camState, busy, result])
 
   // ── sending it ─────────────────────────────────────────────────────────
 
@@ -401,7 +485,7 @@ export default function ScanPage() {
       p_lng: f.lng,
       p_accuracy: f.accuracy,
       p_device: deviceKey(),
-      p_kind: want.kind,
+      p_kind: pickRef.current,
     })
 
     setBusy(false)
@@ -417,7 +501,6 @@ export default function ScanPage() {
       stream.current?.getTracks().forEach((t) => t.stop())
       stream.current = null
       if (navigator.vibrate) navigator.vibrate(r.repeat ? 40 : [60, 40, 60])
-      if (r.needs_reason && r.id) setPending({ id: r.id, kind: r.kind ?? '', late_by_min: r.late_by_min ?? 0 })
       await loadDay()
     } else {
       // A refusal is worth another try — the person moves closer and goes
@@ -427,24 +510,14 @@ export default function ScanPage() {
     }
   }
 
-  async function saveReason() {
-    if (!pending || reason.trim().length < 3) return
-    setBusy(true)
-    const { data, error } = await supabase.rpc('scan_reason', { p_scan: pending.id, p_reason: reason.trim() })
-    setBusy(false)
-    const r = data as { ok: boolean; reason?: string } | null
-    if (error || !r?.ok) return setResult({ ok: false, reason: error?.message ?? r?.reason ?? 'Not saved.' })
-    setSaved(true)
-    setPending(null)
-    setReason('')
-  }
-
   function again() {
     setResult(null)
     setWait(null)
-    setSaved(false)
     sent.current = false
-    startCamera()
+    setScanning(false)
+    stream.current?.getTracks().forEach((t) => t.stop())
+    stream.current = null
+    setCamState('asking')
   }
 
   // ── what the dots say ──────────────────────────────────────────────────
@@ -456,258 +529,330 @@ export default function ScanPage() {
   })()
   const inside = nearest ? nearest.d - (fix?.accuracy ?? 0) <= nearest.s.radius_m : null
 
-  const Dot = ({ ok, label, hint }: { ok: boolean | null; label: string; hint?: string }) => (
-    <div className="flex items-start gap-2">
-      <span
-        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-          ok === null ? 'bg-gray-600' : ok ? 'bg-green-500' : 'bg-red-500'
-        }`}
-      />
-      <span className="min-w-0">
-        <span className="block text-xs text-gray-300">{label}</span>
-        {hint && <span className="block text-[11px] text-gray-500">{hint}</span>}
-      </span>
-    </div>
-  )
+  // ── screens ─────────────────────────────────────────────────────────
+  //
+  // The card is light; the camera and the pass are dark sheets over it.
+  //
+  // Not a whim: this screen is used at a gate, outdoors, at nine in the
+  // morning with the sun on the phone — and a light screen is the one
+  // that stays readable there. The sheets go dark so the camera picture
+  // and the big green tick carry the moment without competing with a
+  // bright page behind them.
 
-  // ── screens ────────────────────────────────────────────────────────────
+  const place = nearest?.s.name ?? null
 
-  // 1. A scan that worked
-  if (result?.ok) {
-    return (
-      <Shell me={me}>
-        <div className="flex flex-col items-center py-8 text-center">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-500/15">
-            <Check size={40} className="text-green-400" />
+  return (
+    <div className="min-h-screen bg-[#eef1f6] text-[#0f172a]">
+      {/* ── the strip above the card ──────────────────────────────── */}
+      <div className="mx-auto flex max-w-md items-center gap-2.5 px-5 pt-5">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white shadow-sm ring-1 ring-black/5">
+          <QrCode size={17} className="text-orange-500" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[13px] font-bold tracking-wide">JK BRANDOS</span>
+          <span className="block text-[11px] text-slate-500">JK Branding · attendance</span>
+        </span>
+      </div>
+
+      {/* ── the card ──────────────────────────────────────────────── */}
+      <div className="mx-auto max-w-md px-5 pb-10 pt-3">
+        <div className="rounded-3xl bg-white p-5 shadow-[0_1px_3px_rgba(15,23,42,0.08),0_12px_32px_-12px_rgba(15,23,42,0.18)]">
+          <p className="text-center text-sm font-bold tracking-wide text-[#0f172a]">JK BRANDING</p>
+          <p className="mt-0.5 text-center text-[11px] text-slate-500">{longDate()}</p>
+
+          <p className="mx-auto mt-3 w-fit rounded-full bg-[#1e293b] px-6 py-2 text-2xl font-semibold tabular-nums tracking-tight text-white">
+            {now.toLocaleTimeString('en-IN', {
+              timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+            })}
+          </p>
+
+          {/* who you are — before the scan, not only after it */}
+          <div className="mt-4 flex items-center gap-3 rounded-2xl bg-[#f1f5f9] px-4 py-3">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#1e293b] text-sm font-semibold text-white">
+              {initials(me?.name)}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-[15px] font-semibold">{me?.name ?? '—'}</span>
+              <span className="block text-[11px] text-slate-500">Code: {me?.code ?? '—'}</span>
+            </span>
           </div>
-          <p className="mt-5 text-3xl font-bold text-white">{result.kind}</p>
-          <p className="mt-1 text-lg text-gray-300">{result.at}</p>
-          {result.site && <p className="mt-1 text-sm text-gray-500">{result.site}</p>}
-          {result.repeat && <p className="mt-3 text-xs text-gray-500">Already scanned a moment ago — nothing new was added.</p>}
 
-          {result.message && !saved && (
-            <div className="mt-6 w-full rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-left">
-              <p className="text-sm text-amber-200">{result.message}</p>
-              {pending && (
-                <>
-                  <textarea
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    rows={2}
-                    placeholder="e.g. Traffic at Kalawad road"
-                    className="mt-3 w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
-                  />
-                  <button
-                    onClick={saveReason}
-                    disabled={busy || reason.trim().length < 3}
-                    className="mt-2 w-full rounded-lg bg-orange-500 py-2.5 text-sm font-semibold text-black disabled:opacity-50"
-                  >
-                    {busy ? 'Saving…' : 'Send reason'}
-                  </button>
-                  <p className="mt-2 text-[11px] text-amber-200/70">
-                    Your scan is already counted. The reason goes with it.
-                  </p>
-                </>
-              )}
+          {/* IN · LUNCH IN · LUNCH OUT · OUT — the office's words, which
+              are the reverse of the database's for the two lunch
+              punches. words.ts holds that reversal, once. Lunch was
+              being recorded and never shown — so a person who scanned
+              out for lunch had no way of telling whether it had gone
+              through, which is the one thing this card is for. */}
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Figure label="IN" value={clock(today?.in ?? null)} />
+            <Figure label="OUT" value={clock(today?.out ?? null)} />
+            <Figure label="LUNCH IN" value={clock(today?.lunchOut ?? null)} />
+            <Figure label="LUNCH OUT" value={clock(today?.lunchIn ?? null)} />
+          </div>
+
+          <div className="mt-2 flex items-center justify-between rounded-2xl bg-[#f1f5f9] px-4 py-3">
+            <span className="text-[10px] font-medium tracking-[0.12em] text-slate-500">WORKED</span>
+            <span className={`text-sm font-semibold tabular-nums ${
+              today?.in ? 'text-[#0f172a]' : 'text-slate-400'}`}>
+              {today?.in ? hhmm(today.minutes) : '—'}
+            </span>
+          </div>
+
+          <div className="mt-7 flex justify-center">
+            {dayDone ? (
+              <div className="flex h-40 w-40 flex-col items-center justify-center rounded-full bg-[#f1f5f9] text-center">
+                <Check size={26} className="text-green-600" />
+                <p className="mt-2 px-5 text-sm font-semibold text-slate-700">Day complete</p>
+                <p className="px-5 text-[11px] text-slate-500">See you tomorrow</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-4">
+                <button
+                  onClick={() => { setPick(opts[0].kind); pickRef.current = opts[0].kind; openScanner() }}
+                  className="h-40 w-40 rounded-full bg-orange-500 text-base font-bold uppercase leading-tight tracking-wide text-white shadow-[0_14px_38px_-8px_rgba(249,115,22,0.85)] transition active:scale-95"
+                >
+                  {opts[0].label}
+                </button>
+
+                {/* The other things this scan could be. Small, but on the
+                    screen — a guess you cannot overrule is worse than no
+                    guess. */}
+                {opts.length > 1 && (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {opts.slice(1).map((o) => (
+                      <button
+                        key={o.kind}
+                        onClick={() => { setPick(o.kind); pickRef.current = o.kind; openScanner() }}
+                        className="rounded-full border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 transition active:scale-95"
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Green only when a scan would really go through. A chip that
+              is friendly whatever the truth is sends somebody to the
+              poster to be refused. */}
+          <div
+            className={`mt-7 flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium ${
+              inside
+                ? 'bg-green-50 text-green-700'
+                : locState === 'off'
+                  ? 'bg-red-50 text-red-700'
+                  : 'bg-[#f1f5f9] text-slate-500'
+            }`}
+          >
+            <MapPin size={13} className="shrink-0" />
+            {locState === 'off'
+              ? 'Location is off — switch it on to scan'
+              : !fix
+                ? 'Finding your location…'
+                : inside
+                  ? `At ${place}`
+                  : nearest
+                    ? `${Math.round(nearest.d)} m from ${place}`
+                    : 'Waiting for the office location'}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-[11px] text-slate-500">
+            <span>
+              This month: <span className="font-semibold text-[#0f172a]">{today?.daysThisMonth ?? 0} days present</span>
+            </span>
+            {torch !== null && camState === 'on' && (
+              <button onClick={flipTorch} className="flex items-center gap-1">
+                {torch ? <Zap size={12} /> : <ZapOff size={12} />} Torch
+              </button>
+            )}
+          </div>
+        </div>
+
+        <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-500">
+          Your location is read only at the moment you scan.<br />You are not tracked through the day.
+        </p>
+      </div>
+
+      {/* ── the camera ────────────────────────────────────────────── */}
+      {scanning && !result && (
+        <Sheet onClose={closeScanner}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-base font-semibold text-white">{want.label}</p>
+              <p className="mt-0.5 text-xs text-slate-400">
+                Point at the office QR
+                {fix ? ` · GPS ±${Math.round(fix.accuracy)} m` : ' · finding GPS…'}
+              </p>
             </div>
-          )}
+            <button onClick={closeScanner} aria-label="Close" className="rounded-full p-2 text-slate-400 ring-1 ring-white/15">
+              <X size={16} />
+            </button>
+          </div>
 
-          {saved && (
-            <p className="mt-5 flex items-center gap-2 text-sm text-green-400">
-              <Check size={15} /> Reason sent. Thank you.
+          <div className="relative mt-4 aspect-square w-full overflow-hidden rounded-2xl bg-black">
+            <video ref={video} playsInline muted className="h-full w-full object-cover" />
+            <canvas ref={canvas} className="hidden" />
+
+            {/* corners, not a closed box: a box reads as "line it up
+                exactly", which is not what the reader needs */}
+            <div className="pointer-events-none absolute inset-0">
+              {[
+                'left-4 top-4 border-l-[3px] border-t-[3px] rounded-tl-xl',
+                'right-4 top-4 border-r-[3px] border-t-[3px] rounded-tr-xl',
+                'left-4 bottom-4 border-l-[3px] border-b-[3px] rounded-bl-xl',
+                'right-4 bottom-4 border-r-[3px] border-b-[3px] rounded-br-xl',
+              ].map((c) => (
+                <span key={c} className={`absolute h-11 w-11 border-orange-500 ${c}`} />
+              ))}
+              <span className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-[#1e293b]/90 px-3 py-1 text-xs tabular-nums text-white">
+                {now.toLocaleTimeString('en-IN', {
+                  timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+                })}
+              </span>
+            </div>
+
+            {camState === 'off' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0b1220] px-7 text-center">
+                <Camera size={26} className="text-slate-500" />
+                <p className="text-sm text-slate-200">The camera did not open</p>
+                <p className="text-xs leading-relaxed text-slate-400">
+                  Allow the camera for this app and try again. Android: hold the app icon → Site settings →
+                  Camera. iPhone: Settings → Safari → Camera.
+                </p>
+                <button onClick={startCamera} className="mt-1 rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-white">
+                  Open the camera
+                </button>
+              </div>
+            )}
+
+            {(busy || wait) && (
+              <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-black/80 px-4 py-3 text-sm text-white backdrop-blur">
+                <Loader2 size={15} className="animate-spin text-orange-400" />
+                {wait ?? 'Sending…'}
+              </div>
+            )}
+          </div>
+
+          <p className="mt-3 text-center text-xs text-slate-400">Hold steady — it reads by itself.</p>
+
+          {!hasDetector && (
+            <p className="mt-3 rounded-xl bg-amber-500/10 px-3 py-2 text-center text-[11px] leading-relaxed text-amber-300">
+              This browser cannot read a QR from inside a page. Use your phone&rsquo;s own camera on the poster
+              instead — it opens this app with the code already read.
             </p>
           )}
-
-          <DayStrip today={today} />
-
-          {result.kind === 'Out' ? (
-            <p className="mt-6 text-sm text-gray-400">Day complete — see you tomorrow.</p>
-          ) : (
-            <button onClick={again} className="mt-6 rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-gray-300">
-              Scan again
-            </button>
-          )}
-        </div>
-      </Shell>
-    )
-  }
-
-  // 2. A scan that was refused
-  if (result && !result.ok) {
-    return (
-      <Shell me={me}>
-        <div className="flex flex-col items-center py-8 text-center">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-red-500/15">
-            <X size={40} className="text-red-400" />
-          </div>
-          <p className="mt-5 text-lg font-medium text-white">Not counted</p>
-          <p className="mt-2 max-w-sm text-sm text-gray-300">{result.reason}</p>
-
-          <button onClick={again} className="mt-6 flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-semibold text-black">
-            <RefreshCw size={15} /> Try again
-          </button>
-          <p className="mt-4 max-w-sm text-xs text-gray-500">
-            Still stuck? Tell HR what this screen says — every attempt, and the reason it was refused, is already
-            on their screen.
-          </p>
-        </div>
-      </Shell>
-    )
-  }
-
-  // 3. The day is over
-  if (dayDone) {
-    return (
-      <Shell me={me}>
-        <div className="py-10 text-center">
-          <p className="text-2xl font-bold text-white">Day complete</p>
-          <p className="mt-1 text-sm text-gray-400">
-            {clock(today?.in ?? null)} to {clock(today?.out ?? null)} · {hhmm(today?.minutes ?? 0)} worked
-          </p>
-          <DayStrip today={today} />
-          <p className="mt-8 text-xs text-gray-600">See you tomorrow.</p>
-        </div>
-      </Shell>
-    )
-  }
-
-  // 4. The scanner
-  return (
-    <Shell me={me}>
-      <div className="mt-4 overflow-hidden rounded-2xl border border-[#242424] bg-black">
-        <div className="relative aspect-square w-full">
-          <video ref={video} playsInline muted className="h-full w-full object-cover" />
-          <canvas ref={canvas} className="hidden" />
-
-          {/* the frame */}
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="h-[62%] w-[62%] rounded-2xl border-2 border-white/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
-          </div>
-
-          {camState === 'off' && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#111] px-6 text-center">
-              <Camera size={28} className="text-gray-500" />
-              <p className="text-sm text-gray-300">The camera is not open</p>
-              <p className="text-xs text-gray-500">
-                Allow the camera for this site, then press below. On Android: the lock icon next to the address →
-                Permissions → Camera. On iPhone: Settings → Safari → Camera.
-              </p>
-              <button onClick={startCamera} className="mt-1 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black">
-                Open the camera
-              </button>
-            </div>
-          )}
-
-          {torch !== null && camState === 'on' && (
-            <button
-              onClick={flipTorch}
-              aria-label="Torch"
-              className="absolute bottom-3 right-3 rounded-full bg-black/60 p-3 text-white backdrop-blur"
-            >
-              {torch ? <Zap size={18} /> : <ZapOff size={18} />}
-            </button>
-          )}
-
-          {(busy || wait) && (
-            <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-black/70 px-4 py-3 text-sm text-white backdrop-blur">
-              <Loader2 size={15} className="animate-spin" />
-              {wait ?? 'Sending…'}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <p className="mt-4 text-center text-lg font-semibold text-white">{want.label}</p>
-      <p className="mt-1 text-center text-xs text-gray-500">
-        Hold the phone up to the poster &mdash; or point your phone&rsquo;s own camera at it
-      </p>
-
-      {/* No BarcodeDetector (iPhone, older browsers) — the camera still
-          shows, so a person can line the code up, but nothing will read it.
-          Saying so beats a scanner that silently never fires. */}
-      {camState === 'on' && !(window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector && (
-        <p className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-center text-xs text-amber-200">
-          This browser cannot read a QR code from inside a page. Use your phone&rsquo;s own camera on the poster
-          instead &mdash; it opens this page with the code already read.
-        </p>
+        </Sheet>
       )}
 
-      <div className="mt-5 grid grid-cols-3 gap-3 rounded-xl border border-[#242424] bg-[#151515] p-4">
-        <Dot
-          ok={locState === 'ok' ? true : locState === 'asking' ? null : false}
-          label="Location"
-          hint={
-            locState === 'off' ? 'Switch it on' :
-            locState === 'weak' ? `±${Math.round(fix?.accuracy ?? 0)} m` :
-            locState === 'asking' ? 'Looking…' : 'Ready'
-          }
-        />
-        <Dot
-          ok={inside}
-          label="At the place"
-          hint={nearest ? `${Math.round(nearest.d)} m from ${nearest.s.name}` : 'Waiting for location'}
-        />
-        <Dot ok={camState === 'on' ? true : camState === 'asking' ? null : false} label="Camera" hint={camState === 'on' ? 'Ready' : 'Not open'} />
-      </div>
+      {/* ── the pass ──────────────────────────────────────────────── */}
+      {result?.ok && (
+        <Sheet onClose={again}>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-base font-semibold text-white">
+                {result.kind === 'In' ? "You're in" : result.kind === 'Out' ? "You're out" : says(result.kind)}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-400">
+                {result.repeat ? 'Already scanned a moment ago.' : 'Saved to your attendance.'}
+              </p>
+            </div>
+            <button onClick={again} aria-label="Close" className="rounded-full p-2 text-slate-400 ring-1 ring-white/15">
+              <X size={16} />
+            </button>
+          </div>
 
-      <p className="mt-3 text-center text-[11px] text-gray-600">
-        Your location is read only at the moment you scan. You are not tracked through the day.
-      </p>
+          <div className="mt-6 flex flex-col items-center">
+            <span className="grid h-24 w-24 place-items-center rounded-full bg-green-500">
+              <Check size={46} className="text-white" strokeWidth={3} />
+            </span>
+            <p className="mt-4 text-xs uppercase tracking-[0.22em] text-slate-400">{says(result.kind)}</p>
+            <p className="text-5xl font-bold tabular-nums tracking-tight text-white">{result.at}</p>
+          </div>
 
-      <DayStrip today={today} />
-    </Shell>
+          <div className="mt-5 rounded-2xl bg-white/5 px-4 py-3 text-center ring-1 ring-white/10">
+            <p className="text-[10px] font-semibold tracking-[0.18em] text-orange-400">JK BRANDING</p>
+            <p className="mt-1 text-sm font-semibold text-white">{me?.name}</p>
+            <p className="text-[11px] text-slate-400">Code: {me?.code}</p>
+          </div>
+
+          <p className="mt-3 text-center text-[11px] text-slate-400">
+            {result.site} · {longDate()}
+          </p>
+
+          {/* Late is told, not asked about. The minutes are already on
+              HR's screen; a text box here would collect "traffic"
+              twenty-two times and tell nobody anything. */}
+          {result.message ? (
+            <p className="mt-5 rounded-2xl bg-amber-500/10 px-4 py-3 text-center text-sm text-amber-300">
+              {result.message}
+            </p>
+          ) : (
+            <p className="mt-5 text-center text-xl font-semibold text-orange-400">Thank you</p>
+          )}
+
+          <button onClick={again} className="mt-5 w-full rounded-2xl bg-white py-3.5 text-sm font-semibold text-[#0f172a]">
+            Done
+          </button>
+        </Sheet>
+      )}
+
+      {/* ── a refusal ─────────────────────────────────────────────── */}
+      {result && !result.ok && (
+        <Sheet onClose={again}>
+          <div className="flex flex-col items-center py-2 text-center">
+            <span className="grid h-20 w-20 place-items-center rounded-full bg-red-500/15">
+              <X size={38} className="text-red-400" />
+            </span>
+            <p className="mt-4 font-semibold text-white">Not counted</p>
+            <p className="mt-2 text-sm leading-relaxed text-slate-300">{result.reason}</p>
+
+            <button
+              onClick={again}
+              className="mt-6 flex items-center gap-2 rounded-2xl bg-orange-500 px-6 py-3 text-sm font-semibold text-white"
+            >
+              <RefreshCw size={15} /> Try again
+            </button>
+            <p className="mt-4 text-[11px] leading-relaxed text-slate-400">
+              Still stuck? Tell HR exactly what this says — every attempt and its reason is already on their screen.
+            </p>
+          </div>
+        </Sheet>
+      )}
+    </div>
   )
 }
 
-// ── the frame around every screen ────────────────────────────────────────
+// ── pieces ───────────────────────────────────────────────────────────────
 
-function Shell({ me, children }: { me: { name: string; code: string } | null; children: React.ReactNode }) {
-  const [now, setNow] = useState(new Date())
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-
+/** One of the three figures on the card. */
+function Figure({ label, value }: { label: string; value: string | null }) {
   return (
-    <div className="min-h-screen bg-[#0f0f0f] px-4 py-5 text-white">
-      <div className="mx-auto max-w-md">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs tracking-[0.2em] text-orange-500">JK BRANDOS</p>
-            <p className="mt-1 text-sm text-gray-300">{me?.name ?? '—'}</p>
-            <p className="font-mono text-xs text-gray-600">{me?.code ?? ''}</p>
-          </div>
-          <p className="tabular-nums text-2xl font-semibold text-white">
-            {now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
-          </p>
-        </div>
+    <div className="rounded-2xl bg-[#f1f5f9] px-2 py-3 text-center">
+      <p className="text-[10px] font-medium tracking-[0.12em] text-slate-500">{label}</p>
+      <p className={`mt-1 text-sm font-semibold tabular-nums ${value ? 'text-[#0f172a]' : 'text-slate-400'}`}>
+        {value ?? '—'}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * A dark sheet that rises over the card.
+ *
+ * Outside the component for the same reason Fold is in ScanSetup:
+ * declared inside, it would be a new component type on every render and
+ * React would rebuild its contents each time — and with a camera inside,
+ * that means tearing down and restarting the video stream.
+ */
+function Sheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative max-h-[94vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-[#111c2e] p-5 pb-7 shadow-2xl ring-1 ring-white/10 sm:rounded-3xl">
         {children}
       </div>
     </div>
-  )
-}
-
-// ── today, in one line ───────────────────────────────────────────────────
-
-function DayStrip({ today }: { today: Today | null }) {
-  if (!today) return null
-  const cell = (icon: React.ReactNode, label: string, value: string | null) => (
-    <div className="min-w-0 flex-1 text-center">
-      <p className="flex items-center justify-center gap-1 text-[11px] text-gray-500">{icon} {label}</p>
-      <p className="mt-0.5 truncate text-sm tabular-nums text-white">{value ?? '—'}</p>
-    </div>
-  )
-  return (
-    <>
-      <div className="mt-6 flex gap-2 rounded-xl border border-[#242424] bg-[#151515] px-3 py-3">
-        {cell(<Check size={11} />, 'In', clock(today.in))}
-        {cell(<Coffee size={11} />, 'Lunch', clock(today.lunchOut))}
-        {cell(<LogOut size={11} />, 'Out', clock(today.out))}
-        {cell(<Clock size={11} />, 'Worked', today.in ? hhmm(today.minutes) : null)}
-      </div>
-      <p className="mt-2 text-center text-xs text-gray-500">
-        This month: {today.daysThisMonth} {today.daysThisMonth === 1 ? 'day' : 'days'} present
-      </p>
-    </>
   )
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { TrendingUp, LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, QrCode, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, QrCode, SlidersHorizontal, Wallet, Package, BookOpen, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
@@ -31,18 +31,40 @@ const GROUPS: Group[] = [
     title: 'People',
     items: [
       { label: 'Employees', path: '/hr/employees', icon: Users, ready: true, perm: 'mod_employees' },
-      { label: 'Design performance', path: '/hr/design-performance', icon: TrendingUp, ready: true, perm: 'design_perf' },
+      { label: 'Attendance', path: '/hr/attendance', icon: CalendarCheck, ready: true, perm: 'attendance_view_all' },
+      { label: 'Leave', path: '/hr/leaves', icon: CalendarOff, ready: true, perm: 'leave_approve' },
+      { label: 'Payroll', path: '/hr/payroll', icon: Wallet, ready: true, perm: 'mod_payroll' },
       { label: 'Scan setup', path: '/hr/scan-setup', icon: QrCode, ready: true, perm: 'scan_setup' },
+      { label: 'Assets', path: '/hr/assets', icon: Package, ready: true, perm: 'mod_assets' },
+      // Writing the rules. Reading them is in "Me" below, because that
+      // is a thing this person owes rather than a thing they run.
+      { label: 'Manage policies', path: '/hr/policies-manage', icon: BookOpen, ready: true, perm: 'policy_edit' },
+      { label: 'Setup', path: '/hr/setup', icon: SlidersHorizontal, ready: true, perm: 'attendance_edit' },
+    ],
+  },
+  // Its own section, never folded. Everything above is OTHER people —
+  // their register, their leave, their pay. These four are this person's
+  // own, and they are the ones opened daily. Side by side under one
+  // heading the two read as the same kind of thing, which is how a
+  // sidebar ends up with ten rows nobody scans.
+  //
+  // Design performance used to sit above. It is an admin-area right and
+  // it is already in the admin sidebar, so it was the same page offered
+  // twice.
+  {
+    title: 'Me',
+    items: [
       { label: 'Scan attendance', path: '/scan', icon: QrCode, ready: true },
       { label: 'My attendance', path: '/hr/my-attendance', icon: CalendarCheck, ready: true },
-      { label: 'Attendance', path: '/hr/attendance', icon: CalendarCheck, ready: false },
-      { label: 'Leave Requests', path: '/hr/leaves', icon: CalendarOff, ready: false },
+      { label: 'My leave', path: '/hr/my-leave', icon: CalendarOff, ready: true },
+      { label: 'My payslips', path: '/hr/my-payslips', icon: Wallet, ready: true },
+      { label: 'Policies', path: '/hr/policies', icon: BookOpen, ready: true },
     ],
   },
 ]
 
 // This section opens on a click; the rest stay in plain view
-const FOLDABLE = ['Productivity']
+const FOLDABLE = ['Productivity', 'People']
 
 export default function HrLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
@@ -61,7 +83,9 @@ export default function HrLayout({ children }: { children: ReactNode }) {
     `flex items-center rounded-lg py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
       narrow ? 'justify-center px-0' : 'gap-3 px-3'
     } ${
-      active ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]' : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
+      active
+        ? `bg-orange-500/10 font-medium text-orange-400 ${narrow ? '' : 'shadow-[inset_3px_0_0_#f97316]'}`
+        : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
     }`
 
   const sidebarFor = (narrow: boolean) => (

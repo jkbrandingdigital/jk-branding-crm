@@ -56,9 +56,11 @@ const ROLE_CHIP: Record<string, string> = {
 }
 // Which modules are offered for each role
 const ROLE_MODULES: Record<string, string[]> = {
-  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_invoices', 'mod_print_jobs', 'mod_customers', 'mod_projects'],
-  hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks', 'mod_notes'],
-  branch_manager: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_print_jobs', 'mod_customers', 'mod_projects'],
+  super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_invoices', 'mod_print_jobs', 'mod_customers', 'mod_projects',
+                'attendance_view_all', 'attendance_view_branch', 'attendance_edit', 'scan_setup', 'leave_approve', 'mod_payroll', 'payroll_view_all', 'payroll_approve', 'mod_assets', 'asset_edit', 'mod_policies', 'policy_edit'],
+  hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks', 'mod_notes',
+       'attendance_view_all', 'attendance_view_branch', 'attendance_edit', 'scan_setup', 'leave_approve', 'mod_payroll', 'payroll_view_all', 'payroll_approve', 'mod_assets', 'asset_edit', 'mod_policies', 'policy_edit'],
+  branch_manager: ['attendance_view_branch', 'mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_print_jobs', 'mod_customers', 'mod_projects'],
   sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_customers', 'mod_projects'],
   // Printing Media is not in this list for a designer. It gets a box of
   // its own below, because picking who handles printing is a decision
@@ -78,9 +80,27 @@ const ROLE_MODULES: Record<string, string[]> = {
 // Everything the admin area holds, grouped the way its sidebar groups it.
 // This is the list a sub admin is given — tick a department and they see
 // that department, nothing else.
-const ADMIN_GROUPS: { title: string; keys: string[] }[] = [
+const ADMIN_GROUPS: { title: string; keys: string[]; note?: string }[] = [
   { title: 'Sales Department', keys: ['mod_leads', 'mod_lead_assignment', 'mod_performance', 'mod_reports', 'mod_evolution', 'mod_questions', 'mod_targets'] },
-  { title: 'HR Department', keys: ['mod_employees'] },
+  // Attendance, leave, payroll, assets and policies all landed in
+  // app_modules as they were built, and none of them were ever added
+  // here — so eleven rights existed that could only be switched on with
+  // SQL. A key in the database that no screen offers is a key nobody
+  // has.
+  {
+    title: 'HR Department',
+    keys: [
+      'mod_employees', 'attendance_view_all', 'attendance_view_branch', 'attendance_edit', 'scan_setup',
+      'leave_approve', 'mod_assets', 'asset_edit', 'mod_policies', 'policy_edit',
+    ],
+  },
+  {
+    title: 'Payroll',
+    keys: ['mod_payroll', 'payroll_view_all', 'payroll_approve'],
+    note: 'Approve payroll should go to somebody who does NOT prepare it. '
+        + 'Whoever builds a month cannot approve it — give both to one person '
+        + 'and the checking step is just an extra click.',
+  },
   { title: 'Productivity', keys: ['mod_tasks', 'mod_reminders', 'mod_notes'] },
   // Projects sit with the customer and the quotation they came from,
   // which is where the sidebar puts them too.
@@ -838,6 +858,11 @@ export default function StaffManager() {
                                 {allOn ? 'Turn all off' : 'Turn all on'}
                               </button>
                             </div>
+                            {g.note && (
+                              <p className="mb-3 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-[11px] leading-relaxed text-gray-400">
+                                {g.note}
+                              </p>
+                            )}
                             <div className="flex flex-wrap gap-x-5 gap-y-4">
                               {items.map((m) => <PermToggle key={m.key} k={m.key} label={m.label} />)}
                             </div>
@@ -846,9 +871,18 @@ export default function StaffManager() {
                       })}
                     </>
                   ) : (
-                    <div className="flex flex-wrap gap-x-5 gap-y-4">
-                      {shownModules.map((m) => <PermToggle key={m.key} k={m.key} label={m.label} />)}
-                    </div>
+                    <>
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        {shownModules.map((m) => <PermToggle key={m.key} k={m.key} label={m.label} />)}
+                      </div>
+                      {effective('payroll_approve') && effective('mod_payroll') && (
+                        <p className="mt-3 rounded-lg border border-amber-900/40 bg-amber-950/15 px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
+                          This person both prepares payroll and approves it. The database
+                          still refuses to let anybody approve a month they submitted, so
+                          nothing breaks — but the checking step now has nobody in it.
+                        </p>
+                      )}
+                    </>
                   )}
 
                   {/* What they may do inside a module they can open */}

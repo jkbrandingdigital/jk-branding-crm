@@ -158,6 +158,20 @@ function Picker({
 
       {open && createPortal(
         <div
+          /*
+            A mark for anything that closes itself on an outside click.
+
+            This layer lives at <body>, so to a panel watching for clicks
+            away from itself, picking 14 October happens somewhere else
+            entirely — and the panel shuts, taking the picker down with
+            it. The filter panel on Leads did exactly that: the calendar
+            opened and disappeared on the first click.
+
+            Those handlers skip anything inside [data-portal-overlay],
+            and the backdrop carries the mark too, so dismissing the
+            calendar leaves the panel that opened it standing.
+          */
+          data-portal-overlay=""
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
           onClick={() => setOpen(false)}
         >

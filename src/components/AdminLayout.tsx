@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, QrCode, type LucideIcon,
+  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, QrCode, BookOpen, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -41,12 +41,23 @@ const GROUPS: NavGroup[] = [
     icon: UserCog,
     items: [
       { label: 'Employees', path: '/admin/employees', icon: Users, ready: true, perm: 'mod_employees' },
+      { label: 'Attendance', path: '/admin/attendance', icon: CalendarCheck, ready: true, perm: 'attendance_view_all' },
       { label: 'Scan setup', path: '/admin/scan-setup', icon: QrCode, ready: true, perm: 'scan_setup' },
       // These two carry no perm on purpose — see the filter below.
       { label: 'Scan attendance', path: '/scan', icon: QrCode, ready: true },
-      { label: 'My attendance', path: '/admin/my-attendance', icon: CalendarCheck, ready: true },
-      { label: 'Attendance', path: '/admin/attendance', icon: CalendarCheck, ready: false },
-      { label: 'Leave Requests', path: '/admin/leaves', icon: CalendarOff, ready: false },
+      { label: 'Leave', path: '/admin/leaves', icon: CalendarOff, ready: true, perm: 'leave_approve' },
+      { label: 'Payroll', path: '/admin/payroll', icon: Wallet, ready: true, perm: 'mod_payroll' },
+      { label: 'Setup', path: '/admin/setup', icon: Settings, ready: true, perm: 'attendance_edit' },
+      { label: 'Assets', path: '/admin/assets', icon: Briefcase, ready: true, perm: 'mod_assets' },
+      { label: 'Manage policies', path: '/admin/policies-manage', icon: BookOpen, ready: true, perm: 'policy_edit' },
+      // These three carry no perm, for the same reason 'Scan attendance'
+      // above does not: they are this person's own record, not a
+      // department they have been given. Their routes already existed in
+      // App.tsx with nothing in any menu pointing at them, which is the
+      // same way eleven permission keys went unreachable earlier.
+      { label: 'Policies', path: '/admin/policies', icon: BookOpen, ready: true },
+      { label: 'My leave', path: '/admin/my-leave', icon: CalendarOff, ready: true },
+      { label: 'My payslips', path: '/admin/my-payslips', icon: Wallet, ready: true },
     ],
   },
   {
@@ -140,9 +151,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     if (activeGroup) setOpen(activeGroup)
   }, [pathname, activeGroup])
 
-  const linkCls = (active: boolean) =>
+    const linkCls = (active: boolean, narrow = false) =>
     `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
-      active ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]' : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
+      active
+        ? `bg-orange-500/10 font-medium text-orange-400 ${narrow ? '' : 'shadow-[inset_3px_0_0_#f97316]'}`
+        : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
     }`
 
   // What this person may see. Nothing is shown until the rights have
@@ -175,7 +188,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <Link
             to="/admin"
             title={narrow ? 'Dashboard' : undefined}
-            className={`${linkCls(pathname === '/admin')} ${narrow ? 'justify-center px-0' : ''}`}
+            className={`${linkCls(pathname === '/admin', narrow)} ${narrow ? 'justify-center px-0' : ''}`}
           >
             <NavIcon icon={LayoutDashboard} narrow={narrow} active={pathname === '/admin'} />
             {!narrow && 'Dashboard'}

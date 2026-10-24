@@ -134,17 +134,26 @@ const nextDay = (d: string) => {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LeadQuery = any
 
-// What lead_lookup() gives back about a lead that is not yours: enough
-// to know it is taken and who to ask, and nothing you could work with.
+/*
+  What lead_lookup() gives back about a lead that is not yours: enough
+  to know it is taken and who to ask, and nothing you could work with.
+
+  The column names are the function's, not ones chosen here — reading
+  it by any other name is how this showed a branch and no person for a
+  day: `branch_name` happened to match and the other two did not, so
+  they came back undefined and rendered as nothing at all.
+*/
 type LeadElsewhere = {
   lead_no: number
   name: string | null
   company: string | null
-  phone_tail: string | null
+  city: string | null
+  source: string | null
+  phone_hint: string | null
   stage_name: string | null
-  stage_color: string | null
-  owner_name: string | null
+  assigned_name: string | null
   branch_name: string | null
+  is_mine: boolean
   created_at: string
 }
 
@@ -257,13 +266,33 @@ const emptyNew = (): NewLead => ({
   two call sites are a page apart and the address is what tells them
   apart.
 */
-export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
+/**
+ * `onlyLabel` locks the board to one label, by NAME.
+ *
+ * HR's board is the hiring enquiries and nothing else — a Facebook
+ * hiring ad puts the Hiring label on them, and that label is the whole
+ * difference between a lead that is HR's and one that is sales'. The
+ * lock is applied to the SAME filter object the cards, the column
+ * counts, the ₹ totals and the export all read, so none of them can
+ * disagree about which leads are on the board.
+ *
+ * Matched by name on purpose: renaming the label in Lead Settings
+ * renames it here too. If no label by that name exists, the board is
+ * EMPTY rather than full — the safe direction, because the other way
+ * round hands HR twelve thousand of the sales team's leads.
+ */
+const NO_SUCH_LABEL = '00000000-0000-0000-0000-000000000000'
+
+export default function LeadsBoard(
+  { scope, onlyLabel }: { scope?: 'mine' | 'all'; onlyLabel?: string } = {},
+) {
   const { can, ready } = usePermissions()
   const { pathname } = useLocation()
   const [myId, setMyId] = useState<string | null>(null)
   const [stages, setStages] = useState<Stage[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [labels, setLabels] = useState<Label[]>([])
+  const [labelsLoaded, setLabelsLoaded] = useState(false)
   const [sources, setSources] = useState<Source[]>(SOURCES)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -378,14 +407,26 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
     which is worse than no narrowing at all: the list and the number
     above it disagree and neither looks wrong on its own.
   */
-  const ef = useMemo(
-    () => (mineOnly && myId ? { ...f, owner: myId } : f),
-    [f, myId, mineOnly],
-  )
+  const lockedLabelId = useMemo(() => {
+    if (!onlyLabel) return null
+    const hit = labels.find(
+      (l) => l.name.trim().toLowerCase() === onlyLabel.trim().toLowerCase(),
+    )
+    return hit?.id ?? NO_SUCH_LABEL
+  }, [onlyLabel, labels])
+
+  const ef = useMemo(() => {
+    let x: Filters = mineOnly && myId ? { ...f, owner: myId } : f
+    if (lockedLabelId) x = { ...x, label: lockedLabelId }
+    return x
+  }, [f, myId, mineOnly, lockedLabelId])
 
   // Nothing is fetched until we know who is asking. Without this the
   // board shows every lead for the moment before the id arrives.
-  const waiting = mineOnly && !myId
+  // Nothing is fetched before the label is resolved either, or the
+  // board shows every lead for the moment before the id arrives — the
+  // same reason mineOnly waits for myId.
+  const waiting = (mineOnly && !myId) || (Boolean(onlyLabel) && !labelsLoaded)
 
   // Answers that arrive after the filters changed again are thrown away
   const queryKey = useMemo(() => JSON.stringify([ef, q]), [ef, q])
@@ -416,6 +457,7 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
       setStages((st.data ?? []) as Stage[])
       setStaff(sf)
       setLabels((lb.data ?? []) as Label[])
+      setLabelsLoaded(true)
       setReasons((cr.data ?? []) as { id: string; name: string }[])
       setTotalAll(tot.count ?? 0)
       setSources([...src])
@@ -594,10 +636,19 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
     return () => clearTimeout(t)
   }, [typed])
 
-  // The filter panel closes when you click away from it
+  /*
+    The filter panel closes when you click away from it.
+
+    "Away" has to leave out the date picker. That opens at <body>, not
+    inside this panel, so picking a day looked like clicking elsewhere
+    and shut the panel mid-choice — the calendar appeared and vanished
+    on the first click, and the dates could not be set at all.
+  */
   useEffect(() => {
     if (!filterOpen) return
     const close = (e: MouseEvent) => {
+      const el = e.target as Element | null
+      if (el?.closest?.('[data-portal-overlay]')) return
       if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false)
     }
     document.addEventListener('mousedown', close)
@@ -681,12 +732,21 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
     of the phone. Enough to stop a second call, not enough to work the
     lead.
 
-    Nobody with `lead_view_all` ever sees the strip. They already get
-    the full card, which names the owner — the strip would repeat it in
-    smaller type and make a search answer itself twice.
+    The strip is dropped only where the board itself is showing every
+    lead AND the person may read them all — then the search already
+    answers itself with a full card, and the strip would repeat it in
+    smaller type.
+
+    `mineOnly` has to be in that test. On the Sales screen the board is
+    narrowed to your own leads on purpose, so a colleague's lead never
+    appears there however wide your rights are. A sub admin has
+    `lead_view_all` for the Admin area, and judging by the right alone
+    hid the strip from them on their own Leads page — a search for a
+    number that plainly exists came back blank, which is the one answer
+    that must never be given.
   */
   const [elsewhere, setElsewhere] = useState<LeadElsewhere[]>([])
-  const seesEveryLead = can('lead_view_all')
+  const seesEveryLead = !mineOnly && can('lead_view_all')
 
   useEffect(() => {
     const term = q.trim()
@@ -702,10 +762,13 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
     return () => { alive = false; clearTimeout(t) }
   }, [q, seesEveryLead])
 
-  // Anything already on screen is not "elsewhere"
+  // Anything already on screen is not "elsewhere". The function marks
+  // your own leads itself, and that is the answer to trust: the board
+  // shows at most three, so a fourth of your own would otherwise look
+  // like somebody else's.
   const elsewhereOnly = useMemo(() => {
-    const mine = new Set(found.map((l) => l.lead_no))
-    return elsewhere.filter((l) => !mine.has(l.lead_no))
+    const onScreen = new Set(found.map((l) => l.lead_no))
+    return elsewhere.filter((l) => !l.is_mine && !onScreen.has(l.lead_no))
   }, [elsewhere, found])
 
   const owners = useMemo(() => [...staff].sort((a, b) => a.full_name.localeCompare(b.full_name)), [staff])
@@ -831,7 +894,7 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
     setExporting('Collecting leads…')
     const all: LeadL[] = []
     for (let start = 0; ; start += BULK_PAGE) {
-      const qy = applyLeadFilters(supabase.from('leads').select('*'), f, q, openStageIds)
+      const qy = applyLeadFilters(supabase.from('leads').select('*'), ef, q, openStageIds)
       const { data, error: e } = await qy.order('created_at', { ascending: false }).range(start, start + BULK_PAGE - 1)
       if (e) {
         setExporting('')
@@ -1302,13 +1365,18 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
                     </Field>
                   )}
 
-                  <Field label="Labels">
-                    <select value={f.label} onChange={(e) => set({ label: e.target.value })} className={panelSelect}>
-                      <option value="all">All labels</option>
-                      <option value="none">No label</option>
-                      {labels.map((lb) => <option key={lb.id} value={lb.id}>{lb.name}</option>)}
-                    </select>
-                  </Field>
+                  {/* Locked boards do not offer this — a switch that
+                      undoes the whole point of the screen is not a
+                      choice, it is a trap. */}
+                  {!lockedLabelId && (
+                    <Field label="Labels">
+                      <select value={f.label} onChange={(e) => set({ label: e.target.value })} className={panelSelect}>
+                        <option value="all">All labels</option>
+                        <option value="none">No label</option>
+                        {labels.map((lb) => <option key={lb.id} value={lb.id}>{lb.name}</option>)}
+                      </select>
+                    </Field>
+                  )}
 
                   <Field label="Search by created date">
                     <div className="flex items-center gap-2">
@@ -1433,17 +1501,17 @@ export default function LeadsBoard({ scope }: { scope?: 'mine' | 'all' } = {}) {
                   {l.name || '—'}
                   {l.company && <span className="text-gray-500"> · {l.company}</span>}
                 </span>
-                {l.phone_tail && <span className="shrink-0 tabular-nums text-xs text-gray-500">{l.phone_tail}</span>}
+                {l.phone_hint && <span className="shrink-0 tabular-nums text-xs text-gray-500">{l.phone_hint}</span>}
                 {l.stage_name && (
-                  <span
-                    className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
-                    style={{ background: l.stage_color ?? '#4b5563' }}
-                  >
+                  <span className="shrink-0 rounded-full bg-[#2a2a2a] px-2 py-0.5 text-[11px] font-medium text-gray-200">
                     {l.stage_name}
                   </span>
                 )}
                 <span className="shrink-0 text-xs text-amber-300">
-                  {l.owner_name}
+                  {/* Unassigned is a real answer and a useful one: the
+                      lead exists, nobody is on it, so ask before you
+                      take it rather than ringing over someone. */}
+                  {l.assigned_name || 'Nobody yet'}
                   {l.branch_name && <span className="text-amber-300/60"> · {l.branch_name}</span>}
                 </span>
               </li>

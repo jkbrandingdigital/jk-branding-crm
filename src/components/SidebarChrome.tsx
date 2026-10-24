@@ -83,6 +83,19 @@ export const NAV_TINT = '#f97316'
   On its own a line icon against a dark panel is thin and easy to miss.
   The square gives it a body — which matters most in the narrow rail,
   where the label is gone and the icon is all there is to aim at.
+
+  ── Why variables and not plain colours ──
+
+  The four colours below used to be written here as hex. An inline style
+  is the last word in CSS: the light-theme sheet re-paints class names,
+  and a style attribute is not a class name, so nothing it said could
+  reach this square. Dark was built first, so on paper the open page's
+  icon stayed the pale peach meant for a black panel — invisible on
+  cream, and the one row a person most needs to find.
+
+  So the colours are named here and decided in the sheet, which already
+  knows which theme is on. Dark's own values sit in the fallbacks, so
+  this file still looks right if the variables are ever missing.
 */
 export function NavIcon({
   icon: Icon, active = false, narrow = false, muted = false,
@@ -96,8 +109,15 @@ export function NavIcon({
     <span
       className={`grid shrink-0 place-items-center rounded-lg transition-colors ${narrow ? 'h-9 w-9' : 'h-8 w-8'}`}
       style={{
-        background: active ? 'rgba(249,115,22,0.30)' : `${NAV_TINT}1f`,
-        color: active ? '#fed7aa' : muted ? '#4b5563' : NAV_TINT,
+        background: active
+          ? 'var(--nav-ico-bg-on, rgba(249,115,22,0.30))'
+          : 'var(--nav-ico-bg, rgba(249,115,22,0.12))',
+        color: active
+          ? 'var(--nav-ico-on, #fed7aa)'
+          : muted
+            ? 'var(--nav-ico-off, #4b5563)'
+            : 'var(--nav-ico, #f97316)',
+        boxShadow: active ? 'var(--nav-ico-ring, none)' : 'none',
       }}
     >
       <Icon size={narrow ? 20 : 18} strokeWidth={2} />

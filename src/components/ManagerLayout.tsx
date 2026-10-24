@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  Activity, Cake, FolderKanban, Users2, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, QrCode, type LucideIcon,
+  Activity, Cake, FolderKanban, Users2, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, QrCode, Wallet, BookOpen, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -49,18 +49,22 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: 'Team',
     items: [
-      { label: 'Attendance', path: '/manager/attendance', icon: CalendarCheck, ready: false },
+      { label: 'Attendance', path: '/manager/attendance', icon: CalendarCheck, ready: true, perm: 'attendance_view_branch' },
       { label: 'Leave Requests', path: '/manager/leaves', icon: CalendarOff, ready: false },
+      
     ],
   },
   // Its own section, not inside Team. Team > Attendance is everybody's
   // register; this is the manager's own days. Side by side under one
   // heading they would read as the same thing.
-  {
+    {
     title: 'Me',
     items: [
       { label: 'Scan attendance', path: '/scan', icon: QrCode, ready: true },
       { label: 'My attendance', path: '/manager/my-attendance', icon: CalendarCheck, ready: true },
+      { label: 'My leave', path: '/manager/my-leave', icon: CalendarOff, ready: true },
+      { label: 'My payslips', path: '/manager/my-payslips', icon: Wallet, ready: true },
+      { label: 'Policies', path: '/manager/policies', icon: BookOpen, ready: true },
     ],
   },
 ]
@@ -173,7 +177,7 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
                       title={narrow ? item.label : undefined}
                       className={`${base} focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                         isActive(item.path)
-                          ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]'
+                        ? `bg-orange-500/10 font-medium text-orange-400 ${narrow ? '' : 'shadow-[inset_3px_0_0_#f97316]'}`
                           : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
                       }`}
                     >

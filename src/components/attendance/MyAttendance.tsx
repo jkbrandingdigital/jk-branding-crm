@@ -12,10 +12,19 @@
 // everything and is handed only what is yours.
 
 import { useCallback, useEffect, useState } from 'react'
-import {
-  ChevronLeft, ChevronRight, Check, Clock, Coffee, AlertCircle, CalendarDays,
-} from 'lucide-react'
+import { ChevronLeft, ChevronRight, Check, Clock, Coffee, CalendarDays, MessageSquarePlus, Loader2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { says } from './words'
+
+type Ask = {
+  id: string
+  work_date: string
+  kind: string
+  at_time: string
+  reason: string
+  state: string
+  decide_note: string | null
+}
 
 type Day = {
   work_date: string
@@ -34,8 +43,6 @@ type Day = {
   reasons_pending: number
   remarks: string | null
 }
-
-type Pending = { id: string; kind: string; late_by_min: number; work_date: string; at: string }
 
 const clock = (iso: string | null) =>
   iso
@@ -59,12 +66,16 @@ export default function MyAttendance() {
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth())      // 0–11
   const [days, setDays] = useState<Day[]>([])
-  const [pending, setPending] = useState<Pending | null>(null)
-  const [reason, setReason] = useState('')
-  const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [openDay, setOpenDay] = useState<string | null>(null)
+  const [asks, setAsks] = useState<Ask[]>([])
+  const [asking, setAsking] = useState<string | null>(null)
+  const [kind, setKind] = useState('In')
+  const [at, setAt] = useState('09:00')
+  const [why, setWhy] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [said, setSaid] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,8 +83,7 @@ export default function MyAttendance() {
     const last = new Date(year, month + 1, 0).getDate()
     const to = `${year}-${String(month + 1).padStart(2, '0')}-${last}`
 
-    const [a, nag] = await Promise.all([
-      supabase
+    const a = await supabase
         .from('attendance')
         // One unbroken string: supabase-js reads this at the type level
         // to work out the row shape, and a string joined with + is not
@@ -81,16 +91,39 @@ export default function MyAttendance() {
         .select('work_date, status, check_in, check_out, punches, is_late, late_minutes, lunch_minutes, break_minutes, gross_minutes, minutes_worked, lunch_open, lunch_late_min, reasons_pending, remarks')
         .gte('work_date', from)
         .lte('work_date', to)
-        .order('work_date', { ascending: false }),
-      supabase.rpc('my_pending_reason'),
-    ])
+        .order('work_date', { ascending: false })
+
+    // What has already been asked about this month. RLS hands back only
+    // this person's rows, so the screen asks for everything and is given
+    // what is theirs — the same as the days above.
+    const r = await supabase
+        .from('attendance_requests')
+        .select('id, work_date, kind, at_time, reason, state, decide_note')
+        .gte('work_date', from)
+        .lte('work_date', to)
 
     if (a.error) setNote(a.error.message)
     setDays((a.data ?? []) as unknown as Day[])
-    const n = nag.data as Partial<Pending> | null
-    setPending(n?.id ? (n as Pending) : null)
+    setAsks((r.data ?? []) as unknown as Ask[])
     setLoading(false)
   }, [year, month])
+
+  async function sendAsk(workDate: string) {
+    setBusy(true)
+    setSaid(null)
+    const { data, error } = await supabase.rpc('request_correction', {
+      p_date: workDate, p_kind: kind, p_time: at, p_reason: why.trim(),
+    })
+    setBusy(false)
+    const res = data as { ok: boolean; reason?: string } | null
+    if (error || !res?.ok) {
+      return setSaid({ kind: 'bad', text: error?.message ?? res?.reason ?? 'Not sent.' })
+    }
+    setSaid({ kind: 'ok', text: 'Sent. HR will see it on their register.' })
+    setAsking(null)
+    setWhy('')
+    load()
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -99,20 +132,6 @@ export default function MyAttendance() {
     setYear(d.getFullYear())
     setMonth(d.getMonth())
     setOpenDay(null)
-  }
-
-  async function saveReason() {
-    if (!pending || reason.trim().length < 3) return
-    setBusy(true)
-    const { data, error } = await supabase.rpc('scan_reason', {
-      p_scan: pending.id, p_reason: reason.trim(),
-    })
-    setBusy(false)
-    const r = data as { ok: boolean; reason?: string } | null
-    if (error || !r?.ok) { setNote(error?.message ?? r?.reason ?? 'Not saved.'); return }
-    setReason('')
-    setNote(null)
-    load()
   }
 
   const present = days.filter((d) => d.minutes_worked > 0).length
@@ -124,36 +143,6 @@ export default function MyAttendance() {
     <div className="mx-auto max-w-3xl">
       <h1 className="text-2xl font-bold">My attendance</h1>
       <p className="mt-1 text-sm text-gray-400">Your own days, as the office clock recorded them.</p>
-
-      {/* A late scan with no reason given yet. Put at the top because it
-          is the one thing on this page that is waiting on the person. */}
-      {pending && (
-        <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4">
-          <p className="flex items-center gap-2 text-sm font-medium text-amber-200">
-            <AlertCircle size={15} />
-            {pending.kind === 'Lunch in' ? 'Late back from lunch' : 'Late in'} on{' '}
-            {new Date(pending.work_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-            {pending.late_by_min ? ` by ${pending.late_by_min} minutes` : ''}
-          </p>
-          <p className="mt-1 text-xs text-amber-200/80">
-            Your scan is already counted. Tell us what happened and it goes on the record with it.
-          </p>
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={2}
-            placeholder="e.g. Traffic at Kalawad road"
-            className="mt-3 w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
-          />
-          <button
-            onClick={saveReason}
-            disabled={busy || reason.trim().length < 3}
-            className="mt-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
-          >
-            {busy ? 'Saving…' : 'Send reason'}
-          </button>
-        </div>
-      )}
 
       {note && (
         <div className="mt-5 rounded-lg border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">{note}</div>
@@ -213,7 +202,6 @@ export default function MyAttendance() {
                         )}
                         {d.is_late && <span className="text-amber-400">{d.late_minutes}m late</span>}
                         {d.lunch_open && <span className="text-amber-400">lunch not closed</span>}
-                        {d.reasons_pending > 0 && <span className="text-amber-400">reason pending</span>}
                       </span>
                     </span>
 
@@ -246,10 +234,84 @@ export default function MyAttendance() {
                         <p className="mt-2 text-amber-400">Back from lunch {d.lunch_late_min} minutes late.</p>
                       )}
                       {d.remarks && <p className="mt-2 text-gray-400">{d.remarks}</p>}
-                      <p className="mt-3 text-[11px] text-gray-600">
-                        Something wrong here? Tell HR — they can correct a day, and every correction is recorded with
-                        a reason.
-                      </p>
+                      {/* This used to be a sentence telling people to
+                          "tell HR" with no way to do it. The RPC existed
+                          from the day the register did; the button did
+                          not. A screen that names an action and does not
+                          offer it is worse than silence. */}
+                      {asks.filter((x) => x.work_date === d.work_date).map((x) => (
+                        <p key={x.id} className="mt-3 rounded-lg border border-[#242424] bg-[#161616] px-3 py-2 text-[11px]">
+                          <span className={
+                            x.state === 'Approved' ? 'text-green-300'
+                            : x.state === 'Refused' ? 'text-red-300' : 'text-amber-300'
+                          }>
+                            {x.state}
+                          </span>
+                          <span className="text-gray-500"> · you asked for {says(x.kind)} at {x.at_time.slice(0, 5)}</span>
+                          {x.decide_note && <span className="block text-gray-400">HR: {x.decide_note}</span>}
+                        </p>
+                      ))}
+
+                      {asking === d.work_date ? (
+                        <div className="mt-3 rounded-lg border border-[#242424] bg-[#161616] p-3">
+                          <div className="flex flex-wrap gap-2">
+                            <select
+                              value={kind} onChange={(e) => setKind(e.target.value)}
+                              className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2.5 py-2 text-xs text-white focus:border-orange-500 focus:outline-none"
+                            >
+                              <option>In</option>
+                              <option>Out</option>
+                              <option value="Lunch out">Lunch in</option>
+                              <option value="Lunch in">Lunch out</option>
+                            </select>
+                            <input
+                              type="time" value={at} onChange={(e) => setAt(e.target.value)}
+                              className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2.5 py-2 text-xs text-white [color-scheme:dark] focus:border-orange-500 focus:outline-none"
+                            />
+                            <input
+                              value={why} onChange={(e) => setWhy(e.target.value)}
+                              placeholder="What happened? HR reads this."
+                              className="min-w-[12rem] flex-1 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-xs text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
+                            />
+                          </div>
+
+                          {said && (
+                            <p className={`mt-2 text-[11px] ${said.kind === 'ok' ? 'text-green-300' : 'text-red-300'}`}>
+                              {said.text}
+                            </p>
+                          )}
+
+                          <div className="mt-2.5 flex items-center gap-2">
+                            <button
+                              onClick={() => sendAsk(d.work_date)}
+                              disabled={busy || why.trim().length < 3}
+                              className="flex items-center gap-1.5 rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-500 disabled:opacity-40"
+                            >
+                              {busy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Send to HR
+                            </button>
+                            <button
+                              onClick={() => { setAsking(null); setSaid(null) }}
+                              className="rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white"
+                            >
+                              Cancel
+                            </button>
+                            {why.trim().length < 3 && (
+                              <span className="text-[11px] text-gray-600">Say what happened first.</span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setAsking(d.work_date)
+                            setSaid(null)
+                            setKind(d.check_in ? 'Out' : 'In')
+                          }}
+                          className="mt-3 flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-[11px] text-gray-300 transition-colors hover:bg-[#1a1a1a] hover:text-white"
+                        >
+                          <MessageSquarePlus size={12} /> Ask HR to correct this day
+                        </button>
+                      )}
                     </div>
                   )}
                 </li>

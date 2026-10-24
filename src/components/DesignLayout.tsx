@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Menu, X, QrCode, CalendarCheck, type LucideIcon } from 'lucide-react'
+import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Menu, X, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
@@ -36,7 +36,9 @@ const NAV: { title: string; items: NavItem[] }[] = [
       // word for it.
       { label: 'Scan attendance', path: '/scan', icon: QrCode },
       { label: 'My attendance', path: '/design/attendance', icon: CalendarCheck },
-      { label: 'Leave', icon: CalendarOff },
+      { label: 'My leave', path: '/design/my-leave', icon: CalendarOff },
+      { label: 'My payslips', path: '/design/my-payslips', icon: Wallet },
+      { label: 'Policies', path: '/design/policies', icon: BookOpen },
     ],
   },
 ]
@@ -115,7 +117,7 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
                       title={narrow ? item.label : undefined}
                       className={`${base} focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
                         isActive(item.path)
-                          ? 'bg-orange-500/10 font-medium text-orange-400 shadow-[inset_3px_0_0_#f97316]'
+                          ? `bg-orange-500/10 font-medium text-orange-400 ${narrow ? '' : 'shadow-[inset_3px_0_0_#f97316]'}`
                           : 'text-gray-300 hover:bg-[#1a1a1a] hover:text-white'
                       }`}
                     >
