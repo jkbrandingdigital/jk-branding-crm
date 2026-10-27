@@ -40,6 +40,39 @@ const TASKS_PATH: Record<string, string> = {
   design_team: '/design/tasks',
 }
 
+/*
+  Header, two shapes
+
+  Desktop keeps everything the eye can take in at once: icon, wordmark,
+  tagline, the actions on the right. The screenshot that got this file
+  reopened was mobile: the same six things crammed into 390 px with the
+  wordmark splitting onto a second line of grey small print nobody can
+  read. There was no "mobile view" problem in the code because the file
+  never knew mobile existed — it painted the same thing at every width
+  and let the browser squash it.
+
+  So the rules change at `sm` (640 px), not before:
+
+    - On narrow screens the icon is the brand. There is one mark, not
+      one mark plus a wordmark of the same mark. "JK" fits in a tap
+      target the thumb has to reach for anyway.
+
+    - "(India) Private Limited" and "Vision 2036 · Agency to Unicorn"
+      go away below sm. They are good lines; they are not lines you
+      need the first time you unlock the phone and open the app, which
+      is when this header is seen. On a wider screen there is room for
+      them and they are back.
+
+    - The right-hand actions keep the same icons at every width, but
+      shed their words — "My work", "Admin area", the person's name
+      and role all step aside until there is room. The avatar carries
+      the menu on its own, which is how every other mobile app does it,
+      so there is nothing to learn.
+
+    - Everything is tucked up — py-2.5 on mobile instead of py-4 — so
+      the chrome does not eat half the screen above the fold.
+*/
+
 export default function Header() {
   const { pathname } = useLocation()
   const { isSubAdmin, isSuper } = usePermissions()
@@ -89,82 +122,125 @@ export default function Header() {
   }
 
   return (
-    <header className="bg-[#1a1a1a] border-b border-[#2a2a2a] px-6 py-4 flex justify-between items-center">
-      <div className="flex items-center gap-2">
-        <img src="/jklogoicon.png" alt="" className="h-10 w-auto" />
-        <div>
-          <img src="/logo.png" alt="JK Branding" className="h-10 w-auto" />
-          <p className="text-orange-400 text-xs font-medium">Vision 2036 : Agency to Unicorn</p>
+    <header className="flex items-center justify-between gap-2 border-b border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2.5 sm:gap-3 sm:px-6 sm:py-4">
+      {/* ── Brand ──
+          On narrow screens, the icon alone. From sm up, icon + wordmark + tagline. */}
+      <Link to="/" className="flex min-w-0 items-center gap-2 sm:gap-2.5">
+        <img
+          src="/jklogoicon.png"
+          alt="JK Branding"
+          className="h-9 w-auto shrink-0 sm:h-10"
+        />
+        <div className="hidden min-w-0 sm:block">
+          <img src="/logo.png" alt="" className="h-9 w-auto sm:h-10" />
+          <p className="truncate text-xs font-medium text-orange-400">
+            Vision 2036 · Agency to Unicorn
+          </p>
         </div>
-      </div>
+      </Link>
 
-      <div className="flex items-center gap-3">
-      {/* A sub admin has two sides: their own daily work, and the parts of
-          the admin area that were switched on for them. */}
-      {isSubAdmin && !isSuper && role && (
-        pathname.startsWith('/admin') ? (
-          <Link
-            to={ownHome(role)}
-            className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 transition-colors hover:border-[#3a3a3a] hover:text-white"
-          >
-            <Briefcase size={15} />
-            <span className="hidden sm:inline">My work</span>
-          </Link>
-        ) : (
-          <Link
-            to="/admin"
-            className="flex items-center gap-2 rounded-lg border border-orange-500/50 bg-orange-500/10 px-3 py-2 text-sm text-orange-400 transition-colors hover:border-orange-500 hover:text-orange-300"
-          >
-            <ShieldCheck size={15} />
-            <span className="hidden sm:inline">Admin area</span>
-          </Link>
-        )
-      )}
-      <AppearanceMenu />
-      <NotificationBell remindersPath={REMINDERS_PATH[role] ?? '/'} leadsPath={LEADS_PATH[role] ?? '/'} tasksPath={TASKS_PATH[role] ?? '/'} />
-      <div className="relative" ref={boxRef}>
-        <button
-          onClick={() => setMenu((m) => !m)}
-          aria-expanded={menu}
-          className="flex items-center gap-3 rounded-lg border border-[#2a2a2a] py-1.5 pl-1.5 pr-3 text-left transition-colors hover:border-[#3a3a3a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500"
-        >
-          {photo ? (
-            <img src={photo} alt="" className="h-9 w-9 rounded-full object-cover" />
+      {/* ── Actions ──
+          Icons at every width; text (My work, Admin area, the name) only
+          when there is room. */}
+      <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* A sub admin has two sides: their own daily work, and the parts of
+            the admin area that were switched on for them. On mobile the
+            label is dropped, so it is a single-icon pill that still shows
+            which side is on at a glance. */}
+        {isSubAdmin && !isSuper && role && (
+          pathname.startsWith('/admin') ? (
+            <Link
+              to={ownHome(role)}
+              aria-label="My work"
+              title="My work"
+              className="flex items-center gap-2 rounded-lg border border-[#2a2a2a] p-2 text-sm text-gray-300 transition-colors hover:border-[#3a3a3a] hover:text-white sm:px-3"
+            >
+              <Briefcase size={16} />
+              <span className="hidden sm:inline">My work</span>
+            </Link>
           ) : (
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-500/15 text-sm font-semibold text-orange-400">
-              {(name || email || '?').charAt(0).toUpperCase()}
-            </span>
-          )}
-          <span className="hidden sm:block">
-            <span className="block max-w-[180px] truncate text-sm text-white">{name || email}</span>
-            <span className="block text-xs text-gray-500">{[ROLE_LABEL[role] ?? role, branch].filter(Boolean).join(' · ')}</span>
-          </span>
-          <ChevronDown className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${menu ? 'rotate-180' : ''}`} />
-        </button>
-
-        {menu && (
-          <div className="absolute right-0 z-30 mt-2 w-56 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#161616] shadow-lg">
-            <button
-              onClick={() => { setMenu(false); setProfileOpen(true) }}
-              className="flex w-full items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
+            <Link
+              to="/admin"
+              aria-label="Admin area"
+              title="Admin area"
+              className="flex items-center gap-2 rounded-lg border border-orange-500/50 bg-orange-500/10 p-2 text-sm text-orange-400 transition-colors hover:border-orange-500 hover:text-orange-300 sm:px-3"
             >
-              <User className="h-4 w-4" /> My profile
-            </button>
-            <button
-              onClick={() => { setMenu(false); setPwOpen(true) }}
-              className="flex w-full items-center gap-3 border-t border-[#2a2a2a] px-4 py-3 text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
-            >
-              <KeyRound className="h-4 w-4" /> Change password
-            </button>
-            <button
-              onClick={handleLogout}
-              className="flex w-full items-center gap-3 border-t border-[#2a2a2a] px-4 py-3 text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
-            >
-              <LogOut className="h-4 w-4" /> Logout
-            </button>
-          </div>
+              <ShieldCheck size={16} />
+              <span className="hidden sm:inline">Admin area</span>
+            </Link>
+          )
         )}
-      </div>
+
+        <AppearanceMenu />
+        <NotificationBell
+          remindersPath={REMINDERS_PATH[role] ?? '/'}
+          leadsPath={LEADS_PATH[role] ?? '/'}
+          tasksPath={TASKS_PATH[role] ?? '/'}
+        />
+
+        <div className="relative" ref={boxRef}>
+          <button
+            onClick={() => setMenu((m) => !m)}
+            aria-expanded={menu}
+            aria-label="Your account"
+            // On mobile the trigger is the avatar alone with a small
+            // chevron tucked into its corner — the same shape every
+            // other phone app uses, so there is nothing to teach.
+            className="flex items-center gap-2 rounded-full border border-[#2a2a2a] p-0.5 pr-0 transition-colors hover:border-[#3a3a3a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 sm:gap-3 sm:rounded-lg sm:py-1.5 sm:pl-1.5 sm:pr-3"
+          >
+            {photo ? (
+              <img src={photo} alt="" className="h-8 w-8 rounded-full object-cover sm:h-9 sm:w-9" />
+            ) : (
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-500/15 text-sm font-semibold text-orange-400 sm:h-9 sm:w-9">
+                {(name || email || '?').charAt(0).toUpperCase()}
+              </span>
+            )}
+            <span className="hidden sm:block">
+              <span className="block max-w-[180px] truncate text-sm text-white">{name || email}</span>
+              <span className="block text-xs text-gray-500">
+                {[ROLE_LABEL[role] ?? role, branch].filter(Boolean).join(' · ')}
+              </span>
+            </span>
+            <ChevronDown
+              className={`mr-1 h-4 w-4 shrink-0 text-gray-500 transition-transform sm:mr-0 ${
+                menu ? 'rotate-180' : ''
+              }`}
+            />
+          </button>
+
+          {menu && (
+            <div className="absolute right-0 z-30 mt-2 w-60 overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#161616] shadow-lg">
+              {/* On mobile the name does not fit beside the avatar, so it
+                  sits at the top of the menu where it has room — one place
+                  to read who is signed in. On desktop that line is already
+                  on the trigger, so this header disappears. */}
+              <div className="border-b border-[#2a2a2a] px-4 py-3 sm:hidden">
+                <p className="truncate text-sm font-medium text-white">{name || email}</p>
+                <p className="truncate text-xs text-gray-500">
+                  {[ROLE_LABEL[role] ?? role, branch].filter(Boolean).join(' · ')}
+                </p>
+              </div>
+              <button
+                onClick={() => { setMenu(false); setProfileOpen(true) }}
+                className="flex w-full items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
+              >
+                <User className="h-4 w-4" /> My profile
+              </button>
+              <button
+                onClick={() => { setMenu(false); setPwOpen(true) }}
+                className="flex w-full items-center gap-3 border-t border-[#2a2a2a] px-4 py-3 text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
+              >
+                <KeyRound className="h-4 w-4" /> Change password
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex w-full items-center gap-3 border-t border-[#2a2a2a] px-4 py-3 text-sm text-gray-300 hover:bg-[#1f1f1f] hover:text-white"
+              >
+                <LogOut className="h-4 w-4" /> Logout
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} onSaved={loadMe} />}

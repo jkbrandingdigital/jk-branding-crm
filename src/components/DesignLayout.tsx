@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Menu, X, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
+import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Package, Menu, X, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
@@ -26,6 +26,11 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: 'My performance', path: '/design/performance', icon: TrendingUp, perm: 'design_perf' },
       // Only the designer who handles printing has this switched on.
       { label: 'Printing Media', path: '/design/print', icon: Printer, perm: 'mod_print_jobs' },
+      // Same designer, one step further on. Printing Media is the list of
+      // what went to a printer; this is the order behind it — the vendor,
+      // the quantity and what the job is costing. The artwork they send
+      // from the screen above is what this one is waiting for.
+      { label: 'Job Work', path: '/design/job-works', icon: Package, perm: 'mod_job_works' },
     ],
   },
   {

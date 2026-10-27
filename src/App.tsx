@@ -59,6 +59,9 @@ import AdminDesignPerformance from './pages/admin/DesignPerformance'
 import HrDesignPerformance from './pages/hr/DesignPerformance'
 import AdminWorkTypes from './pages/admin/WorkTypes'
 import AdminPrintRegister from './pages/admin/PrintRegister'
+// Job work: the order behind a print job — which vendor has it, how far
+// it has got, what dispatch found and what shipped.
+import AdminJobWorks from './pages/admin/JobWorks'
 import AdminCustomers from './pages/admin/Customers'
 import GreetingsPopup from './components/customers/GreetingsPopup'
 import AdminGreetings from './pages/admin/Greetings'
@@ -71,6 +74,7 @@ import SalesProjects from './pages/sales/Projects'
 import SalesCustomers from './pages/sales/Customers'
 import ManagerCustomers from './pages/manager/Customers'
 import DesignPrintRegister from './pages/design/PrintRegister'
+import DesignJobWorks from './pages/design/JobWorks'
 import ManagerQuotations from './pages/manager/Quotations'
 import ManagerQuotationEdit from './pages/manager/QuotationEdit'
 import ManagerQuotationView from './pages/manager/QuotationView'
@@ -115,6 +119,19 @@ import AdminPoliciesManage from './pages/admin/PoliciesManage'
 import ManagerPolicies from './pages/manager/Policies'
 import SalesPolicies from './pages/sales/Policies'
 import DesignPolicies from './pages/design/Policies'
+// Dispatch and Accounts. Both work off the same job work register —
+// dispatch checks the goods and books the courier, accounts settles the
+// vendor. Neither is given a register of its own.
+import DispatchJobWorks from './pages/dispatch/JobWorks'
+import DispatchAttendance from './pages/dispatch/Attendance'
+import DispatchMyLeave from './pages/dispatch/MyLeave'
+import DispatchMyPayslips from './pages/dispatch/MyPayslips'
+import DispatchPolicies from './pages/dispatch/Policies'
+import AccountsJobWorks from './pages/accounts/JobWorks'
+import AccountsAttendance from './pages/accounts/Attendance'
+import AccountsMyLeave from './pages/accounts/MyLeave'
+import AccountsMyPayslips from './pages/accounts/MyPayslips'
+import AccountsPolicies from './pages/accounts/Policies'
 import AdminMyLeave from './pages/admin/MyLeave'
 import ManagerMyLeave from './pages/manager/MyLeave'
 import ManagerAttendancePage from './pages/manager/Attendance'
@@ -136,6 +153,10 @@ const ADMIN_HOME: { perm: string; path: string }[] = [
   { perm: 'mod_notes', path: '/admin/notes' },
   { perm: 'mod_todos', path: '/admin/todos' },
   { perm: 'mod_quotations', path: '/admin/quotations' },
+  // Somebody switched on for dispatch and nothing else lands here. Leave
+  // it out and they reach "Nothing is switched on yet" with a sidebar
+  // full of things they can open.
+  { perm: 'mod_job_works', path: '/admin/job-works' },
   { perm: 'mod_employees', path: '/admin/employees' },
   { perm: 'mod_settings', path: '/admin/settings' },
   { perm: 'mod_backup', path: '/admin/backup' },
@@ -225,6 +246,10 @@ function AppRoutes() {
           <Route path="/admin/design-performance" element={<Guard ok={may('design_perf')}><AdminDesignPerformance /></Guard>} />
           <Route path="/admin/work-types" element={<Guard ok={may('work_types_edit')}><AdminWorkTypes /></Guard>} />
           <Route path="/admin/print" element={<Guard ok={may('mod_print_jobs')}><AdminPrintRegister /></Guard>} />
+          {/* One register for everyone. Who sees which jobs, and who may
+              pass a check or book a courier, is decided in the database —
+              the route only asks whether the module is open at all. */}
+          <Route path="/admin/job-works" element={<Guard ok={may('mod_job_works')}><AdminJobWorks /></Guard>} />
           <Route path="/admin/customers" element={<Guard ok={may('mod_customers')}><AdminCustomers /></Guard>} />
           <Route path="/admin/greetings" element={<Guard ok={may('mod_customers')}><AdminGreetings /></Guard>} />
           <Route path="/admin/projects" element={<Guard ok={may('mod_projects')}><AdminProjects /></Guard>} />
@@ -330,11 +355,36 @@ function AppRoutes() {
           <Route path="/design/activity" element={<DesignTeamActivity />} />
           <Route path="/design/performance" element={<DesignPerformancePage />} />
           <Route path="/design/print" element={<DesignPrintRegister />} />
+          <Route path="/design/job-works" element={<DesignJobWorks />} />
           <Route path="/design/projects" element={<DesignProjects />} />
           <Route path="/design/my-leave" element={<DesignMyLeave />} />
           <Route path="/design/my-payslips" element={<DesignMyPayslips />} />
           <Route path="/design/policies" element={<DesignPolicies />} />
           <Route path="/design/*" element={<DesignDashboard />} />
+        </>
+      )}
+      {role === 'dispatch' && (
+        <>
+          <Route path="/dispatch/attendance" element={<DispatchAttendance />} />
+          <Route path="/dispatch/my-leave" element={<DispatchMyLeave />} />
+          <Route path="/dispatch/my-payslips" element={<DispatchMyPayslips />} />
+          <Route path="/dispatch/policies" element={<DispatchPolicies />} />
+          {/* The register is the home page. These two are the same screen
+              with a filter already on — dispatch opens the CRM to ask
+              "what is waiting on me", not to browse. */}
+          <Route path="/dispatch/qc" element={<DispatchJobWorks />} />
+          <Route path="/dispatch/shipped" element={<DispatchJobWorks />} />
+          <Route path="/dispatch/*" element={<DispatchJobWorks />} />
+        </>
+      )}
+      {role === 'accounts' && (
+        <>
+          <Route path="/accounts/attendance" element={<AccountsAttendance />} />
+          <Route path="/accounts/my-leave" element={<AccountsMyLeave />} />
+          <Route path="/accounts/my-payslips" element={<AccountsMyPayslips />} />
+          <Route path="/accounts/policies" element={<AccountsPolicies />} />
+          <Route path="/accounts/job-works" element={<AccountsJobWorks />} />
+          <Route path="/accounts/*" element={<AccountsJobWorks />} />
         </>
       )}
       <Route path="*" element={<Navigate to={home} />} />

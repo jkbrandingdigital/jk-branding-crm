@@ -3,13 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/jklogoicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      viewport-fit=cover lets the app paint into the iPhone's rounded
+      corners and under the home-indicator bar, so the orange brand
+      header reaches edge to edge once installed to the home screen.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="JK Branding CRM — leads, sales and team management" />
     <title>JK Branding CRM</title>
+
+    <!-- Add to Home Screen -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0f0f0f" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" />
+
+    <!--
+      Open in its own window, not Safari in a wrapper.
+      "apple-mobile-web-app-capable" is iPhone's historical spelling;
+      "mobile-web-app-capable" is the agreed one. Both, so Android and
+      iOS both treat it as a real app.
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="JK BrandOS" />
   </head>
   <body>
     <div id="root"></div>

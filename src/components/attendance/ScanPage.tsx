@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Camera, Check, X, Loader2, RefreshCw, Zap, ZapOff, QrCode, MapPin,
 } from 'lucide-react'
+import jsQR from 'jsqr'
 import { supabase } from '../../lib/supabase'
 import { says, BUTTON_WORDS } from './words'
 import { istDate } from '../../lib/format'
@@ -184,7 +185,6 @@ export default function ScanPage() {
   // renders old. It must read the choice from a ref, not from `want`.
   useEffect(() => { pickRef.current = want.kind }, [want.kind])
   const dayDone = today?.lastKind === 'Out'
-  const hasDetector = typeof (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector !== 'undefined'
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000)
@@ -384,18 +384,35 @@ export default function ScanPage() {
 
   // ── reading the code ───────────────────────────────────────────────────
   //
-  // BarcodeDetector where the browser has it (Android Chrome), which is
-  // fast and costs nothing. Everywhere else the page shows the manual
-  // button rather than pulling in a second decoder: iOS Safari has no
-  // BarcodeDetector, and shipping a whole decoder for it is a decision
-  // worth making on purpose, not by accident.
+  // Two decoders, picked in this order:
+  //
+  //   1. BarcodeDetector, where the browser has it. Native, fast, costs
+  //      nothing. Android Chrome has it.
+  //
+  //   2. jsQR, everywhere else. iOS Safari has no BarcodeDetector, and
+  //      an iPhone opening the installed app and then being told to go
+  //      back to the Camera app to scan is a flow with a seam right in
+  //      the middle of it. jsQR is 40 KB, pure JavaScript, and reads
+  //      an ImageData the browser hands it from a canvas. We draw one
+  //      frame of the video onto a hidden canvas, pass its pixels to
+  //      jsQR, and if a code is found we send it.
+  //
+  // The in-app camera is the second way in regardless. The POSTER's own
+  // link, read by the phone's native camera, is still the first way:
+  // it brings people here with ?c=TOKEN already set, with no camera to
+  // open and no permission to grant. Both work; the in-app camera is
+  // what keeps the installed app a self-contained thing.
 
   useEffect(() => {
     if (!scanning || camState !== 'on' || busy || result) return
-    const Detector = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => { detect(s: CanvasImageSource): Promise<{ rawValue: string }[]> } }).BarcodeDetector
-    if (!Detector) return
 
-    const det = new Detector({ formats: ['qr_code'] })
+    const Detector = (window as unknown as {
+      BarcodeDetector?: new (o: { formats: string[] }) => {
+        detect(s: CanvasImageSource): Promise<{ rawValue: string }[]>
+      }
+    }).BarcodeDetector
+
+    const det = Detector ? new Detector({ formats: ['qr_code'] }) : null
     let stop = false
 
     const tick = async () => {
@@ -404,14 +421,47 @@ export default function ScanPage() {
       try {
         const v = video.current
         if (v.readyState >= 2) {
-          const found = await det.detect(v)
-          if (found.length > 0 && !sent.current) await send(found[0].rawValue)
+          let raw: string | null = null
+
+          if (det) {
+            const found = await det.detect(v)
+            if (found.length > 0) raw = found[0].rawValue
+          } else {
+            // The jsQR path. The canvas is kept in the DOM (hidden)
+            // rather than recreated per frame — making one every 300 ms
+            // runs the garbage collector into the ground on a mid-range
+            // phone.
+            const c = canvas.current
+            if (c) {
+              const w = v.videoWidth
+              const h = v.videoHeight
+              if (w && h) {
+                if (c.width !== w) c.width = w
+                if (c.height !== h) c.height = h
+                const ctx = c.getContext('2d', { willReadFrequently: true })
+                if (ctx) {
+                  ctx.drawImage(v, 0, 0, w, h)
+                  const img = ctx.getImageData(0, 0, w, h)
+                  // "dontInvert": the poster is black on white; checking
+                  // the inverted version too is work for nothing.
+                  const found = jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' })
+                  if (found?.data) raw = found.data
+                }
+              }
+            }
+          }
+
+          if (raw && !sent.current) await send(raw)
         }
       } catch { /* a frame that would not decode; the next one will */ }
       reading.current = false
     }
 
-    const id = window.setInterval(tick, 300)
+    // 300 ms with BarcodeDetector (native, cheap). 180 ms with jsQR —
+    // slightly tighter because the browser's scheduler is the only one
+    // between frames; on an iPhone that still sits comfortably under
+    // the frame rate.
+    const id = window.setInterval(tick, det ? 300 : 180)
     return () => { stop = true; window.clearInterval(id) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanning, camState, busy, result])
@@ -736,13 +786,6 @@ export default function ScanPage() {
           </div>
 
           <p className="mt-3 text-center text-xs text-slate-400">Hold steady — it reads by itself.</p>
-
-          {!hasDetector && (
-            <p className="mt-3 rounded-xl bg-amber-500/10 px-3 py-2 text-center text-[11px] leading-relaxed text-amber-300">
-              This browser cannot read a QR from inside a page. Use your phone&rsquo;s own camera on the poster
-              instead — it opens this app with the code already read.
-            </p>
-          )}
         </Sheet>
       )}
 

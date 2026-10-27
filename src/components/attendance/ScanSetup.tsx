@@ -16,11 +16,11 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   MapPin, QrCode, Users, Smartphone, ListChecks, Activity, Crosshair,
   Printer, RefreshCw, ChevronDown, Check, X, AlertCircle, CheckCircle2,
-  Plus, Loader2, Ban, type LucideIcon,
+  Plus, Loader2, Ban, Download, type LucideIcon,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
-import { PosterSheet, QrImage, type PosterInfo } from './QrPoster'
+import { PosterSheet, QrImage, downloadQr, type PosterInfo } from './QrPoster'
 
 // ── types ────────────────────────────────────────────────────────────────
 
@@ -95,6 +95,32 @@ const day = (d: string) =>
 
 const metres = (m: number | null) =>
   m == null ? '—' : m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`
+
+/**
+ * The poster carries a LINK, not the bare token.
+ *
+ * This is the whole difference between a poster that works and one that
+ * does not. A phone camera reading a bare token shows a line of letters
+ * and offers nothing to tap — the poster says "tap the link that
+ * appears" and no link appears. Wrapped in an address, the iPhone Camera
+ * app and every Android scanner know exactly what to do with it.
+ *
+ * The address comes from wherever this page is served, so there is no
+ * domain written into the code to go stale when the site moves.
+ *
+ * The prefix strip handles a payload that arrives tagged (`v1:TOKEN`);
+ * an untagged one passes through untouched.
+ */
+function scanLink(payload: string) {
+  const token = payload.replace(/^[A-Za-z0-9]{1,8}:/, '')
+  return `${window.location.origin}/scan?c=${encodeURIComponent(token)}`
+}
+
+/** A file name a person can find again: "Rajkot-office-qr.png". */
+function qrFileName(place: string, codeNo: number) {
+  const clean = place.trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return `${clean || 'poster'}-qr-${codeNo}.png`
+}
 
 /** Straight-line metres, the same haversine the database uses. */
 function distance(aLat: number, aLng: number, bLat: number, bLng: number) {
@@ -444,7 +470,28 @@ export default function ScanSetup() {
     if (error) return say('bad', error.message)
     const r = data as { ok: boolean; reason?: string; payload?: string }
     if (!r?.ok || !r.payload) return say('bad', r?.reason ?? 'The code could not be read.')
-    setCodeFor((m) => ({ ...m, [site.id]: r.payload as string }))
+    setCodeFor((m) => ({ ...m, [site.id]: scanLink(r.payload as string) }))
+  }
+
+  /**
+   * The same code, as a PNG file.
+   *
+   * Printing from here is the quick way; a file is the one that goes to a
+   * print shop, into a WhatsApp message, or onto a machine with a better
+   * printer. It is drawn at about 1200 px, so it stays sharp at any size
+   * somebody prints it.
+   */
+  async function saveCode(site: Site) {
+    const { data, error } = await supabase.rpc('site_qr', { p_site: site.id })
+    if (error) return say('bad', error.message)
+    const r = data as { ok: boolean; reason?: string; payload?: string }
+    if (!r?.ok || !r.payload) return say('bad', r?.reason ?? 'The code could not be read.')
+    try {
+      await downloadQr(scanLink(r.payload), qrFileName(site.name, site.qr_no))
+      say('ok', `Code saved for ${site.name}.`)
+    } catch (e) {
+      say('bad', e instanceof Error ? e.message : String(e))
+    }
   }
 
   async function print(site: Site, paper: 'A4' | 'A5') {
@@ -455,7 +502,7 @@ export default function ScanSetup() {
     setPoster({
       paper,
       info: {
-        payload: r.payload,
+        payload: scanLink(r.payload),
         place: site.name,
         branch: r.branch ?? '',
         codeNo: site.qr_no,
@@ -592,6 +639,9 @@ export default function ScanSetup() {
                     </button>
                     <button onClick={() => print(s, 'A5')} className="flex items-center gap-1.5 rounded-lg border border-orange-500/60 px-3 py-1.5 text-xs text-orange-400 hover:bg-orange-500/10">
                       <Printer size={13} /> A5
+                    </button>
+                    <button onClick={() => saveCode(s)} className="flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white">
+                      <Download size={13} /> PNG
                     </button>
                     <button onClick={() => newCode(s)} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-red-900 px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/40 disabled:opacity-50">
                       <RefreshCw size={13} /> New code

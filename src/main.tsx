@@ -21,3 +21,6 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
     })
   })
 }
+
+   import { registerSW } from './lib/registerSW'
+   registerSW()

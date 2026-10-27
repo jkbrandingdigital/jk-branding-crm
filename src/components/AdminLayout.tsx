@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, QrCode, BookOpen, type LucideIcon,
+  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Package, ShieldCheck, QrCode, BookOpen, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -87,7 +87,20 @@ const GROUPS: NavGroup[] = [
     ],
   },
   { key: 'digital', label: 'Digital Department', icon: MonitorSmartphone, items: [] },
-  { key: 'dispatch', label: 'Dispatch Zone', icon: Truck, items: [] },
+  {
+    key: 'dispatch',
+    label: 'Dispatch Zone',
+    icon: Truck,
+    items: [
+      // The order behind a print job: which vendor has it, how far it has
+      // got, and what shipped. Sales opens it, the designer sends the
+      // artwork, the vendor works, dispatch checks and books the courier.
+      { label: 'Job Work Orders', path: '/admin/job-works', icon: Package, ready: true, perm: 'mod_job_works' },
+      // The same register, filtered to what is waiting on a check. It is
+      // the one question the two people in dispatch open the CRM to ask.
+      { label: 'Quality Check', path: '/admin/job-works?stage=production_done', icon: ShieldCheck, ready: true, perm: 'mod_dispatch' },
+    ],
+  },
   {
     key: 'designing',
     label: 'Designing Department',
@@ -99,7 +112,16 @@ const GROUPS: NavGroup[] = [
       { label: 'Printing Media', path: '/admin/print', icon: Printer, ready: true, perm: 'mod_print_jobs' },
     ],
   },
-  { key: 'finance', label: 'Finance Department', icon: Wallet, items: [] },
+  {
+    key: 'finance',
+    label: 'Finance Department',
+    icon: Wallet,
+    items: [
+      // What is still owed to the printers. The register is the same one
+      // dispatch uses; this line is for whoever pays the bills.
+      { label: 'Vendor Payments', path: '/admin/job-works', icon: Wallet, ready: true, perm: 'job_work_payment' },
+    ],
+  },
   {
     key: 'company',
     label: 'Company',
@@ -122,9 +144,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   // Only the closest match lights up: /admin/quotations/new must not also
   // light up /admin/quotations
+  //
+  // A path may carry a query (Quality Check is the register with a filter
+  // already on), and the browser's pathname never does. Compare on the
+  // part before the '?' or nothing in that group would ever light up.
+  const pathOf = (p: string) => p.split('?')[0]
   const bestMatch = GROUPS.flatMap((g) => g.items)
-    .filter((i) => pathname === i.path || pathname.startsWith(i.path + '/'))
-    .sort((a, b) => b.path.length - a.path.length)[0]?.path ?? null
+    .filter((i) => pathname === pathOf(i.path) || pathname.startsWith(pathOf(i.path) + '/'))
+    .sort((a, b) => pathOf(b.path).length - pathOf(a.path).length)[0]?.path ?? null
   const isActive = (path: string) => path === bestMatch
 
   const activeGroup = GROUPS.find((g) => g.items.some((i) => isActive(i.path)))?.key ?? null

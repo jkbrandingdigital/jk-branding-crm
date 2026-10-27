@@ -11,10 +11,11 @@
 // why. This is exactly the kind of thing that belongs in a library.
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 
 type Props = {
-  payload: string          // "JKB:XXXXXXXXXXXXXXXX" — straight from site_qr()
+  payload: string          // the scan link: https://…/scan?c=TOKEN
   size?: number
   className?: string
 }
@@ -68,8 +69,30 @@ export function QrImage({ payload, size = 180, className }: Props) {
   )
 }
 
+/**
+ * Save the code as a PNG file.
+ *
+ * Printing from the browser is the quick way; a file is the one you can
+ * send to a print shop, put in a WhatsApp message, or hand to somebody
+ * with a better printer. It is the same image the poster carries.
+ */
+export async function downloadQr(payload: string, fileName: string) {
+  const url = await QRCode.toDataURL(payload, {
+    errorCorrectionLevel: 'Q',
+    margin: 2,
+    scale: 20,              // ~1200px: large enough to print at any size
+    color: { dark: '#000000', light: '#FFFFFF' },
+  })
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName.endsWith('.png') ? fileName : `${fileName}.png`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
 export type PosterInfo = {
-  payload: string
+  payload: string          // the scan link the poster carries
   place: string            // "Rajkot office"
   branch: string           // "Rajkot"
   codeNo: number
@@ -82,6 +105,36 @@ export type PosterInfo = {
  * Two rather than one because people arriving and people leaving queue in
  * different places, and a single poster at the door turns the morning into
  * a line. The second is not a spare — it is the one used at going-home time.
+ *
+ * ── Why this hangs off document.body ──
+ *
+ * The print rule below hides every child of <body> except the sheet. Left
+ * where React puts it, the sheet sits INSIDE <div id="root"> — which is
+ * itself a child of body, so the rule hid the root and took the posters
+ * down with it. The dialogue opened on a blank page every time, and
+ * nothing on screen could explain why: the code was fine, the QR was
+ * fine, the paper was empty.
+ *
+ * A portal puts the sheet where the rule expects it: a real child of
+ * body, beside the root rather than inside it.
+ *
+ * ── And why it waits, without counting ──
+ *
+ * It used to print on a 400 ms timer and close itself in the same breath.
+ * A timer is a guess about how long an image takes to draw, and the guess
+ * is wrong on a slow machine — which prints an empty box.
+ *
+ * The first attempt to fix that counted the codes as they loaded, and was
+ * worse: `Poster` is declared inside this function, so every render makes
+ * a NEW component type and React throws the subtree away and builds it
+ * again. Counting caused a render, the render remounted the images, the
+ * images reported in again — and the dialogue never opened at all.
+ * ScanSetup carries this exact warning above Fold and Switch; I wrote it
+ * there and then walked into it here.
+ *
+ * So there is nothing to count. The code is drawn ONCE, into one data
+ * URL, and the browser is made to load it before React is told about it.
+ * By the time the posters render, the image is already in hand.
  */
 export function PosterSheet({
   info,
@@ -92,21 +145,63 @@ export function PosterSheet({
   paper: 'A4' | 'A5'
   onDone: () => void
 }) {
-  const printed = useRef(false)
+  // The drawn code, or '' until it is ready. One image, both posters.
+  const [qr, setQr] = useState('')
+  const [err, setErr] = useState('')
+  const started = useRef(false)
 
+  // Draw it, then make the browser actually LOAD it before React hears
+  // about it. An <img> that has not decoded yet prints as a blank box,
+  // and waiting on the element would need a render to wait on.
   useEffect(() => {
-    if (printed.current) return
-    printed.current = true
-    // One frame, so the QR images are in the DOM before the dialog opens.
-    const id = window.setTimeout(() => {
-      window.print()
-      onDone()
-    }, 400)
-    return () => window.clearTimeout(id)
-  }, [onDone])
+    let alive = true
+    QRCode.toDataURL(info.payload, {
+      errorCorrectionLevel: 'Q',
+      margin: 2,
+      scale: 10,
+      color: { dark: '#000000', light: '#FFFFFF' },
+    })
+      .then((url) =>
+        new Promise<string>((resolve) => {
+          const img = new Image()
+          img.onload = () => resolve(url)
+          img.onerror = () => resolve(url)   // print it and let the paper show
+          img.src = url
+        }))
+      .then((url) => alive && setQr(url))
+      .catch((e) => alive && setErr(String(e?.message ?? e)))
+    return () => { alive = false }
+  }, [info.payload])
 
-  const Poster = ({ where }: { where: string }) => (
-    <section className="poster">
+  // Open the dialogue once, when there is something to print.
+  useEffect(() => {
+    if (started.current || (!qr && !err)) return
+    started.current = true
+
+    const finish = () => onDone()
+    window.addEventListener('afterprint', finish, { once: true })
+
+    // One frame, so the sheet is painted and not merely in the DOM.
+    const open = window.setTimeout(() => window.print(), 60)
+
+    // A few browsers never fire afterprint. Without this the staging area
+    // would stay mounted for the rest of the session — invisible, but
+    // holding the next print open on the same two posters.
+    const guard = window.setTimeout(finish, 120000)
+
+    return () => {
+      window.clearTimeout(open)
+      window.clearTimeout(guard)
+      window.removeEventListener('afterprint', finish)
+    }
+  }, [qr, err, onDone])
+
+  const size = paper === 'A4' ? 420 : 300
+
+  // A plain function, called as poster('Entrance'). NOT a component —
+  // see the note above about what a component declared in here does.
+  const poster = (where: string) => (
+    <section className="poster" key={where}>
       <p className="brand">JK BRANDING</p>
       <h1>Scan here for attendance</h1>
       <p className="where">
@@ -114,13 +209,25 @@ export function PosterSheet({
       </p>
 
       <div className="code">
-        <QrImage payload={info.payload} size={paper === 'A4' ? 420 : 300} />
+        {qr ? (
+          <img
+            src={qr}
+            width={size}
+            height={size}
+            alt="Attendance QR code"
+            style={{ imageRendering: 'pixelated' }}
+          />
+        ) : (
+          <div style={{ width: size, height: size, fontSize: '10pt' }}>
+            The code could not be drawn: {err}
+          </div>
+        )}
       </div>
 
       <ol className="how">
-        <li>Open the JK Branding app on your phone</li>
-        <li>Tap Scan</li>
-        <li>Hold the phone up to this code</li>
+        <li>Point your phone camera at this code</li>
+        <li>Tap the link that appears</li>
+        <li>Your attendance is marked</li>
       </ol>
 
       <p className="note">
@@ -133,7 +240,7 @@ export function PosterSheet({
     </section>
   )
 
-  return (
+  const sheet = (
     <div className="poster-sheet">
       <style>{`
         @page { size: ${paper} portrait; margin: 12mm; }
@@ -145,7 +252,8 @@ export function PosterSheet({
         @media print {
           /* Hide the app, show the posters. Done by hiding body's children
              rather than by a class on each, so no screen component has to
-             know that printing exists. */
+             know that printing exists — which only works because the sheet
+             is portalled onto body and really is one of those children. */
           body > *:not(.poster-sheet) { display: none !important; }
           .poster-sheet {
             position: static; opacity: 1; z-index: auto;
@@ -169,11 +277,19 @@ export function PosterSheet({
           .note   { margin: 8mm 14mm 0; font-size: ${paper === 'A4' ? '11pt' : '9pt'};
                     color: #444; line-height: 1.5; }
           .foot   { margin-top: 6mm; font-size: 9pt; color: #777; }
+
+          /* The browser's own header and footer print the page address
+             across the top of the poster. Nothing here can remove them —
+             that is "Headers and footers" under More settings in the print
+             dialogue, and it is remembered after the first time. */
         }
       `}</style>
 
-      <Poster where="Entrance" />
-      <Poster where="Inside" />
+      {poster('Entrance')}
+      {poster('Inside')}
     </div>
   )
+
+  // Beside <div id="root">, not inside it. See the note above.
+  return createPortal(sheet, document.body)
 }

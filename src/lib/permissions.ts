@@ -59,11 +59,17 @@ export function usePermissions() {
 
 // The person's own side of the CRM — their daily work, whatever extra
 // admin rights they may also have.
+//
+// Every role in app_role needs a line here. The last one is a fallback,
+// and a role that falls through to it lands on a path with no routes —
+// which sends it straight back here, for ever.
 export const ownHome = (role: string | null | undefined) =>
   role === 'super_admin' ? '/admin'
   : role === 'hr' ? '/hr'
   : role === 'branch_manager' ? '/manager'
   : role === 'design_team' ? '/design'
+  : role === 'dispatch' ? '/dispatch'
+  : role === 'accounts' ? '/accounts'
   : '/sales'
 
 // Every right the app knows about, grouped for the toggles screen
@@ -79,6 +85,24 @@ export const PERMISSION_GROUPS: { title: string; items: { key: string; label: st
       { key: 'lead_export', label: 'Export' },
       { key: 'lead_import', label: 'Import' },
       { key: 'lead_settings', label: 'Lead settings' },
+    ],
+  },
+  {
+    title: 'Job Work & Dispatch',
+    items: [
+      { key: 'mod_job_works', label: 'Job Work Orders' },
+      { key: 'job_work_create', label: 'Open a job work' },
+      { key: 'job_work_edit', label: 'Change any job work' },
+      { key: 'job_work_delete', label: 'Delete a job work' },
+      { key: 'job_work_view_all', label: "See everyone's job work" },
+      { key: 'job_work_view_branch', label: "See the branch's job work" },
+      { key: 'job_work_payment', label: 'Vendor payment' },
+      // These three are given person by person, not by role. Whoever
+      // checks the goods gets them, whether they sit in sales, in design
+      // or in dispatch — the work is the same either way.
+      { key: 'mod_dispatch', label: 'Dispatch & QC' },
+      { key: 'dispatch_qc', label: 'Record quality check' },
+      { key: 'dispatch_courier', label: 'Add courier & LR number' },
     ],
   },
 ]

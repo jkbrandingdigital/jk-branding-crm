@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck, Printer, Clock3 } from 'lucide-react'
+import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck, Printer, Truck, Clock3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { DateField } from './DateField'
 
@@ -38,10 +38,12 @@ const ROLE_LABEL: Record<string, string> = {
   branch_manager: 'Branch Manager',
   sales: 'Sales',
   design_team: 'Design Team',
+  dispatch: 'Dispatch',
+  accounts: 'Accounts',
 }
 // The order the count tiles appear in; any role in ROLE_LABEL left out of
 // this list still gets a tile, at the end.
-const ROLE_TILE_ORDER = ['sales', 'design_team', 'branch_manager', 'hr', 'super_admin']
+const ROLE_TILE_ORDER = ['sales', 'design_team', 'dispatch', 'accounts', 'branch_manager', 'hr', 'super_admin']
 const ROLE_TILES = [
   ...ROLE_TILE_ORDER.filter((r) => r in ROLE_LABEL),
   ...Object.keys(ROLE_LABEL).filter((r) => !ROLE_TILE_ORDER.includes(r)),
@@ -53,15 +55,22 @@ const ROLE_CHIP: Record<string, string> = {
   branch_manager: 'bg-orange-950/60 text-orange-300',
   sales: 'bg-[#1f1f1f] text-gray-300',
   design_team: 'bg-teal-950/60 text-teal-300',
+  dispatch: 'bg-sky-950/60 text-sky-300',
+  accounts: 'bg-emerald-950/60 text-emerald-300',
 }
 // Which modules are offered for each role
 const ROLE_MODULES: Record<string, string[]> = {
   super_admin: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_invoices', 'mod_print_jobs', 'mod_customers', 'mod_projects',
+                'mod_job_works', 'job_work_create', 'job_work_edit', 'job_work_view_all', 'job_work_payment', 'mod_dispatch', 'dispatch_qc', 'dispatch_courier',
                 'attendance_view_all', 'attendance_view_branch', 'attendance_edit', 'scan_setup', 'leave_approve', 'mod_payroll', 'payroll_view_all', 'payroll_approve', 'mod_assets', 'asset_edit', 'mod_policies', 'policy_edit'],
   hr: ['mod_employees', 'mod_leads', 'mod_reminders', 'mod_tasks', 'mod_notes',
        'attendance_view_all', 'attendance_view_branch', 'attendance_edit', 'scan_setup', 'leave_approve', 'mod_payroll', 'payroll_view_all', 'payroll_approve', 'mod_assets', 'asset_edit', 'mod_policies', 'policy_edit'],
-  branch_manager: ['attendance_view_branch', 'mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_print_jobs', 'mod_customers', 'mod_projects'],
-  sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_customers', 'mod_projects'],
+  branch_manager: ['attendance_view_branch', 'mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_targets', 'mod_employees', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_print_jobs', 'mod_customers', 'mod_projects',
+                   'mod_job_works', 'job_work_create', 'job_work_edit', 'job_work_view_branch', 'job_work_payment'],
+  sales: ['mod_leads', 'mod_reminders', 'mod_reports', 'mod_evolution', 'mod_performance', 'mod_tasks', 'mod_notes', 'mod_quotations', 'mod_customers', 'mod_projects',
+          // Sales opens the job work — they are the ones who know what
+          // the client bought and what it has to cost.
+          'mod_job_works', 'job_work_create'],
   // Printing Media is not in this list for a designer. It gets a box of
   // its own below, because picking who handles printing is a decision
   // about a person's job, not one more thing they are allowed to open.
@@ -74,7 +83,22 @@ const ROLE_MODULES: Record<string, string[]> = {
   // It is a toggle rather than something worked out from a job title,
   // because a title is typed by hand: one spelling slip and the right
   // silently never arrives, with nothing on screen to say why.
-  design_team: ['mod_tasks', 'mod_reminders', 'mod_notes', 'mod_project_board', 'project_coordinate'],
+  design_team: ['mod_tasks', 'mod_reminders', 'mod_notes', 'mod_project_board', 'project_coordinate',
+                // Job Work is not in this list for a designer either, for
+                // the same reason Printing Media is not: it rides with
+                // printing. Whoever handles the printer handles the order
+                // behind it, and the box below switches on both.
+                ],
+
+  // The two people who check what comes back from the printer. Their
+  // register is their whole job, so it is on by default — there is no
+  // version of this role that does not open it.
+  dispatch: ['mod_job_works', 'mod_dispatch', 'dispatch_qc', 'dispatch_courier', 'job_work_payment'],
+
+  // Accounts watches the same register for what is still owed. No check,
+  // no courier — paying for a job and passing it are two different jobs,
+  // and one person doing both is how a bad lot gets paid for.
+  accounts: ['mod_job_works', 'job_work_view_all', 'job_work_payment'],
 }
 
 // Everything the admin area holds, grouped the way its sidebar groups it.
@@ -106,6 +130,19 @@ const ADMIN_GROUPS: { title: string; keys: string[]; note?: string }[] = [
   // which is where the sidebar puts them too.
   { title: 'Business', keys: ['mod_quotations', 'mod_customers', 'mod_projects', 'mod_project_board', 'project_coordinate', 'project_view_money'] },
   { title: 'Designing Department', keys: ['timer_view_all', 'design_perf', 'work_types_edit', 'mod_print_jobs', 'extra_time_approve'] },
+  // Job work and dispatch are one department on the sidebar and one here.
+  // Vendor payment sits with them rather than under Finance, because the
+  // figure it settles is on the job work.
+  {
+    title: 'Production & Dispatch',
+    keys: [
+      'mod_job_works', 'job_work_create', 'job_work_edit', 'job_work_delete',
+      'job_work_view_all', 'job_work_view_branch', 'job_work_payment',
+      'mod_dispatch', 'dispatch_qc', 'dispatch_courier',
+    ],
+    note: 'Whoever passes the quality check should not also settle the vendor. '
+        + 'Give one person both and the lot that was sent back is paid for anyway.',
+  },
   { title: 'Company', keys: ['mod_settings', 'mod_backup'] },
 ]
 
@@ -165,11 +202,37 @@ const PRINT_ACTION_LABEL: Record<string, string> = {
   print_job_delete: 'Delete entries',
 }
 
+// What a person may do inside Job Work.
+//
+// The module switch alone lets them watch the register and add
+// production updates. These are the ones handed out on top.
+const JOB_WORK_ACTION_LABEL: Record<string, string> = {
+  job_work_create: 'Open a job work',
+  job_work_edit: "Change anyone's job work",
+  job_work_view_all: "See everyone's job work",
+  job_work_delete: 'Delete job work',
+  job_work_payment: 'Vendor payment',
+}
+
+// The two things dispatch does that nobody else may.
+//
+// They are separate because they are separate jobs. Somebody can be
+// trusted to open boxes and say what they found without also being the
+// one who books the lorry.
+const DISPATCH_ACTION_LABEL: Record<string, string> = {
+  dispatch_qc: 'Pass or reject a lot',
+  dispatch_courier: 'Add courier & LR number',
+}
+
 const WORK_MODE: Record<string, string> = {
   office: 'Work from office',
   wfh: 'Work from home',
 }
-const needsBranch = (role: string) => role === 'sales' || role === 'branch_manager'
+// Dispatch sits at a branch like anyone else — the goods arrive
+// somewhere, and that somewhere is what their attendance is measured
+// against.
+const needsBranch = (role: string) =>
+  role === 'sales' || role === 'branch_manager' || role === 'dispatch'
 
 const emptyForm = (): Form => ({
   full_name: '',
@@ -571,6 +634,15 @@ export default function StaffManager() {
                           <Printer size={11} /> Printing
                         </span>
                       )}
+                      {/* And who checks what comes back from the printer.
+                          Same reason as the chip above: one or two people
+                          do this, and this is how you find them without
+                          opening anyone. */}
+                      {userPerms[p.id]?.mod_dispatch === true && (
+                        <span className="ml-2 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-sky-950/60 px-2 py-0.5 text-[11px] text-sky-300">
+                          <Truck size={11} /> Dispatch
+                        </span>
+                      )}
                       {Object.keys(userPerms[p.id] ?? {}).length > 0 && <span className="ml-2 text-[10px] text-orange-400">custom</span>}
                     </td>
                     <td className="py-3 pr-4 text-gray-400">{branchName.get(p.branch_id ?? '') ?? '—'}</td>
@@ -811,6 +883,72 @@ export default function StaffManager() {
                 </div>
               )}
 
+              {/*
+                Dispatch & QC.
+
+                Its own box, above the grid, for the same reason Printing
+                Media has one: this is a decision about what somebody's
+                job is, not one more thing they are allowed to open.
+
+                It is a switch rather than a role because the two people
+                who check the goods are not a department. One sits in
+                sales, one came from design, and the work is the same
+                either way. Turning it on hands them every job work in
+                the CRM — they cannot check a lot they cannot see.
+
+                Not shown for the Dispatch role itself: it is already the
+                default there, and a switch that only ever says yes is a
+                switch nobody should have to find.
+              */}
+              {editingProfile && callerRole === 'super_admin' && !editingSelf
+                && form.role !== 'dispatch' && form.role !== 'accounts' && (
+                <div className="border-t border-[#222] pt-4">
+                  <div className="rounded-xl border border-[#242424] bg-[#151515] p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 text-sm font-medium text-white">
+                          <Truck size={15} className="text-orange-400" /> Dispatch &amp; QC
+                        </p>
+                        <p className="mt-1 text-xs text-gray-400">
+                          They check what comes back from the printer before it goes to the client.
+                          This shows them every job work in the CRM, whatever their role — there is no
+                          checking a lot you cannot see.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={effective('mod_dispatch')}
+                        aria-label="Dispatch and QC"
+                        onClick={() => togglePerm('mod_dispatch')}
+                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+                          effective('mod_dispatch') ? 'bg-orange-500' : 'bg-[#2a2a2a]'
+                        }`}
+                      >
+                        <span className={`h-5 w-5 rounded-full bg-white transition-transform ${effective('mod_dispatch') ? 'translate-x-5' : ''}`} />
+                      </button>
+                    </div>
+
+                    {effective('mod_dispatch') && (
+                      <div className="mt-4 border-t border-[#242424] pt-4">
+                        <p className="mb-3 text-xs text-gray-500">On top of that, they may also:</p>
+                        <div className="flex flex-wrap gap-x-5 gap-y-4">
+                          {Object.entries(DISPATCH_ACTION_LABEL).map(([k, label]) => (
+                            <PermToggle key={k} k={k} label={label} />
+                          ))}
+                        </div>
+                        {!effective('mod_job_works') && (
+                          <p className="mt-3 rounded-lg border border-amber-900/40 bg-amber-950/15 px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
+                            Job Work Orders is still off for this person, so nothing will appear in
+                            their sidebar. Switch it on below.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {editingProfile && callerRole === 'super_admin' && !editingSelf && (
                 <div className="border-t border-[#222] pt-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -928,6 +1066,22 @@ export default function StaffManager() {
                       <div className="flex flex-wrap gap-x-5 gap-y-4">
                         {Object.entries(QUOTE_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
                       </div>
+                    </>
+                  )}
+
+                  {effective('mod_job_works') && (
+                    <>
+                      <p className="mb-3 mt-5 text-sm font-medium text-gray-300">Inside job work</p>
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        {Object.entries(JOB_WORK_ACTION_LABEL).map(([k, label]) => <PermToggle key={k} k={k} label={label} />)}
+                      </div>
+                      {effective('dispatch_qc') && effective('job_work_payment') && (
+                        <p className="mt-3 rounded-lg border border-amber-900/40 bg-amber-950/15 px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
+                          This person both passes the quality check and settles the vendor. Nothing
+                          breaks, but the lot they sent back is now paid for by the same hand that
+                          rejected it.
+                        </p>
+                      )}
                     </>
                   )}
 
