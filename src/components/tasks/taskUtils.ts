@@ -49,7 +49,15 @@ export type Task = {
   created_at: string
   updated_at: string
   work_type_id: string | null
+  // How many pieces: 5 banners. Not how many options — that is its own
+  // count below. One column meaning both is what made "work_qty = 5"
+  // unanswerable.
   work_qty: number
+  // How many design variations. Every task has Option 1 from birth, so
+  // counting starts at 2.
+  option_count: number
+  // Set when this task is a slice of a bigger one.
+  parent_task_id: string | null
   in_changes: boolean
   project_id: string | null
   task_assignees: TaskAssignee[]
@@ -62,6 +70,17 @@ export type TimeStatus = {
   per_unit: boolean | null
   unit: string | null
   work_qty: number
+  option_count: number
+  parent_task_id: string | null
+  // A task that has been split is a container: the work happens in its
+  // children, so it carries no allowance of its own.
+  child_count: number
+  assigned_qty: number
+  // The pieces' totals, for showing only. Never for scoring: the points
+  // belong to whoever did each piece, and a figure that can be read as
+  // both would sooner or later count one banner twice.
+  rolled_allowed_mins: number
+  rolled_spent_secs: number
   in_changes: boolean
   change_rounds: number
   client_changes: number
@@ -136,9 +155,17 @@ export const mins = (n: number) => {
   return h > 0 ? (m % 60 ? `${h}h ${m % 60}m` : `${h}h`) : `${m}m`
 }
 
-// What this task is allowed, once quantity is taken into account
-export const allowedOf = (w: WorkType | undefined, qty: number) =>
-  w ? w.minutes * (w.per_unit ? Math.max(qty, 1) : 1) : 0
+/*
+  What this task is allowed.
+
+      work type's time  ×  pieces  ×  options
+
+  `per_unit` is no longer part of it. The flag stays on the row because
+  older screens still read it, but it decides nothing: its `unit` is
+  now only a word to show ("page", "panel").
+*/
+export const allowedOf = (w: WorkType | undefined, qty: number, options = 1) =>
+  w ? w.minutes * Math.max(qty, 1) * Math.max(options, 1) : 0
 
 export async function loadTaskLabels(): Promise<TaskLabel[]> {
   const { data } = await supabase.from('task_labels').select('*').eq('is_active', true).order('sort_order')

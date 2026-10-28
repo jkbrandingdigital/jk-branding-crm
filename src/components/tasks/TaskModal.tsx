@@ -7,7 +7,6 @@ import { fromInputDT, toInputDT, type Staff } from '../leads/leadUtils'
 import { DateTimeField } from '../DateField'
 import { searchLeads, type LeadLite } from '../reminders/reminderUtils'
 import { RichText, isEmptyHtml, toHtml } from '../RichText'
-import { loadProjectsLite } from '../projects/projectUtils'
 import {
   PRIORITIES, REPEATS, currentAssignees,
   type Priority, type Task, type TaskLabel, type TaskStage,
@@ -30,13 +29,6 @@ const input =
   'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none'
 const label = 'mb-1.5 block text-sm text-gray-300'
 
-function tomorrow() {
-  const d = new Date()
-  d.setDate(d.getDate() + 1)
-  d.setSeconds(0, 0)
-  return toInputDT(d.toISOString())
-}
-
 export default function TaskModal({ task, stages, labels, staff, lead: fromLead = null, onClose, onSaved }: Props) {
   const { user } = useAuth()
   const { can } = usePermissions()
@@ -49,7 +41,15 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   const [stageId, setStageId] = useState(task?.stage_id ?? stages.find((s) => s.is_default)?.id ?? stages[0]?.id ?? '')
   const [labelId, setLabelId] = useState(task?.label_id ?? '')
   const [start, setStart] = useState(toInputDT(task?.start_at ?? new Date().toISOString()))
-  const [due, setDue] = useState(task?.due_at ? toInputDT(task.due_at) : tomorrow())
+  /*
+    Empty until somebody picks one.
+
+    It used to open on tomorrow, which meant every task created in a
+    hurry carried a due date nobody had chosen — and a board full of
+    invented deadlines is a board where "overdue" stops meaning
+    anything. No date is honest; a wrong one is not.
+  */
+  const [due, setDue] = useState(task?.due_at ? toInputDT(task.due_at) : '')
   const [repeat, setRepeat] = useState(task?.repeat_every ?? 'none')
   const [lead, setLead] = useState<LeadLite | null>(fromLead)
   const [customer, setCustomer] = useState(task?.customer_name ?? '')
@@ -62,6 +62,8 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   const [projectId, setProjectId] = useState(task?.project_id ?? '')
   const [workTypes, setWorkTypes] = useState<WorkType[]>([])
   const [workTypeId, setWorkTypeId] = useState(task?.work_type_id ?? '')
+  // How many pieces — 5 banners. Separate from options, which the
+  // designer adds on the task itself as the work goes.
   const [workQty, setWorkQty] = useState(task?.work_qty ?? 1)
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
@@ -116,9 +118,30 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
       return n
     })
 
+  /*
+    Projects come through project_board(), not the projects table.
+
+    A designer has no direct read on projects, so the plain query came
+    back empty for them and the list showed nothing but "Not part of a
+    project" — which read as "this client has no projects" rather than
+    "you are not allowed to see them". The RPC answers for everyone who
+    may see the board.
+  */
   useEffect(() => {
     void loadWorkTypes().then(setWorkTypes)
-    void loadProjectsLite().then(setProjects)
+    void (async () => {
+      const { data } = await supabase.rpc('project_board', { p_customer: null, p_open_only: false })
+      const rows = (data ?? []) as { id: string; project_no: number; title: string; customer_name: string | null; is_done: boolean | null }[]
+      setProjects(
+        rows.map((r) => ({
+          id: r.id,
+          project_no: r.project_no,
+          name: r.title,
+          customer_name: r.customer_name,
+          is_done: Boolean(r.is_done),
+        })),
+      )
+    })()
   }, [])
 
   // A task opened from a project arrives with it already chosen
@@ -128,14 +151,18 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
     if (fromUrl) setProjectId(fromUrl)
   }, [task])
 
-  // The time rules are a design-team thing. A task given to sales or HR
-  // gets no work type, no allowed time and no timer.
-  const forDesign = useMemo(
-    () => staff.some((p) => to.has(p.id) && p.role === 'design_team'),
-    [staff, to],
-  )
+  /*
+    The work type is asked for straight away, before anyone is picked.
+
+    It used to appear only once a designer was ticked — but on Add task
+    nobody is ticked yet, so the whole block was invisible exactly when
+    it was needed. Worse, a sales person raising the job is the one who
+    knows what it is ("5 banners"), and they were never shown the
+    question at all.
+  */
   const chosen = workTypes.find((w) => w.id === workTypeId)
-  const allowed = allowedOf(chosen, workQty)
+  const optionCount = task?.option_count ?? 1
+  const allowed = allowedOf(chosen, workQty, optionCount)
 
   async function save() {
     setError('')
@@ -157,8 +184,8 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
       due_at: fromInputDT(due),
       repeat_every: repeat,
       project_id: projectId || null,
-      work_type_id: forDesign ? workTypeId || null : null,
-      work_qty: forDesign && chosen?.per_unit ? Math.max(1, Math.min(99, workQty)) : 1,
+      work_type_id: workTypeId || null,
+      work_qty: Math.max(1, Math.min(99, workQty)),
     }
 
     setBusy(true)
@@ -266,18 +293,24 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
             </select>
           </div>
 
-          {/* Design work: which kind of job, and how much of it.
-              Only when the task is going to a designer — a task for sales or
-              HR carries no time rule at all. */}
-          {forDesign && (
-            <div className="rounded-lg border border-[#242424] bg-[#151515] p-4">
+          {/* Design work: which kind of job, and how many of them.
+
+              Shown to everyone, always. A sales person raising "5
+              banners" is the one who knows that, and the person who
+              will do it is often not picked yet. Left out, the figure
+              everything else is measured against never gets set. */}
+          <div className="rounded-lg border border-[#242424] bg-[#151515] p-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className={label} htmlFor="task-work-type">Design work</label>
                   <select
                     id="task-work-type"
                     value={workTypeId}
-                    onChange={(e) => { setWorkTypeId(e.target.value); setWorkQty(1) }}
+                    /* The quantity is NOT reset here. Picking a different
+                       kind of work does not change how many of them there
+                       are, and wiping a typed 4 back to 1 sent several
+                       tasks out with the wrong allowance. */
+                    onChange={(e) => setWorkTypeId(e.target.value)}
                     className={input}
                   >
                     <option value="">Not set</option>
@@ -300,11 +333,14 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                   </select>
                 </div>
 
-                {chosen?.per_unit && (
+                {/* How many pieces. Five banners is one task of five,
+                    not five tasks — and the coordinator can hand two of
+                    them to one designer and two to another from the task
+                    itself. Each slice gets its share of the time without
+                    anyone working it out. */}
+                {chosen && (
                   <div>
-                    <label className={label} htmlFor="task-work-qty">
-                      How many {chosen.unit}s to start with
-                    </label>
+                    <label className={label} htmlFor="task-work-qty">How many</label>
                     <input
                       id="task-work-qty"
                       type="number"
@@ -314,6 +350,11 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                       onChange={(e) => setWorkQty(Math.max(1, Math.min(99, Number(e.target.value) || 1)))}
                       className={input}
                     />
+                    <p className="mt-1 text-xs text-gray-600">
+                      {workQty > 1
+                        ? `One task of ${workQty} — hand pieces to designers later`
+                        : 'More than one? Put the number here, not a task each'}
+                    </p>
                   </div>
                 )}
               </div>
@@ -321,20 +362,16 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
               {chosen && (
                 <div className="mt-3 text-sm text-gray-400">
                   Allowed time <span className="font-semibold text-white">{mins(allowed)}</span>
-                  {chosen.per_unit && (
-                    <> · {workQty} {chosen.unit}{workQty === 1 ? '' : 's'} × {mins(chosen.minutes)}</>
-                  )}
+                  {' · '}{workQty} × {mins(chosen.minutes)}
+                  {optionCount > 1 && <> × {optionCount} options</>}
                   {chosen.note && <span className="text-gray-600"> · {chosen.note}</span>}
-                  {chosen.per_unit && (
-                    <span className="mt-1 block text-xs text-gray-600">
-                      The designer can add more {chosen.unit}s later with + on the task, and the
-                      allowed time goes up on its own.
-                    </span>
-                  )}
+                  <span className="mt-1 block text-xs text-gray-600">
+                    Option 1 comes with the task. The designer adds option 2 onwards from the
+                    task itself, and the allowed time goes up on its own.
+                  </span>
                 </div>
               )}
-            </div>
-          )}
+          </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
             <div>

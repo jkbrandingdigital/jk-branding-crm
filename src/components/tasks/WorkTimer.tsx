@@ -31,10 +31,20 @@ import { useChartTheme } from '../../lib/chartTheme'
   null means an older sitting, from before the parts existed. Those stay
   unassigned rather than being guessed into option 1.
 */
-export type TaskPartRef = { kind: 'option' | 'change'; no: number }
+export type TaskPartRef = { kind: 'option' | 'change'; no: number; piece?: number }
 
+/*
+  The work has two dimensions, not one.
+
+  Five banners with two options each is ten pieces of work, and "Option
+  1" on its own covers two of them. Without the piece number, 4h sat
+  against "Option 1" and nobody could say which banner had eaten it.
+*/
 export const samePart = (a: TaskPartRef | null | undefined, b: TaskPartRef | null | undefined) =>
-  (a?.kind ?? null) === (b?.kind ?? null) && (a?.no ?? null) === (b?.no ?? null)
+  (a?.kind ?? null) === (b?.kind ?? null) &&
+  (a?.no ?? null) === (b?.no ?? null) &&
+  // A change round has no piece, so it compares equal whatever is passed
+  ((a?.kind ?? b?.kind) === 'change' || (a?.piece ?? 1) === (b?.piece ?? 1))
 
 export type RunningTask = {
   session_id: string
@@ -45,6 +55,9 @@ export type RunningTask = {
   today_secs: number
   part_kind: 'option' | 'change' | null
   part_no: number | null
+  piece_no: number | null
+  unit_name: string | null
+  work_qty: number | null
 }
 
 // Why the timer stopped. The reason matters: a lot of "Urgent work came" is
@@ -123,6 +136,7 @@ export async function startTask(taskId: string, reason = 'switched', part?: Task
     p_reason: reason,
     p_part_kind: part?.kind ?? null,
     p_part_no: part?.no ?? null,
+    p_piece_no: part?.piece ?? null,
   })
   tellEveryone()
   if (error) throw new Error(error.message)
@@ -287,7 +301,12 @@ export function WorkTimerBar() {
               does. A designer with three options open needs to know which
               one the clock is on. */}
           {running.part_kind === 'option' && (
-            <span className="ml-2 font-normal text-orange-300">Option {running.part_no}</span>
+            <span className="ml-2 font-normal text-orange-300">
+              {(running.work_qty ?? 1) > 1 && (
+                <>{running.unit_name ?? 'Piece'} {running.piece_no ?? 1} · </>
+              )}
+              Option {running.part_no}
+            </span>
           )}
           {running.part_kind === 'change' && (
             <span className="ml-2 font-normal text-orange-300">Changes · round {running.part_no}</span>
@@ -345,7 +364,7 @@ export function TaskTimerButton({
   // A button that names a part is only "the running one" when that same part
   // is running. Without this every option on the task would light up together.
   const runningPart: TaskPartRef | null = running?.part_kind
-    ? { kind: running.part_kind, no: running.part_no ?? 1 }
+    ? { kind: running.part_kind, no: running.part_no ?? 1, piece: running.piece_no ?? 1 }
     : null
   const isThisOne =
     running?.task_id === taskId && (part === undefined || samePart(runningPart, part))

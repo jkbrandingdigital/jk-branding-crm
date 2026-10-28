@@ -7,10 +7,13 @@ import { loadWorkTypes, mins, type WorkType } from './taskUtils'
 /*
   The kinds of design work and the time each is meant to take.
 
-  Most are a flat time: a visiting card is 15 minutes however it goes. Two
-  grow with quantity — a logo is 2 hours for each option, brochure inner
-  pages are 30 minutes each — and for those the designer adds options or
-  pages on the task itself with +.
+  The time here is for ONE piece, ONE option. The task multiplies it:
+
+      allowed  =  this time  ×  how many pieces  ×  how many options
+
+  So a banner at 1 hour, five of them, one option, is five hours; a logo
+  at 3 hours with two options is six. Nothing here needs to know which
+  job will be five of something.
 
   Changing a time here changes what new work is measured against. Jobs
   already finished keep the time they were given.
@@ -25,7 +28,10 @@ export default function WorkTypesTab() {
   const [name, setName] = useState('')
   const [hours, setHours] = useState(0)
   const [minutes, setMinutes] = useState(30)
-  const [unit, setUnit] = useState('option')
+  // What one of them is called — banner, page, panel. NOT "option":
+  // options are counted inside each piece, and a unit called "option"
+  // made the task screen read "Option 1 · Option 1".
+  const [unit, setUnit] = useState('piece')
 
   const load = useCallback(async () => {
     setRows(await loadWorkTypes())
@@ -48,8 +54,8 @@ export default function WorkTypesTab() {
     const { error } = await supabase.from('work_types').insert({
       name: name.trim(),
       minutes: total,
-      per_unit: true,                                   // every kind counts by option now
-      unit: unit.trim() || 'option',
+      per_unit: true,                       // kept for older screens; decides nothing
+      unit: unit.trim() || 'piece',
       sort_order: (rows[rows.length - 1]?.sort_order ?? 0) + 10,
     })
     setBusy('')
@@ -95,10 +101,10 @@ export default function WorkTypesTab() {
       <div>
         <h1 className="text-2xl font-semibold text-white">Design work types</h1>
         <p className="mt-1 text-sm text-gray-400">
-          What each kind of job should take, for one option. Two options means twice the time. A task
-          is green while it is inside its allowed time and red once it goes past. Time spent on a
-          client's changes is measured by the clock and kept out of this — there is nothing to set
-          for it.
+          What one of these should take — one piece, one option. A task of five with two options
+          gets ten times this. A task is green while it is inside its allowed time and red once it
+          goes past. Time spent on a client's changes is measured by the clock and kept out of
+          this — there is nothing to set for it.
         </p>
       </div>
 
@@ -119,8 +125,8 @@ export default function WorkTypesTab() {
             <thead>
               <tr className="border-b border-[#242424] text-left text-xs text-gray-500">
                 <th className="px-4 py-2.5 font-medium">Work</th>
-                <th className="px-4 py-2.5 font-medium">Time per option</th>
-                <th className="px-4 py-2.5 font-medium">Counts by</th>
+                <th className="px-4 py-2.5 font-medium">Time for one</th>
+                <th className="px-4 py-2.5 font-medium">Call each one a</th>
                 <th className="px-4 py-2.5" />
               </tr>
             </thead>
@@ -148,7 +154,17 @@ export default function WorkTypesTab() {
                       {busy === r.id && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />}
                     </div>
                   </td>
-                  <td className="px-4 py-2.5 text-gray-400">each {r.unit ?? 'option'}</td>
+                  <td className="px-4 py-2.5">
+                    <input
+                      defaultValue={r.unit ?? 'piece'}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim()
+                        if (v && v !== r.unit) void setField(r, { unit: v })
+                      }}
+                      aria-label={`What one ${r.name} is called`}
+                      className="w-28 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1 text-sm text-white focus:border-orange-500 focus:outline-none"
+                    />
+                  </td>
                   <td className="px-4 py-2.5 text-right">
                     <button
                       onClick={() => remove(r)}
@@ -188,7 +204,7 @@ export default function WorkTypesTab() {
 
           <label className="block sm:col-span-2">
             <span className="mb-1.5 block text-xs text-gray-400">Call each one a</span>
-            <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="option, page, panel" className={input} />
+            <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="banner, page, panel" className={input} />
           </label>
 
         </div>
@@ -199,7 +215,7 @@ export default function WorkTypesTab() {
             className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
           >
             {busy === 'add' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Add · {mins(hours * 60 + minutes)} per {unit || 'option'}
+            Add · {mins(hours * 60 + minutes)} per {unit || 'piece'}
           </button>
         </div>
       </section>

@@ -12,6 +12,7 @@ import LeadEditModal from './LeadEditModal'
 import { DateTimeField } from '../DateField'
 import type { LeadLite } from '../reminders/reminderUtils'
 import LeadCreateMenu from './LeadCreateMenu'
+import ConvertLead from '../customers/ConvertLead'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
 type LeadL = Lead & {
@@ -69,6 +70,23 @@ export default function LeadDrawer({
 
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  /*
+    Asking to open the client, after the stage has moved to a won one.
+
+    The board already asks when a card is dragged across. Changing the
+    stage from in here did not ask at all, and that silence cost one
+    branch manager thirteen confirmed leads — ₹2,08,600 of this month's
+    work among them, counted nowhere, because no customer and so no
+    project was ever created.
+
+    The move happens first and the question comes after, as on the
+    board. Creating the customer by itself would be worse than not
+    creating it: cards reach Confirm by mistake often enough, and a
+    client that appeared on its own leaves nobody able to say whether
+    it is real.
+  */
+  const [wonFor, setWonFor] = useState<{ name: string; requirement: string | null; estimated: number | null } | null>(null)
 
   const nameOf = (id: string | null) => (id ? staff.find((s) => s.id === id)?.full_name ?? (id === myId ? 'You' : '—') : 'System')
   const stageName = (id: unknown) => stages.find((s) => s.id === id)?.name ?? '—'
@@ -215,7 +233,15 @@ export default function LeadDrawer({
       setCancelStage(s.id)
       return
     }
-    update({ stage_id: s.id }, `Moved to ${s.name}.`)
+    void update({ stage_id: s.id }, `Moved to ${s.name}.`)
+
+    if (s.is_won && lead && !lead.customer_id && can('mod_customers')) {
+      setWonFor({
+        name: lead.name,
+        requirement: lead.requirement ?? null,
+        estimated: lead.estimated_amount ?? null,
+      })
+    }
   }
 
   const inputCls =
@@ -773,6 +799,18 @@ export default function LeadDrawer({
           can={can}
           onClose={() => setEditMode(false)}
           onSaved={() => { setEditMode(false); setMsg({ type: 'success', text: 'Saved.' }); load(); onChanged() }}
+        />
+      )}
+
+      {/* Won: offer to open the client */}
+      {wonFor && lead && (
+        <ConvertLead
+          leadId={lead.id}
+          leadName={wonFor.name}
+          requirement={wonFor.requirement}
+          estimated={wonFor.estimated}
+          onClose={() => setWonFor(null)}
+          onDone={() => { setWonFor(null); load(); onChanged() }}
         />
       )}
     </div>

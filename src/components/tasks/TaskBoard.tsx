@@ -159,7 +159,6 @@ export default function TaskBoard() {
     const t = setInterval(loadLive, 60000)
     return () => clearInterval(t)
   }, [loadLive])
-  const [bumping, setBumping] = useState('')
   const { dark } = useChartTheme()   // the colours below have to follow the Light/Dark switch
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'stage' | 'assign' } | null>(null)
 
@@ -184,16 +183,6 @@ export default function TaskBoard() {
       setError((e as Error).message)
     }
     setLoading(false)
-  }, [])
-
-  // One more option (or brochure page) straight from the card. The allowed
-  // time goes up by itself, and the change is written into the task history.
-  const addUnit = useCallback(async (taskId: string) => {
-    setBumping(taskId)
-    const { error: e } = await supabase.rpc('task_add_unit', { p_task: taskId, p_by: 1 })
-    if (e) setError(e.message)
-    setTimeOf(await loadTimeStatus())
-    setBumping('')
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -256,6 +245,17 @@ export default function TaskBoard() {
     const fromMs = from ? new Date(from).getTime() : null
     const tillMs = till ? new Date(till).getTime() + 86400000 : null
     return tasks.filter((t) => {
+      /*
+        A piece of a split task belongs on the board of whoever is
+        doing it, and nowhere else.
+
+        The coordinator split five banners into two pieces and then saw
+        three cards for one job — the whole task plus both pieces. The
+        pieces are the designers' work, not the coordinator's view of
+        it; the big task already says "4 of 4 given out". So a piece is
+        shown to the people it is assigned to, and to nobody else.
+      */
+      if (t.parent_task_id && !currentAssignees(t).includes(me)) return false
       if (projectId && t.project_id !== projectId) return false
       const to = currentAssignees(t)
       if (scope === 'mine' && !to.includes(me)) return false
@@ -391,7 +391,11 @@ export default function TaskBoard() {
     // changes get their own number so nobody is marked down for them.
     const spent = Math.round((ts?.base_secs ?? ts?.actual_secs ?? 0) / 60)
     const changeMins = Math.round((ts?.change_secs ?? 0) / 60)
-    const timed = allowed > 0
+    // A task that has been split carries no allowance of its own — the
+    // work is in its children now. Colouring it green or red would be
+    // judging a job nobody is doing.
+    const split = (ts?.child_count ?? 0) > 0
+    const timed = allowed > 0 && !split
     const over = timed && spent > allowed
 
     // Inline colours on purpose: theme.css does not map every opacity, so a
@@ -439,23 +443,11 @@ export default function TaskBoard() {
           late ? 'border-red-500/40' : 'border-[#242424]'
         } ${dragId === t.id ? 'opacity-50' : ''}`}
       >
-        <div className="flex items-start gap-2">
-          <p className="min-w-0 flex-1 text-sm font-medium text-white">{t.subject}</p>
-          {/* One more option. Only on design work, and only while the task is
-              still open — a finished job's allowed time must not move. */}
-          {ts?.per_unit && !isClosed(t) && mayEdit && (
-            <button
-              onClick={(e) => { e.stopPropagation(); addUnit(t.id) }}
-              onMouseDown={(e) => e.stopPropagation()}
-              disabled={bumping === t.id}
-              aria-label={`Add one ${ts.unit ?? 'option'}`}
-              title={`Add one ${ts.unit ?? 'option'} · now ${ts.work_qty}`}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#2a2a2a] text-gray-400 hover:border-orange-500/60 hover:text-orange-400 disabled:opacity-50"
-            >
-              {bumping === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
-            </button>
-          )}
-        </div>
+        {/* The + that added an option has gone. Options now belong to
+            the task screen, where the designer can see what each one
+            has already taken before adding another — on the card it
+            was a button that silently moved the figure beside it. */}
+        <p className="text-sm font-medium text-white">{t.subject}</p>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className={`rounded px-1.5 py-0.5 text-[11px] ${p.cls}`}>{p.label}</span>
@@ -493,18 +485,36 @@ export default function TaskBoard() {
             <span
               className="rounded px-1.5 py-0.5 text-[11px] font-medium"
               style={timeChip}
-              title={`${ts?.work_type ?? ''}${ts?.per_unit ? ` · ${ts.work_qty} ${ts.unit}${ts.work_qty === 1 ? '' : 's'}` : ''}`}
+              title={`${ts?.work_type ?? ''}${(ts?.work_qty ?? 1) > 1 ? ` · ${ts?.work_qty} pcs` : ''}${(ts?.option_count ?? 1) > 1 ? ` · ${ts?.option_count} options` : ''}`}
             >
-              {ts?.per_unit && ts.work_qty > 1 && <>{ts.work_qty} {ts.unit}s · </>}
+              {(ts?.work_qty ?? 1) > 1 && <>{ts?.work_qty}× · </>}
+              {(ts?.option_count ?? 1) > 1 && <>{ts?.option_count} opt · </>}
               {mins(spent)} / {mins(allowed)}
               {over && <> · over {mins(spent - allowed)}</>}
               {changeMins > 0 && <> · +{mins(changeMins)} chg</>}
             </span>
           )}
 
+          {/* Split into pieces: how many are handed out, how many are
+              not. The one left unassigned is the whole reason this is
+              on the card — it is the piece nobody is doing. */}
+          {split && (
+            <span className="rounded bg-[#232323] px-1.5 py-0.5 text-[11px] text-gray-300">
+              {ts?.assigned_qty} of {ts?.work_qty} given out
+              {(ts?.work_qty ?? 0) > (ts?.assigned_qty ?? 0) && (
+                <span className="text-amber-400"> · {(ts?.work_qty ?? 0) - (ts?.assigned_qty ?? 0)} left</span>
+              )}
+              {(ts?.rolled_allowed_mins ?? 0) > 0 && (
+                <span className="text-gray-500">
+                  {' · '}{mins(Math.round((ts?.rolled_spent_secs ?? 0) / 60))} / {mins(ts?.rolled_allowed_mins ?? 0)}
+                </span>
+              )}
+            </span>
+          )}
+
           {/* The timer belongs to whoever is doing the task, so it only shows
               on your own open ones. Clicking it must not open the card. */}
-          {currentAssignees(t).includes(me) && !isClosed(t) && (
+          {currentAssignees(t).includes(me) && !isClosed(t) && !split && (
             <span className="ml-auto" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
               {/* Starting or stopping your own timer redraws the badge
                   at once, rather than waiting for the next minute. */}

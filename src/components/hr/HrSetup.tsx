@@ -23,6 +23,7 @@ import {
   AlertTriangle, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { DateField } from '../DateField'
 
 type Rules = {
   absent_penalty: number
@@ -50,6 +51,12 @@ type Branch = { id: string; name: string }
 
 const rupees = (n: number) =>
   '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })
+
+/** Days from a to b inclusive. Both dates are YYYY-MM-DD. */
+const dayCount = (a: string, b: string) => {
+  const ms = new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()
+  return Math.round(ms / 86_400_000) + 1
+}
 
 const day = (d: string) =>
   new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {
@@ -87,7 +94,12 @@ export default function HrSetup() {
   const [amount, setAmount] = useState('')
   const [said, setSaid] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null)
 
-  const [hDate, setHDate] = useState('')
+  // Holidays are entered as a stretch — Janmashtami is three days,
+  // Diwali is five — because typing a row each is the chore that leaves
+  // the calendar empty, and leave then quietly eats paid days on them.
+  // From alone is the single-day case, which is still ordinary.
+  const [hFrom, setHFrom] = useState('')
+  const [hTo, setHTo] = useState('')
   const [hName, setHName] = useState('')
   const [hBranch, setHBranch] = useState('')
 
@@ -128,13 +140,20 @@ export default function HrSetup() {
   }
 
   async function addHoliday() {
-    const { data, error } = await supabase.rpc('holiday_set', {
-      p_date: hDate, p_name: hName.trim(), p_branch: hBranch || null,
+    // To is optional on screen; blank means a single day. The server
+    // asks for both, so we fill it in here rather than making the
+    // common case (one day) take two taps.
+    const to = hTo || hFrom
+    const { data, error } = await supabase.rpc('holiday_set_range', {
+      p_from: hFrom, p_to: to, p_name: hName.trim(), p_branch: hBranch || null,
     })
-    const r = data as { ok: boolean; reason?: string } | null
+    const r = data as { ok: boolean; reason?: string; days?: number } | null
     if (error || !r?.ok) return setSaid({ kind: 'bad', text: error?.message ?? r?.reason ?? 'Not saved.' })
-    setHName('')
-    setSaid(null)
+    setSaid({
+      kind: 'ok',
+      text: r.days === 1 ? 'Holiday added.' : `${r.days} days added.`,
+    })
+    setHFrom(''); setHTo(''); setHName('')
     load()
   }
 
@@ -306,20 +325,67 @@ export default function HrSetup() {
         )}
 
         {rules?.can_edit && (
-          <div className="grid gap-3 border-t border-[#242424] p-5 sm:grid-cols-4">
-            <input type="date" value={hDate} onChange={(e) => setHDate(e.target.value)} className={inputCls} />
-            <input value={hName} onChange={(e) => setHName(e.target.value)} placeholder="What the holiday is" className={inputCls} />
-            <select value={hBranch} onChange={(e) => setHBranch(e.target.value)} className={inputCls}>
-              <option value="">Every branch</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-            <button
-              onClick={addHoliday}
-              disabled={!hDate || hName.trim().length < 2}
-              className="flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Plus size={15} /> Add
-            </button>
+          <div className="border-t border-[#242424] p-5">
+            {/* From and To. To is a hint "or a single day" when it is
+                blank — that is the common case and should not look like
+                a required field.
+                Below the row, the day count if a stretch is set, so the
+                person can see "3 days" before they tap Add. */}
+            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+              <div>
+                <label className="mb-1 block text-[11px] text-gray-500">From</label>
+                <DateField
+                  value={hFrom}
+                  onChange={(v) => setHFrom(v ?? '')}
+                  placeholder="dd mmm yyyy"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-gray-500">
+                  To <span className="text-gray-600">(or leave blank for a single day)</span>
+                </label>
+                <DateField
+                  value={hTo}
+                  onChange={(v) => setHTo(v ?? '')}
+                  placeholder="dd mmm yyyy"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-gray-500">What</label>
+                <input
+                  value={hName}
+                  onChange={(e) => setHName(e.target.value)}
+                  placeholder="e.g. Janmashtami"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-gray-500">Branch</label>
+                <select value={hBranch} onChange={(e) => setHBranch(e.target.value)} className={inputCls}>
+                  <option value="">Every branch</option>
+                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={addHoliday}
+                  disabled={!hFrom || hName.trim().length < 2}
+                  className="flex h-[42px] items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 text-sm font-medium text-white transition-colors hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Plus size={15} /> Add
+                </button>
+              </div>
+            </div>
+            {hFrom && hTo && hTo > hFrom && (
+              <p className="mt-2 text-xs text-gray-500">
+                {dayCount(hFrom, hTo)} days will be added.
+              </p>
+            )}
+            {hFrom && hTo && hTo < hFrom && (
+              <p className="mt-2 text-xs text-red-400">
+                The last day cannot be before the first.
+              </p>
+            )}
           </div>
         )}
       </Card>
@@ -364,10 +430,13 @@ export default function HrSetup() {
                     started running — move it back only if you mean to.
                   </p>
                 </div>
-                <input
-                  type="date" value={from} onChange={(e) => setFrom(e.target.value)}
-                  className="w-44 rounded-xl border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-white [color-scheme:dark] focus:border-orange-500 focus:outline-none"
-                />
+                <div className="w-44">
+                  <DateField
+                    value={from}
+                    onChange={(v) => setFrom(v ?? '')}
+                    placeholder="dd mmm yyyy"
+                  />
+                </div>
                 <button
                   onClick={() => saveRule('absence_from_set', { p_date: from })}
                   className="rounded-xl border border-[#2a2a2a] px-3 py-2 text-xs text-gray-300 hover:bg-[#1f1f1f] hover:text-white"

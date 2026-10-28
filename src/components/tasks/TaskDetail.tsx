@@ -26,6 +26,8 @@ type TimeRow = { user_id: string; full_name: string | null; secs: number; sessio
 */
 type Part = {
   part_kind: 'option' | 'change' | null
+  // Which piece: banner 1 of 5. A change round has none.
+  piece_no: number | null
   part_no: number | null
   label: string
   allowed_mins: number
@@ -36,6 +38,17 @@ type Part = {
   // half way through, and the option carries that — the points follow
   // the clock, not the name on the task.
   workers: string | null
+}
+type Child = {
+  id: string
+  task_no: number
+  subject: string
+  work_qty: number
+  stage_name: string | null
+  is_done: boolean
+  people: string | null
+  allowed_mins: number | null
+  spent_secs: number
 }
 type Sitting = { id: string; user_id: string; started_at: string; ended_at: string | null; end_reason: string | null; end_note: string | null }
 type Comment = { id: string; user_id: string; body: string; created_at: string }
@@ -94,10 +107,19 @@ export default function TaskDetail({
   const [status, setStatus] = useState<TimeStatus | null>(null)
   const [sittings, setSittings] = useState<Sitting[]>([])
   const [parts, setParts] = useState<Part[]>([])
-  // Just the options, for the line under the title. Change rounds and the
-  // old unassigned time have their own places and would only crowd it.
-  const optionParts = parts.filter((p0) => p0.part_kind === 'option')
   const [adding, setAdding] = useState(false)
+  /*
+    The pieces this task was broken into.
+
+    Five banners is one task of five. The coordinator hands two to one
+    designer and two to another, and each slice gets its share of the
+    time without anybody working it out. The piece still unassigned is
+    the number worth seeing: it is the work nobody is doing.
+  */
+  const [kids, setKids] = useState<Child[]>([])
+  const [splitOpen, setSplitOpen] = useState(false)
+  const [splitTo, setSplitTo] = useState('')
+  const [splitQty, setSplitQty] = useState(1)
   const [changeOpen, setChangeOpen] = useState(false)
   const [changeNote, setChangeNote] = useState('')
   const [dragging, setDragging] = useState(false)
@@ -106,15 +128,35 @@ export default function TaskDetail({
   const [error, setError] = useState('')
 
   const loadTime = useCallback(async () => {
-    const [t, st, pt] = await Promise.all([
+    const [t, st, pt, kd] = await Promise.all([
       supabase.rpc('task_time', { p_task_id: task.id }),
       supabase.from('task_time_status').select('*').eq('task_id', task.id).maybeSingle(),
       supabase.rpc('task_parts', { p_task: task.id }),
+      supabase.rpc('task_children', { p_task: task.id }),
     ])
     setTime((t.data ?? []) as TimeRow[])
     setStatus((st.data ?? null) as TimeStatus | null)
     setParts((pt.data ?? []) as Part[])
+    setKids((kd.data ?? []) as Child[])
   }, [task.id])
+
+  async function splitTask() {
+    if (!splitTo) return setError('Pick who gets this piece.')
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_split', {
+      p_task: task.id,
+      p_user: splitTo,
+      p_qty: splitQty,
+      p_subject: null,
+    })
+    setAdding(false)
+    if (e) return setError(e.message)
+    setSplitOpen(false)
+    setSplitTo('')
+    setSplitQty(1)
+    await loadTime()
+    onChanged()
+  }
 
   // Records that the job came back. A client's change buys more allowed
   // time; our own mistake does not. The name of whoever records it goes
@@ -134,11 +176,35 @@ export default function TaskDetail({
     onChanged()
   }
 
-  // Adds one option, or one brochure page. The database works out the
-  // new allowed time and writes it into the history.
-  async function addUnit() {
+  /*
+    One more option.
+
+    Option 1 comes with the task, so this always makes option 2 or
+    later — which is why the button says the number it is about to
+    create rather than a bare +. The allowed time goes up by itself;
+    that is the whole point of counting options at all.
+  */
+  /*
+    Taking an option back off.
+
+    Only the last one of a piece, and only while nothing has been
+    worked on it. Removing one from the middle would leave Option 1,
+    3, 4 — and then an old sitting marked "Option 3" belongs to work
+    nobody can name. Renumbering to close the gap is worse: it quietly
+    rewrites what those sittings were for.
+  */
+  async function removeOption(piece = 1) {
     setAdding(true)
-    const { error: e } = await supabase.rpc('task_add_unit', { p_task: task.id, p_by: 1 })
+    const { error: e } = await supabase.rpc('task_remove_option', { p_task: task.id, p_piece: piece })
+    setAdding(false)
+    if (e) return setError(e.message)
+    await loadTime()
+    onChanged()
+  }
+
+  async function addOption(piece = 1) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_add_option', { p_task: task.id, p_piece: piece })
     setAdding(false)
     if (e) return setError(e.message)
     await loadTime()
@@ -335,7 +401,27 @@ export default function TaskDetail({
   // The original work, with the client's change rounds kept out — that is
   // what the allowed time was set for.
   const spentMins = Math.round((status?.base_secs ?? status?.actual_secs ?? 0) / 60)
-  const over = (status?.allowed_mins ?? 0) > 0 && spentMins > (status?.allowed_mins ?? 0)
+
+  /*
+    A split task has no allowance of its own, so the line above it used
+    to read "0m of 0m" — which says the job was given no time at all,
+    and that is not what happened. It shows its pieces' total instead:
+    still the whole job, just added up from where the work actually is.
+  */
+  /*
+    How many options a piece already has, read off the rows the
+    database just sent. Asking the server again for a number that is
+    already on screen is how two parts of one page end up disagreeing.
+  */
+  const optionsOf = (piece: number) =>
+    parts.filter((x) => x.part_kind === 'option' && (x.piece_no ?? 1) === piece).length
+  // "Banner", "Page" — whatever one of them is called in Settings.
+  const unitName = (status?.unit ?? 'piece').replace(/^./, (c) => c.toUpperCase())
+
+  const isContainer = (status?.child_count ?? 0) > 0
+  const shownAllowed = isContainer ? (status?.rolled_allowed_mins ?? 0) : (status?.allowed_mins ?? 0)
+  const shownSpent = isContainer ? Math.round((status?.rolled_spent_secs ?? 0) / 60) : spentMins
+  const shownOver = shownAllowed > 0 && shownSpent > shownAllowed
 
   const row = (k: string, v: React.ReactNode) => (
     <div className="flex gap-3 border-b border-[#1f1f1f] py-2.5 text-sm last:border-0">
@@ -357,19 +443,6 @@ export default function TaskDetail({
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <h2 id="task-detail-title" className="truncate font-semibold text-white">{task.subject}</h2>
-              {/* One more logo option, or one more brochure page. The allowed
-                  time goes up by itself — that is the whole point of it. */}
-              {status?.per_unit && !locked && (
-                <button
-                  onClick={addUnit}
-                  disabled={adding}
-                  aria-label={`Add one ${status.unit}`}
-                  title={`Add one ${status.unit} · +${mins(Math.round((status.allowed_mins ?? 0) / Math.max(status.work_qty, 1)))}`}
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#2a2a2a] text-gray-400 hover:border-orange-500/60 hover:text-orange-400 disabled:opacity-50"
-                >
-                  {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
-                </button>
-              )}
             </div>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-gray-500">
               <span>#{task.task_no} · {nameOf(task.created_by)}</span>
@@ -386,7 +459,7 @@ export default function TaskDetail({
               {status?.work_type && (
                 <span className="text-gray-400">
                   · {status.work_type}
-                  {status.per_unit && <> · {status.work_qty} {status.unit}{status.work_qty === 1 ? '' : 's'}</>}
+                  {status.work_qty > 1 && <> · {status.work_qty} pcs</>}
                   {/* One figure per option, not one for all of them.
 
                       "25m of 9h" is three options added up, and added up it
@@ -394,28 +467,20 @@ export default function TaskDetail({
                       over or option 3 was never started. Each option is its
                       own piece of work with its own allowance, so each gets
                       its own figure here, the same as in the list below. */}
-                  {optionParts.length > 1 ? (
-                    optionParts.map((pt) => {
-                      const ov = pt.allowed_mins > 0 && pt.spent_secs / 60 > pt.allowed_mins
-                      return (
-                        <span key={pt.part_no}>
-                          {' · '}
-                          <span className="text-gray-500">Opt {pt.part_no} </span>
-                          <span style={{ color: ov ? (dark ? '#fca5a5' : '#991b1b') : (dark ? '#6ee7b7' : '#065f46') }}>
-                            {hhmm(pt.spent_secs)} of {mins(pt.allowed_mins)}
-                          </span>
-                        </span>
-                      )
-                    })
-                  ) : (
-                    <>
-                      {' · '}
-                      <span style={{ color: over ? (dark ? '#fca5a5' : '#991b1b') : (dark ? '#6ee7b7' : '#065f46') }}>
-                        {mins(spentMins)} of {mins(status.allowed_mins ?? 0)}
-                        {over && <> · over by {mins(spentMins - (status.allowed_mins ?? 0))}</>}
-                      </span>
-                    </>
-                  )}
+                  {/* The line under the title stays a total.
+
+                      It used to print one figure per option, which was
+                      readable at three. With pieces as well it would be
+                      ten — banner 1 option 1, banner 1 option 2 — and a
+                      title line of ten figures is a title line nobody
+                      reads. The breakdown has a table of its own right
+                      below, which is where that question belongs. */}
+                  {' · '}
+                  <span style={{ color: shownOver ? (dark ? '#fca5a5' : '#991b1b') : (dark ? '#6ee7b7' : '#065f46') }}>
+                    {mins(shownSpent)} of {mins(shownAllowed)}
+                    {shownOver && <> · over by {mins(shownSpent - shownAllowed)}</>}
+                  </span>
+                  {isContainer && <span className="text-gray-500"> across its pieces</span>}
                   {status.change_secs > 0 && (
                     <span className="text-gray-500"> · +{mins(status.change_secs / 60)} on changes</span>
                   )}
@@ -433,7 +498,11 @@ export default function TaskDetail({
               locked={locked}
               onChanged={loadTime}
             />
-            {!locked && <TaskTimerButton taskId={task.id} size="md" onChanged={loadTime} />}
+            {/* A split task has no clock of its own: the work is in its
+                pieces, and a timer here would count one banner twice. */}
+            {!locked && (status?.child_count ?? 0) === 0 && (
+              <TaskTimerButton taskId={task.id} size="md" onChanged={loadTime} />
+            )}
             {canEdit && (
               <button onClick={onEdit} aria-label="Edit task" title="Edit" className="rounded-md p-1.5 text-gray-400 hover:bg-[#222] hover:text-white">
                 <Pencil size={16} />
@@ -479,7 +548,108 @@ export default function TaskDetail({
                   screen can actually say. Starting one option pauses
                   whatever was running — the database sees to that, the same
                   way it always has. */}
-              {parts.length > 0 && (
+              {/* Five banners, two designers.
+
+                  The big task becomes a container the moment it has a
+                  piece: its own timer goes quiet and its allowance moves
+                  into the pieces, so one banner's time cannot be counted
+                  twice. What is left unassigned stays on screen, because
+                  that is the piece nobody has been told to do. */}
+              {(status?.work_qty ?? 1) > 1 && !task.parent_task_id && (
+                <div className="mb-5 overflow-hidden rounded-lg border border-[#242424]">
+                  <div className="flex flex-wrap items-center gap-3 border-b border-[#242424] bg-[#171717] px-4 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-gray-300">
+                        {status?.work_qty} pieces
+                        {kids.length > 0 && (
+                          <span className="text-gray-500">
+                            {' · '}{status?.assigned_qty} given out
+                            {(status?.work_qty ?? 0) > (status?.assigned_qty ?? 0) && (
+                              <span className="text-amber-400">
+                                {' · '}{(status?.work_qty ?? 0) - (status?.assigned_qty ?? 0)} still with nobody
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-gray-500">
+                        Hand some of them to a designer — the time goes with them.
+                      </p>
+                    </div>
+                    {canEdit && !locked && (status?.work_qty ?? 0) > (status?.assigned_qty ?? 0) && (
+                      <button
+                        onClick={() => setSplitOpen((o) => !o)}
+                        className="shrink-0 rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-orange-500/60 hover:text-orange-300"
+                      >
+                        {splitOpen ? 'Cancel' : 'Hand some out'}
+                      </button>
+                    )}
+                  </div>
+
+                  {splitOpen && (
+                    <div className="flex flex-wrap items-end gap-3 border-b border-[#1f1f1f] bg-[#141414] px-4 py-3">
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] text-gray-500">How many</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={(status?.work_qty ?? 1) - (status?.assigned_qty ?? 0)}
+                          value={splitQty}
+                          onChange={(e) => setSplitQty(Math.max(1, Number(e.target.value) || 1))}
+                          className="w-20 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 text-sm tabular-nums text-white focus:border-orange-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block min-w-[12rem] flex-1">
+                        <span className="mb-1 block text-[11px] text-gray-500">To</span>
+                        <select
+                          value={splitTo}
+                          onChange={(e) => setSplitTo(e.target.value)}
+                          className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 text-sm text-white focus:border-orange-500 focus:outline-none"
+                        >
+                          <option value="">Pick a designer</option>
+                          {staff
+                            .filter((x) => x.is_active && x.role === 'design_team')
+                            .map((x) => <option key={x.id} value={x.id}>{x.full_name}</option>)}
+                        </select>
+                      </label>
+                      <button
+                        onClick={splitTask}
+                        disabled={adding || !splitTo}
+                        className="flex items-center gap-1.5 rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+                      >
+                        {adding && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        Give
+                      </button>
+                    </div>
+                  )}
+
+                  {kids.length > 0 && (
+                    <ul>
+                      {kids.map((k) => (
+                        <li key={k.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[#1f1f1f] px-4 py-2.5 last:border-0">
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm text-gray-200">
+                              <span className="text-gray-500">#{k.task_no}</span> {k.subject}
+                            </span>
+                            <span className="block truncate text-[11px] text-gray-500">
+                              {k.people ?? 'Nobody'}{k.stage_name ? ` · ${k.stage_name}` : ''}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-xs tabular-nums text-gray-400">
+                            {k.work_qty} pc{k.work_qty === 1 ? '' : 's'}
+                          </span>
+                          <span className="shrink-0 text-sm tabular-nums text-gray-300">
+                            {hhmm(k.spent_secs)}
+                            {k.allowed_mins ? <span className="text-gray-500"> of {mins(k.allowed_mins)}</span> : null}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {parts.length > 0 && (status?.child_count ?? 0) === 0 && (
                 <div className="mb-5 overflow-hidden rounded-lg border border-[#242424]">
                   <div className="border-b border-[#242424] bg-[#171717] px-4 py-2">
                     <p className="text-xs font-medium text-gray-300">Where the time went</p>
@@ -493,7 +663,7 @@ export default function TaskDetail({
                       const partOver = pt.allowed_mins > 0 && spent > pt.allowed_mins
                       return (
                         <li
-                          key={`${pt.part_kind ?? 'none'}-${pt.part_no ?? 0}`}
+                          key={`${pt.part_kind ?? 'none'}-${pt.piece_no ?? 0}-${pt.part_no ?? 0}`}
                           className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[#1f1f1f] px-4 py-2.5 last:border-b-0"
                         >
                           <span className="min-w-0 flex-1 leading-tight">
@@ -532,18 +702,71 @@ export default function TaskDetail({
                               {pt.sittings} sitting{pt.sittings === 1 ? '' : 's'}
                             </span>
                           )}
-                          {/* Old unassigned time has no option to start. */}
-                          {!locked && pt.part_kind && (
+                          {!locked && pt.part_kind && (status?.child_count ?? 0) === 0 && (
                             <TaskTimerButton
                               taskId={task.id}
-                              part={{ kind: pt.part_kind, no: pt.part_no ?? 1 }}
+                              part={{ kind: pt.part_kind, no: pt.part_no ?? 1, piece: pt.piece_no ?? 1 }}
                               onChanged={loadTime}
                             />
+                          )}
+                          {/* Only on the last option of a piece, and only
+                              while it is still untouched. An option with
+                              time on it is work that happened, and the
+                              hours do not come back. */}
+                          {canEdit && !locked && pt.part_kind === 'option'
+                            && (status?.child_count ?? 0) === 0
+                            && pt.part_no === optionsOf(pt.piece_no ?? 1)
+                            && optionsOf(pt.piece_no ?? 1) > 1
+                            && pt.spent_secs === 0 && (
+                            <button
+                              onClick={() => removeOption(pt.piece_no ?? 1)}
+                              disabled={adding}
+                              aria-label={`Remove ${pt.label}`}
+                              title="Remove this option — nothing has been worked on it"
+                              className="shrink-0 rounded-md p-1 text-gray-600 hover:bg-[#222] hover:text-red-400 disabled:opacity-50"
+                            >
+                              <X size={14} />
+                            </button>
                           )}
                         </li>
                       )
                     })}
                   </ul>
+
+                  {/* One button per piece, not one for the task.
+
+                      A single button added an option to every piece at
+                      once: two banners, and asking for a third draft of
+                      the first one invented a third draft of the second
+                      as well — four hours of work that was never done,
+                      sitting in the allowance. The client wants three
+                      of one and one of the other, and the screen has to
+                      be able to say that. */}
+                  {canEdit && !locked && status?.work_type && (status?.child_count ?? 0) === 0 && (
+                    <div className="border-t border-[#242424] bg-[#141414] px-4 py-2.5">
+                      <p className="mb-2 text-[11px] text-gray-500">
+                        A new option adds its own time to this job.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Array.from({ length: Math.max(status?.work_qty ?? 1, 1) }, (_, i) => i + 1).map((pc) => {
+                          const next = optionsOf(pc) + 1
+                          return (
+                            <button
+                              key={pc}
+                              onClick={() => addOption(pc)}
+                              disabled={adding}
+                              className="flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-orange-500/60 hover:text-orange-300 disabled:opacity-50"
+                            >
+                              {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                              {(status?.work_qty ?? 1) > 1
+                                ? `${unitName} ${pc} · option ${next}`
+                                : `Add option ${next}`}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

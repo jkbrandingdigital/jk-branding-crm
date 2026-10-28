@@ -8,6 +8,7 @@ import { useChartTheme } from '../lib/chartTheme'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { istDate, addDays, weekStart, addMonths, shortDate, monthLabel, inr, inrCompact } from '../lib/format'
+import IncentiveCard from './sales/IncentiveCard'
 
 type View = 'daily' | 'weekly' | 'monthly' | 'yearly'
 type Row = {
@@ -88,6 +89,17 @@ export default function PerformanceView({
   const [view, setView] = useState<View>('daily')
   const [rows, setRows] = useState<Row[]>([])
   const [norm, setNorm] = useState<Norm | null>(null)
+  /*
+    Whose incentive to show.
+
+    Without an id the incentive RPC answers for everyone the viewer is
+    allowed to see, which for a sales person is only themselves but for
+    an admin on their own page would be the whole team. So the signed-in
+    id is resolved first and the card is held back until it arrives —
+    showing the team for a moment and then swapping it for one person
+    would read as a bug.
+  */
+  const [meId, setMeId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -119,6 +131,7 @@ export default function PerformanceView({
         id = data.user?.id ?? null
       }
       if (!id) return setNorm(null)
+      if (!cancelled) setMeId(id)
       const { data: p } = await supabase.from('profiles').select('work_mode').eq('id', id).maybeSingle()
       const mode = (p as { work_mode?: string } | null)?.work_mode ?? 'office'
       const { data: n } = await supabase.from('work_norms').select('*').eq('work_mode', mode).maybeSingle()
@@ -274,6 +287,15 @@ export default function PerformanceView({
             )
           })}
         </div>
+
+        {/* What this month pays on top of salary. One person only:
+            on a team or branch view there is nobody whose incentive
+            this would be. */}
+        {onePerson && meId && (
+          <div className="mt-6">
+            <IncentiveCard userId={meId} />
+          </div>
+        )}
 
         {/* Revenue chart */}
         <section className="mt-6 rounded-2xl border border-[#242424] bg-[#151515] p-5">

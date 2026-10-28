@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, CheckCircle2, Loader2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Users, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { DateField } from '../DateField'
 import { CLIENT_FIELDS, missingOf, NEED_LABEL, type Branch, type Customer } from './customerUtils'
@@ -25,6 +25,20 @@ import { CLIENT_FIELDS, missingOf, NEED_LABEL, type Branch, type Customer } from
 
 const ROLE_FIELD = CLIENT_FIELDS.find((f) => f.key === 'contact_role')
 
+type Similar = {
+  id: string
+  customer_code: string
+  company_name: string
+  contact_person: string | null
+  phone: string | null
+  branch_name: string | null
+  owner_name: string | null
+  status: string
+  project_count: number
+  by_phone: boolean
+  by_name: boolean
+}
+
 export default function ClientMasterForm({
   customer, branches = [], onClose, onSaved,
 }: {
@@ -38,6 +52,20 @@ export default function ClientMasterForm({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
+  /*
+    Somebody who looks like this one already.
+
+    JKB-039 and JKB-040 were the same client, same phone, typed in
+    twice — and after that "how much work has Krishna done" had two
+    answers and neither was right.
+
+    It warns rather than blocks. One phone really can carry two firms,
+    and a CRM that refuses would just be beaten by changing a digit —
+    which leaves two files AND a wrong number. So the screen says what
+    it found and the person decides.
+  */
+  const [similar, setSimilar] = useState<Similar[] | null>(null)
+
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', esc)
@@ -48,10 +76,26 @@ export default function ClientMasterForm({
 
   const set = (k: keyof Customer, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
-  async function save() {
+  async function save(force = false) {
     if (!String(form.company_name ?? '').trim()) return setErr('A company or brand name is needed.')
     setBusy(true)
     setErr('')
+
+    // Only when making a new one. Editing an existing client past its
+    // own phone number would warn about itself for ever.
+    if (!customer && !force) {
+      const { data } = await supabase.rpc('customer_find_similar', {
+        p_phone: String(form.phone ?? '').trim() || null,
+        p_name: String(form.company_name ?? '').trim() || null,
+        p_ignore: null,
+      })
+      const hits = (data ?? []) as Similar[]
+      if (hits.length > 0) {
+        setBusy(false)
+        setSimilar(hits)
+        return
+      }
+    }
 
     const patch: Record<string, string | null> = {}
     for (const f of CLIENT_FIELDS) {
@@ -227,7 +271,7 @@ export default function ClientMasterForm({
             Cancel
           </button>
           <button
-            onClick={save}
+            onClick={() => save()}
             disabled={busy}
             className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
           >
@@ -236,6 +280,75 @@ export default function ClientMasterForm({
           </button>
         </div>
       </div>
+
+      {/* Already on the books?
+
+          Shown before anything is written, with the existing client
+          named and its work counted — because "2 projects" is what
+          tells you it is really the same firm. Two ways out and no
+          third: open the one that exists, or say this is a different
+          firm and carry on. */}
+      {similar && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setSimilar(null) }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="This client may already exist"
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-amber-600/40 bg-[#161616] shadow-2xl">
+            <div className="flex items-start gap-2 border-b border-[#242424] px-5 py-4">
+              <Users size={18} className="mt-0.5 shrink-0 text-amber-400" />
+              <div>
+                <h3 className="text-sm font-semibold text-white">This client may already be here</h3>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  {similar.length === 1 ? 'One match' : `${similar.length} matches`} on the phone number or the name.
+                </p>
+              </div>
+            </div>
+
+            <ul className="divide-y divide-[#202020]">
+              {similar.map((c) => (
+                <li key={c.id} className="px-5 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-white">
+                        {c.company_name}
+                        <span className="ml-2 font-mono text-xs text-gray-600">{c.customer_code}</span>
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-gray-500">
+                        {[c.contact_person, c.phone, c.branch_name, c.owner_name].filter(Boolean).join(' · ') || '—'}
+                      </p>
+                      <p className="mt-1 text-[11px] text-gray-600">
+                        {c.project_count} project{c.project_count === 1 ? '' : 's'}
+                        {c.status !== 'active' && <span className="text-amber-400"> · inactive</span>}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                      {c.by_phone ? 'Same phone' : 'Same name'}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <div className="flex flex-wrap justify-end gap-2 border-t border-[#242424] px-5 py-4">
+              <button
+                onClick={() => { setSimilar(null); onClose() }}
+                className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
+              >
+                Use the existing one
+              </button>
+              <button
+                onClick={() => { setSimilar(null); void save(true) }}
+                className="rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-gray-300 hover:text-white"
+              >
+                Different firm — add anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body,
   )

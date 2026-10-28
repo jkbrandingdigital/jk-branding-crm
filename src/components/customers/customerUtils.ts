@@ -27,6 +27,14 @@ export type Customer = {
   reference_notes: string | null
   notes: string | null
   is_complete: boolean
+  /*
+    Lifetime value of this client — every project that was not rejected.
+    The star below is worked out from it, so the two can never disagree.
+  */
+  revenue: number
+  // 2 to 5, from `revenue`. Nobody sets this by hand any more: two
+  // people used to give the same client different stars, and "why four?"
+  // had no answer. See Customers_C8_Revenue_Rating.sql.
   rating: number
   status: 'active' | 'inactive'
   birth_date: string | null
@@ -70,6 +78,15 @@ export type ProjectRow = {
   // Zero would say "this job is free", which is a different and untrue
   // thing. A designer gets null and the screen shows no figure at all.
   value_amount: number | null
+  /*
+    When the work was booked — not when somebody typed it in.
+
+    Revenue counts by this date. Without it, an old client's finished
+    job entered today lands in this month, and two months are wrong at
+    once: one short, one flattered. Keeping the two dates apart is what
+    makes it safe to enter old work at all.
+  */
+  booked_on?: string | null
   start_date: string | null
   due_date: string | null
   owner_id: string | null

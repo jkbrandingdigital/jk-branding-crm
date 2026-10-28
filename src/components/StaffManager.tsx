@@ -83,12 +83,12 @@ const ROLE_MODULES: Record<string, string[]> = {
   // It is a toggle rather than something worked out from a job title,
   // because a title is typed by hand: one spelling slip and the right
   // silently never arrives, with nothing on screen to say why.
+  // Job Work is offered here, but it is not a default for anybody —
+  // Printing Media is not either. The register is one person's job on
+  // this team, not the whole team's, so it arrives by a switch and not
+  // by having the role.
   design_team: ['mod_tasks', 'mod_reminders', 'mod_notes', 'mod_project_board', 'project_coordinate',
-                // Job Work is not in this list for a designer either, for
-                // the same reason Printing Media is not: it rides with
-                // printing. Whoever handles the printer handles the order
-                // behind it, and the box below switches on both.
-                ],
+                'mod_job_works', 'job_work_create'],
 
   // The two people who check what comes back from the printer. Their
   // register is their whole job, so it is on by default — there is no

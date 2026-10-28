@@ -34,6 +34,17 @@ export default function ProjectModal({
   const [title, setTitle] = useState(project?.title ?? '')
   const [stageId, setStageId] = useState(project?.stage_id ?? stages[0]?.id ?? '')
   const [value, setValue] = useState(String(project?.value_amount ?? 0))
+  /*
+    When the work was booked, not when it was typed in.
+
+    An old client's finished job entered today must count in the month
+    it was actually sold. Left on the entry date, two months go wrong
+    at once — one short and one flattered — and after that nobody
+    trusts entering old work at all.
+
+    New projects open on today, which is right almost every time.
+  */
+  const [booked, setBooked] = useState(project?.booked_on ?? new Date().toLocaleDateString('en-CA'))
   const [start, setStart] = useState(project?.start_date ?? '')
   const [due, setDue] = useState(project?.due_date ?? '')
   const [owner, setOwner] = useState(project?.owner_id ?? '')
@@ -71,6 +82,7 @@ export default function ProjectModal({
       title: title.trim(),
       stage_id: stageId || null,
       value_amount: Number(value) || 0,
+      booked_on: booked || new Date().toLocaleDateString('en-CA'),
       start_date: start || null,
       due_date: due || null,
       owner_id: owner || null,
@@ -193,6 +205,10 @@ export default function ProjectModal({
                 follows the machine's locale and reads dd-----yyyy here,
                 while every other date in the app is picked the same way.
                 One habit, one look. */}
+            <div>
+              <label className={label}>Booked on</label>
+              <DateField value={booked} onChange={setBooked} placeholder="Today" />
+            </div>
             <div>
               <label className={label}>Start</label>
               <DateField value={start} onChange={setStart} placeholder="Not set" />

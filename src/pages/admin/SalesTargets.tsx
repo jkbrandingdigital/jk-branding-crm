@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, ChevronDown, CheckCircle2, AlertCircle } from 'lucide-react'
 import AdminLayout from '../../components/AdminLayout'
+import IncentiveRates from '../../components/sales/IncentiveRates'
 import { supabase } from '../../lib/supabase'
 import { istDate, addDays, addMonths, inr } from '../../lib/format'
 import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../../lib/targets'
@@ -394,6 +395,20 @@ export default function SalesTargets() {
                 </section>
               )
             })}
+          </div>
+
+          {/* What the month pays above target.
+
+              Below the split rather than above it, because it is
+              company policy and barely changes, while the split is the
+              monthly work this page exists for.
+
+              It is deliberately NOT part of "Save targets": a rate
+              saves the moment it is typed. Two save behaviours in one
+              screen is a trap, so the panel says so on itself rather
+              than relying on anyone noticing. */}
+          <div className="mt-6">
+            <IncentiveRates />
           </div>
 
           <div className="sticky bottom-0 mt-6 flex items-center justify-between gap-4 border-t border-[#1f1f1f] bg-[#0f0f0f]/95 py-4 backdrop-blur">

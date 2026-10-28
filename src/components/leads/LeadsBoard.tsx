@@ -8,6 +8,7 @@ import LeadDrawer from './LeadDrawer'
 import { DateField, DateTimeField } from '../DateField'
 import ImportLeads from './ImportLeads'
 import LeadSearchCard from './LeadSearchCard'
+import PendingConvert from './PendingConvert'
 import ConvertLead from '../customers/ConvertLead'
 import ClientMasterForm from '../customers/ClientMasterForm'
 import LeadCreateMenu from './LeadCreateMenu'
@@ -1276,6 +1277,12 @@ export default function LeadsBoard(
           )}
         </div>
       </div>
+
+      {/* Confirmed, but never turned into a client — so counted nowhere.
+          It sits above the board because the board is where the habit
+          is: a list nobody passes every day is a list nobody reads.
+          It draws nothing when there is nothing pending. */}
+      <PendingConvert onChanged={refresh} />
 
       {/* Search + Filter */}
       <div className="mt-5 flex flex-wrap items-center gap-3">

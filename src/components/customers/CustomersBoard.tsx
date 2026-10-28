@@ -7,7 +7,7 @@ import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import ClientMasterForm from './ClientMasterForm'
 import CustomerDetail from './CustomerDetail'
-import { CONTACT_ROLE_LABEL, downloadCsv, fmtDT, loadBranches, type Branch, type Customer } from './customerUtils'
+import { CONTACT_ROLE_LABEL, downloadCsv, fmtDT, loadBranches, money, type Branch, type Customer } from './customerUtils'
 
 /*
   Customers.
@@ -28,6 +28,20 @@ export default function CustomersBoard() {
   const [open, setOpen] = useState<Customer | null>(null)
   const [branches, setBranches] = useState<Branch[]>([])
   const [branchF, setBranchF] = useState('all')
+  /*
+    Whose client, and how good.
+
+    `ownerF` reads `owner_id` — whoever the client is credited to. That
+    is the same column the revenue is credited by, so this filter and
+    the performance screen can never tell two different stories about
+    one person.
+
+    The list of people comes from the rows already on screen rather
+    than from a fetch: only somebody who actually owns a client can be
+    picked, so a choice here can never come back empty.
+  */
+  const [ownerF, setOwnerF] = useState('all')
+  const [ratingF, setRatingF] = useState('all')
   const [busy, setBusy] = useState('')
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
@@ -62,6 +76,9 @@ export default function CustomersBoard() {
       if (tab === 'incomplete' && (c.is_complete || c.status !== 'active')) return false
       if (branchF === 'none' && c.branch_id) return false
       if (branchF !== 'all' && branchF !== 'none' && c.branch_id !== branchF) return false
+      if (ownerF === 'none' && c.owner_id) return false
+      if (ownerF !== 'all' && ownerF !== 'none' && c.owner_id !== ownerF) return false
+      if (ratingF !== 'all' && (c.rating ?? 0) !== Number(ratingF)) return false
       if (!t) return true
       return (
         c.company_name.toLowerCase().includes(t) ||
@@ -71,30 +88,34 @@ export default function CustomersBoard() {
         c.customer_code.toLowerCase().includes(t)
       )
     })
-  }, [rows, q, tab, branchF])
+  }, [rows, q, tab, branchF, ownerF, ratingF])
+
+  // Everyone who owns at least one client, by name
+  const owners = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of rows) if (c.owner_id) m.set(c.owner_id, c.owner_name ?? '—')
+    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  }, [rows])
+
+  const filtered = branchF !== 'all' || ownerF !== 'all' || ratingF !== 'all'
 
   // The tab counts follow the branch filter too. A tab reading 41 above a
   // list of 6 is the kind of disagreement nobody can explain later.
   const counts = useMemo(() => {
-    const inBranch = rows.filter((c) =>
-      branchF === 'all' ? true : branchF === 'none' ? !c.branch_id : c.branch_id === branchF)
+    const narrowed = rows.filter((c) => {
+      if (branchF === 'none' && c.branch_id) return false
+      if (branchF !== 'all' && branchF !== 'none' && c.branch_id !== branchF) return false
+      if (ownerF === 'none' && c.owner_id) return false
+      if (ownerF !== 'all' && ownerF !== 'none' && c.owner_id !== ownerF) return false
+      if (ratingF !== 'all' && (c.rating ?? 0) !== Number(ratingF)) return false
+      return true
+    })
     return {
-      active: inBranch.filter((c) => c.status === 'active').length,
-      incomplete: inBranch.filter((c) => c.status === 'active' && !c.is_complete).length,
-      inactive: inBranch.filter((c) => c.status === 'inactive').length,
+      active: narrowed.filter((c) => c.status === 'active').length,
+      incomplete: narrowed.filter((c) => c.status === 'active' && !c.is_complete).length,
+      inactive: narrowed.filter((c) => c.status === 'inactive').length,
     }
-  }, [rows, branchF])
-
-  async function setRating(c: Customer, rating: number) {
-    setBusy(c.id)
-    const { error } = await supabase
-      .from('customers')
-      .update({ rating: c.rating === rating ? 0 : rating })
-      .eq('id', c.id)
-    setBusy('')
-    if (error) return setMsg({ type: 'err', text: error.message })
-    void load()
-  }
+  }, [rows, branchF, ownerF, ratingF])
 
   async function setStatus(c: Customer, status: 'active' | 'inactive') {
     setBusy(c.id)
@@ -124,13 +145,13 @@ export default function CustomersBoard() {
       `customers-${new Date().toISOString().slice(0, 10)}.csv`,
       ['Code', 'Company / Brand', 'Branch', 'Contact Person', 'They are the', 'Mobile', 'WhatsApp',
        'Email', 'Billing Address', 'GST', 'Website', 'Birthday', 'Anniversary', 'Projects',
-       'Client info', 'Rating', 'Status', 'Converted on', 'Converted by', 'Owner'],
+       'Client info', 'Revenue', 'Rating', 'Status', 'Converted on', 'Converted by', 'Owner'],
       shown.map((c) => [
         c.customer_code, c.company_name, c.branch_name ?? '', c.contact_person ?? '',
         CONTACT_ROLE_LABEL[c.contact_role ?? ''] ?? '', c.phone ?? '', c.whatsapp ?? '',
         c.email ?? '', c.billing_address ?? '', c.gst_number ?? '', c.website ?? '',
         c.birth_date ?? '', c.anniversary_date ?? '', c.project_count,
-        c.is_complete ? 'Complete' : 'Incomplete', c.rating, c.status,
+        c.is_complete ? 'Complete' : 'Incomplete', c.revenue, c.rating, c.status,
         fmtDT(c.converted_at), c.converted_by_name ?? '', c.owner_name ?? '',
       ]),
     )
@@ -146,6 +167,8 @@ export default function CustomersBoard() {
 
   const input =
     'w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none'
+  const pick =
+    'rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none'
 
   return (
     <div className="space-y-5">
@@ -227,6 +250,44 @@ export default function CustomersBoard() {
           </select>
         )}
 
+        {/* Whose client. The same column the revenue is credited by, so
+            this list and the performance screen agree by construction. */}
+        {owners.length > 0 && (
+          <select
+            value={ownerF}
+            onChange={(e) => setOwnerF(e.target.value)}
+            aria-label="Sales person"
+            className={pick}
+          >
+            <option value="all">Everyone</option>
+            {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            <option value="none">Nobody yet</option>
+          </select>
+        )}
+
+        <select
+          value={ratingF}
+          onChange={(e) => setRatingF(e.target.value)}
+          aria-label="Rating"
+          className={pick}
+        >
+          <option value="all">Any rating</option>
+          {/* Two to five. Nothing scores one or none — the stars come
+              from revenue, and the bottom band starts at two. */}
+          {[5, 4, 3, 2].map((n) => (
+            <option key={n} value={String(n)}>{'★'.repeat(n)} only</option>
+          ))}
+        </select>
+
+        {filtered && (
+          <button
+            onClick={() => { setBranchF('all'); setOwnerF('all'); setRatingF('all') }}
+            className="rounded-lg px-2.5 py-2 text-xs text-gray-400 hover:text-white"
+          >
+            Clear
+          </button>
+        )}
+
         <div className="relative min-w-[200px] flex-1">
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone, email or code" className={`${input} pl-9`} />
@@ -235,10 +296,10 @@ export default function CustomersBoard() {
 
       <section className="overflow-hidden rounded-xl border border-[#242424] bg-[#151515]">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[960px] border-collapse text-sm">
+          <table className="w-full min-w-[1100px] border-collapse text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500">
-                {['Code', 'Customer', 'Branch', 'Contact', 'Projects', 'Client info', 'Rating', 'Converted', ''].map((h, i) => (
+                {['Code', 'Customer', 'Branch', 'Contact', 'Projects', 'Client info', 'Revenue', 'Converted', ''].map((h, i) => (
                   <th key={i} className="border-b border-[#242424] px-4 py-3 font-normal">{h}</th>
                 ))}
               </tr>
@@ -303,31 +364,32 @@ export default function CustomersBoard() {
                     </button>
                   </td>
 
-                  <td className="border-t border-[#202020] px-4 py-3">
-                    <div className="flex gap-0.5">
+                  {/* Money and stars in one cell, because they are one
+                      fact. Two columns said the same thing twice and
+                      pushed the row off the screen to do it. The stars
+                      are read-only: clicking one would be arguing with
+                      an arithmetic. */}
+                  <td className="whitespace-nowrap border-t border-[#202020] px-4 py-3">
+                    <span className={`block tabular-nums ${c.revenue > 0 ? 'text-gray-200' : 'text-gray-600'}`}>
+                      {money(c.revenue)}
+                    </span>
+                    <span className="mt-1 flex gap-0.5" title={`${money(c.revenue)} of work`}>
                       {[1, 2, 3, 4, 5].map((n) => (
-                        <button
+                        <Star
                           key={n}
-                          onClick={() => setRating(c, n)}
-                          disabled={busy === c.id}
-                          aria-label={`Rate ${n}`}
-                          className="disabled:opacity-50"
-                        >
-                          <Star
-                            size={14}
-                            className={n <= c.rating ? 'fill-amber-400 text-amber-400' : 'text-gray-700'}
-                          />
-                        </button>
+                          size={12}
+                          className={n <= c.rating ? 'fill-amber-400 text-amber-400' : 'text-gray-700'}
+                        />
                       ))}
-                    </div>
+                    </span>
                   </td>
 
-                  <td className="border-t border-[#202020] px-4 py-3 text-xs text-gray-400">
+                  <td className="whitespace-nowrap border-t border-[#202020] px-4 py-3 text-xs text-gray-400">
                     {fmtDT(c.converted_at)}
-                    <span className="block text-gray-600">{c.converted_by_name ?? '—'}</span>
+                    <span className="block truncate text-gray-600">{c.converted_by_name ?? '—'}</span>
                   </td>
 
-                  <td className="border-t border-[#202020] px-4 py-3">
+                  <td className="whitespace-nowrap border-t border-[#202020] px-4 py-3">
                     <div className="flex justify-end gap-1">
                       <button
                         onClick={() => setEditing(c)}
