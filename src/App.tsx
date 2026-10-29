@@ -137,6 +137,22 @@ import ManagerMyLeave from './pages/manager/MyLeave'
 import ManagerAttendancePage from './pages/manager/Attendance'
 import SalesMyLeave from './pages/sales/MyLeave'
 import DesignMyLeave from './pages/design/MyLeave'
+// Reception — visitor management. New dedicated role + layout.
+import ReceptionDashboard from './pages/reception/Dashboard'
+import ReceptionAddVisitor from './pages/reception/AddVisitor'
+import ReceptionReport from './pages/reception/Report'
+import ReceptionAttendance from './pages/reception/Attendance'
+import ReceptionMyLeave from './pages/reception/MyLeave'
+import ReceptionMyPayslips from './pages/reception/MyPayslips'
+import ReceptionPolicies from './pages/reception/Policies'
+import ReceptionReminders from './pages/reception/Reminders'
+import ReceptionNotes from './pages/reception/Notes'
+import ReceptionTodos from './pages/reception/Todos'
+// Reception oversight for admin + HR (view + report only).
+import AdminReception from './pages/admin/Reception'
+import AdminReceptionReport from './pages/admin/ReceptionReport'
+import HrReception from './pages/hr/Reception'
+import HrReceptionReport from './pages/hr/ReceptionReport'
 
 // Where a sub admin lands, in order. The first one they are allowed to
 // open becomes their home page.
@@ -268,6 +284,8 @@ function AppRoutes() {
           <Route path="/admin/assets" element={<Guard ok={may('mod_assets')}><AdminAssetsPage /></Guard>} />
           <Route path="/admin/policies" element={<AdminPolicies />} />
           <Route path="/admin/policies-manage" element={<Guard ok={may('policy_edit')}><AdminPoliciesManage /></Guard>} />
+          <Route path="/admin/reception" element={<Guard ok={may('mod_reception')}><AdminReception /></Guard>} />
+          <Route path="/admin/reception-report" element={<Guard ok={may('mod_reception')}><AdminReceptionReport /></Guard>} />
           <Route
             path="/admin/*"
             element={isSuper ? <AdminDashboard /> : subHome ? <Navigate to={subHome} replace /> : <NoAdminAccess />}
@@ -342,6 +360,8 @@ function AppRoutes() {
           <Route path="/hr/my-payslips" element={<HrMyPayslips />} />
           <Route path="/hr/policies" element={<HrPolicies />} />
           <Route path="/hr/policies-manage" element={<HrPoliciesManage />} />
+          <Route path="/hr/reception" element={<HrReception />} />
+          <Route path="/hr/reception-report" element={<HrReceptionReport />} />
           <Route path="/hr/*" element={<HRDashboard />} />
         </>
       )}
@@ -385,6 +405,21 @@ function AppRoutes() {
           <Route path="/accounts/policies" element={<AccountsPolicies />} />
           <Route path="/accounts/job-works" element={<AccountsJobWorks />} />
           <Route path="/accounts/*" element={<AccountsJobWorks />} />
+        </>
+      )}
+      {role === 'reception' && (
+        <>
+          <Route path="/reception/add" element={<ReceptionAddVisitor />} />
+          <Route path="/reception/report" element={<ReceptionReport />} />
+          <Route path="/reception/reminders" element={<ReceptionReminders />} />
+          <Route path="/reception/notes" element={<ReceptionNotes />} />
+          <Route path="/reception/todos" element={<ReceptionTodos />} />
+          <Route path="/reception/attendance" element={<ReceptionAttendance />} />
+          <Route path="/reception/my-leave" element={<ReceptionMyLeave />} />
+          <Route path="/reception/my-payslips" element={<ReceptionMyPayslips />} />
+          <Route path="/reception/policies" element={<ReceptionPolicies />} />
+          {/* catch-all LAST, like the other roles */}
+          <Route path="/reception/*" element={<ReceptionDashboard />} />
         </>
       )}
       <Route path="*" element={<Navigate to={home} />} />

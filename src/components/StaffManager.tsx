@@ -40,10 +40,11 @@ const ROLE_LABEL: Record<string, string> = {
   design_team: 'Design Team',
   dispatch: 'Dispatch',
   accounts: 'Accounts',
+  reception: 'Reception',
 }
 // The order the count tiles appear in; any role in ROLE_LABEL left out of
 // this list still gets a tile, at the end.
-const ROLE_TILE_ORDER = ['sales', 'design_team', 'dispatch', 'accounts', 'branch_manager', 'hr', 'super_admin']
+const ROLE_TILE_ORDER = ['reception','sales', 'design_team', 'dispatch', 'accounts', 'branch_manager', 'hr', 'super_admin']
 const ROLE_TILES = [
   ...ROLE_TILE_ORDER.filter((r) => r in ROLE_LABEL),
   ...Object.keys(ROLE_LABEL).filter((r) => !ROLE_TILE_ORDER.includes(r)),
@@ -57,6 +58,7 @@ const ROLE_CHIP: Record<string, string> = {
   design_team: 'bg-teal-950/60 text-teal-300',
   dispatch: 'bg-sky-950/60 text-sky-300',
   accounts: 'bg-emerald-950/60 text-emerald-300',
+  reception: 'bg-amber-950/60 text-amber-300',
 }
 // Which modules are offered for each role
 const ROLE_MODULES: Record<string, string[]> = {
@@ -232,7 +234,7 @@ const WORK_MODE: Record<string, string> = {
 // somewhere, and that somewhere is what their attendance is measured
 // against.
 const needsBranch = (role: string) =>
-  role === 'sales' || role === 'branch_manager' || role === 'dispatch'
+  role === 'sales' || role === 'branch_manager' || role === 'dispatch' || role === 'reception'
 
 const emptyForm = (): Form => ({
   full_name: '',

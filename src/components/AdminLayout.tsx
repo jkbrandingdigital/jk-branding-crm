@@ -123,6 +123,15 @@ const GROUPS: NavGroup[] = [
     ],
   },
   {
+    key: 'reception',
+    label: 'Reception',
+    icon: ClipboardCheck,
+    items: [
+      { label: "Today's Visitors", path: '/admin/reception', icon: Users, ready: true, perm: 'mod_reception' },
+      { label: 'Visitor Report', path: '/admin/reception-report', icon: FileBarChart, ready: true, perm: 'mod_reception' },
+    ],
+  },
+  {
     key: 'company',
     label: 'Company',
     icon: Landmark,

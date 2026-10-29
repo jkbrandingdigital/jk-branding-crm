@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellRing, Check, CheckCheck, FileText, ListTodo, UserPlus, X } from 'lucide-react'
+import { Bell, BellRing, Check, CheckCheck, FileText, ListTodo, UserPlus, Volume2, VolumeX, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fmtDT } from './leads/leadUtils'
 
@@ -20,6 +20,20 @@ const isLead = (n: Notif) => n.kind === 'lead'
 const isTask = (n: Notif) => n.kind === 'task'
 const isReport = (n: Notif) => n.kind === 'report'
 
+// Notification sound: on unless the viewer has turned it off.
+const SOUND_KEY = 'jk_notif_sound'
+
+// Which tone plays for which notification. Add a line here (and a file in
+// public/) to give any kind its own sound — e.g. a future 'lead_done'.
+//   visitor  -> reception check-ins          (public/notify-visitor.mp3)
+//   default  -> leads, tasks, reports, etc.  (public/notify-default.mp3)
+const CATEGORY_FILE: Record<string, string> = {
+  visitor: '/notify-visitor.mp3',
+  default: '/notify-default.mp3',
+}
+const categoryOf = (kind: string): keyof typeof CATEGORY_FILE =>
+  kind === 'visitor' ? 'visitor' : 'default'
+
 export default function NotificationBell({
   remindersPath,
   leadsPath,
@@ -37,6 +51,111 @@ export default function NotificationBell({
   const [toasts, setToasts] = useState<Notif[]>([])
   const [showRead, setShowRead] = useState(false)   // the bell holds what is still unread
   const boxRef = useRef<HTMLDivElement>(null)
+
+  // Sound: per-viewer preference, kept in localStorage. Read via a ref in
+  // the realtime handler so toggling it never re-subscribes the channel.
+  const [muted, setMuted] = useState(() => {
+    try { return localStorage.getItem(SOUND_KEY) === 'off' } catch { return false }
+  })
+  const mutedRef = useRef(muted)
+  useEffect(() => { mutedRef.current = muted }, [muted])
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const audioEls = useRef<Record<string, HTMLAudioElement>>({})
+
+  // One <audio> per category, from public/. A missing/blocked file falls
+  // back to the built-in beep, so the sound never goes fully silent.
+  useEffect(() => {
+    const map: Record<string, HTMLAudioElement> = {}
+    for (const [cat, url] of Object.entries(CATEGORY_FILE)) {
+      try {
+        const a = new Audio(url)
+        a.preload = 'auto'
+        a.volume = 0.7
+        map[cat] = a
+      } catch { /* fall back to the built-in beep */ }
+    }
+    audioEls.current = map
+  }, [])
+
+  // Make (or resume) the AudioContext for the built-in beep fallback.
+  const ensureAudio = useCallback(() => {
+    if (!audioCtxRef.current) {
+      try {
+        const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+        if (Ctx) audioCtxRef.current = new Ctx()
+      } catch { /* no audio available */ }
+    }
+    const ctx = audioCtxRef.current
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
+    return ctx
+  }, [])
+
+  // Built-in fallback beep: one note for visitors, two for everything else.
+  const playBeep = useCallback((cat: string) => {
+    const ctx = ensureAudio()
+    if (!ctx) return
+    try {
+      const now = ctx.currentTime
+      const notes = cat === 'visitor'
+        ? [{ f: 880, t: 0 }]
+        : [{ f: 880, t: 0 }, { f: 1318.5, t: 0.14 }]
+      for (const { f, t } of notes) {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.value = f
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        const start = now + t
+        gain.gain.setValueAtTime(0.0001, start)
+        gain.gain.exponentialRampToValueAtTime(0.22, start + 0.01)
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.35)
+        osc.start(start)
+        osc.stop(start + 0.4)
+      }
+    } catch { /* ignore */ }
+  }, [ensureAudio])
+
+  // Play the right tone for this notification kind.
+  const playChime = useCallback((kind: string) => {
+    if (mutedRef.current) return
+    const cat = categoryOf(kind)
+    const el = audioEls.current[cat] ?? audioEls.current.default
+    if (el) {
+      try {
+        el.currentTime = 0
+        const p = el.play()
+        if (p && typeof p.then === 'function') p.catch(() => playBeep(cat))
+        return
+      } catch { /* fall through to the beep */ }
+    }
+    playBeep(cat)
+  }, [playBeep])
+
+  // Unlock audio on the first interaction so later chimes can play.
+  useEffect(() => {
+    const unlock = () => {
+      ensureAudio()
+      // Prime each tone within a user gesture so it can play later.
+      for (const el of Object.values(audioEls.current)) {
+        const prevMuted = el.muted
+        el.muted = true
+        const p = el.play()
+        if (p && typeof p.then === 'function') {
+          p.then(() => { el.pause(); el.currentTime = 0; el.muted = prevMuted })
+           .catch(() => { el.muted = prevMuted })
+        } else {
+          el.muted = prevMuted
+        }
+      }
+    }
+    window.addEventListener('pointerdown', unlock, { once: true })
+    window.addEventListener('keydown', unlock, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [ensureAudio])
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUid(data.user?.id ?? null))
@@ -79,6 +198,7 @@ export default function NotificationBell({
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
         (payload) => {
           const n = payload.new as Notif
+          playChime(n.kind)
           setCount((c) => c + 1)
           setItems((list) => [n, ...list.filter((x) => x.id !== n.id)].slice(0, 20))
           setToasts((t) => [...t, n])
@@ -98,7 +218,7 @@ export default function NotificationBell({
       supabase.removeChannel(channel)
       clearInterval(poll)
     }
-  }, [uid, loadCount])
+  }, [uid, loadCount, playChime])
 
   // Close when clicking elsewhere
   useEffect(() => {
@@ -113,6 +233,15 @@ export default function NotificationBell({
   function toggle() {
     if (!open && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     setOpen((o) => !o)
+  }
+
+  function toggleSound() {
+    setMuted((m) => {
+      const next = !m
+      try { localStorage.setItem(SOUND_KEY, next ? 'off' : 'on') } catch { /* ignore */ }
+      if (!next) ensureAudio() // turning it on counts as the gesture that unlocks audio
+      return next
+    })
   }
 
   // Ticking one clears it off the bell. It is kept, not deleted — "Read"
@@ -155,7 +284,17 @@ export default function NotificationBell({
 
   return (
     <>
-      <div className="relative" ref={boxRef}>
+      <div className="relative flex items-center gap-1.5" ref={boxRef}>
+        {/* Sound on / off — per viewer, remembered on this device */}
+        <button
+          onClick={toggleSound}
+          aria-label={muted ? 'Turn notification sound on' : 'Turn notification sound off'}
+          title={muted ? 'Notification sound off' : 'Notification sound on'}
+          className="rounded-lg border border-[#2a2a2a] p-2.5 text-gray-300 transition-colors hover:border-[#3a3a3a] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500"
+        >
+          {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+        </button>
+
         <button
           onClick={toggle}
           aria-expanded={open}
@@ -171,7 +310,7 @@ export default function NotificationBell({
         </button>
 
         {open && (
-          <div className="absolute right-0 z-30 mt-2 w-80 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#161616] shadow-lg sm:w-96">
+          <div className="absolute right-0 top-full z-30 mt-2 w-80 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#161616] shadow-lg sm:w-96">
             <div className="flex items-center justify-between border-b border-[#2a2a2a] px-4 py-2.5">
               <div className="flex items-center gap-2">
                 <p className="text-sm font-medium text-white">{showRead ? 'All notifications' : 'Notifications'}</p>

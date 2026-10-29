@@ -70,6 +70,7 @@ export const ownHome = (role: string | null | undefined) =>
   : role === 'design_team' ? '/design'
   : role === 'dispatch' ? '/dispatch'
   : role === 'accounts' ? '/accounts'
+  : role === 'reception' ? '/reception'
   : '/sales'
 
 // Every right the app knows about, grouped for the toggles screen
