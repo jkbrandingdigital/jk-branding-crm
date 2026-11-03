@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ArrowRight, Link2, Loader2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { inr } from '../../lib/format'
+import { useChartTheme } from '../../lib/chartTheme'
 import ConvertLead from '../customers/ConvertLead'
 
 /*
@@ -70,6 +71,23 @@ export default function PendingConvert({ onChanged }: { onChanged?: () => void }
 
   useEffect(() => { void load() }, [load])
 
+  /*
+    This strip is always on the Leads page, so its colours cannot be
+    dark-only — on the cream theme the pale amber text washed out to
+    nothing. The tones are written for both, the same way the task
+    cards and the timer are.
+  */
+  const { dark } = useChartTheme()
+  const cls = {
+    box:   dark ? { background: 'rgba(120,53,15,0.12)', borderColor: 'rgba(180,83,9,0.40)' } : { background: 'rgba(251,191,36,0.12)', borderColor: 'rgba(180,83,9,0.35)' },
+    head:  dark ? '#fcd34d' : '#92400e',
+    dim:   dark ? 'rgba(252,211,77,0.65)' : 'rgba(146,64,14,0.75)',
+    line:  dark ? 'rgba(180,83,9,0.25)' : 'rgba(180,83,9,0.22)',
+    name:  dark ? '#f3f4f6' : '#2b2722',
+    muted: dark ? '#9ca3af' : '#6b6356',
+    btn:   dark ? { borderColor: '#2a2a2a', background: '#1a1a1a', color: '#e5e7eb' } : { borderColor: '#ddd6cb', background: '#fbf9f5', color: '#2b2722' },
+  }
+
   const total = useMemo(
     () => rows.reduce((n, r) => n + Number(r.estimated ?? 0), 0),
     [rows],
@@ -100,27 +118,27 @@ export default function PendingConvert({ onChanged }: { onChanged?: () => void }
       {/* Spacing lives here, not on a wrapper in the caller: an empty
           wrapper left behind when this draws nothing is a gap nobody
           can explain six months later. */}
-      <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/[0.07]">
+      <div className="mt-5 rounded-xl border" style={cls.box}>
         <button
           onClick={() => setOpen((v) => !v)}
           className="flex w-full items-center gap-3 px-4 py-3 text-left"
         >
-          <AlertTriangle size={17} className="shrink-0 text-amber-400" />
+          <AlertTriangle size={17} className="shrink-0" style={{ color: cls.head }} />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-amber-200">
+            <p className="text-sm font-medium" style={{ color: cls.head }}>
               {rows.length} confirmed {rows.length === 1 ? 'lead has' : 'leads have'} not become a client yet
             </p>
-            <p className="mt-0.5 text-xs text-amber-200/60">
+            <p className="mt-0.5 text-xs" style={{ color: cls.dim }}>
               {total > 0 ? `About ${inr(total)} is not counted anywhere.` : 'Until they do, none of this work is counted anywhere.'}
             </p>
           </div>
-          <span className="shrink-0 rounded-lg border border-amber-500/30 px-3 py-1.5 text-xs text-amber-200">
+          <span className="shrink-0 rounded-lg border px-3 py-1.5 text-xs" style={{ borderColor: cls.box.borderColor, color: cls.head }}>
             {open ? 'Hide' : 'Show'}
           </span>
         </button>
 
         {open && (
-          <div className="border-t border-amber-500/20 px-2 pb-2">
+          <div className="border-t px-2 pb-2" style={{ borderColor: cls.line }}>
             {err && (
               <p className="mx-2 mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">{err}</p>
             )}
@@ -129,11 +147,12 @@ export default function PendingConvert({ onChanged }: { onChanged?: () => void }
               {rows.map((p) => (
                 <div
                   key={p.lead_id}
-                  className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[#2a2a2a]/60 px-2 py-2.5 last:border-0"
+                  className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-2 py-2.5 last:border-0"
+                  style={{ borderColor: cls.line }}
                 >
                   <div className="min-w-[12rem] flex-1">
-                    <p className="truncate text-sm text-white">{titleOf(p)}</p>
-                    <p className="mt-0.5 truncate text-xs text-gray-500">
+                    <p className="truncate text-sm" style={{ color: cls.name }}>{titleOf(p)}</p>
+                    <p className="mt-0.5 truncate text-xs" style={{ color: cls.muted }}>
                       {p.assigned_name ?? 'Nobody'}
                       {p.branch_name ? ` · ${p.branch_name}` : ''}
                       {' · '}
@@ -143,7 +162,7 @@ export default function PendingConvert({ onChanged }: { onChanged?: () => void }
                     </p>
                   </div>
 
-                  <span className="w-24 shrink-0 text-right text-sm text-gray-300">
+                  <span className="w-24 shrink-0 text-right text-sm" style={{ color: cls.name }}>
                     {Number(p.estimated ?? 0) > 0 ? inr(Number(p.estimated)) : '—'}
                   </span>
 
@@ -157,7 +176,8 @@ export default function PendingConvert({ onChanged }: { onChanged?: () => void }
                       onClick={() => void link(p)}
                       disabled={busyId === p.lead_id}
                       title={`Already on file as ${p.match_code} — matched by ${p.match_by === 'fone' ? 'phone' : 'name'}`}
-                      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-1.5 text-xs text-gray-200 hover:border-orange-500/50 hover:text-white disabled:opacity-50"
+                      className="flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs hover:border-orange-500/50 disabled:opacity-50"
+                      style={cls.btn}
                     >
                       {busyId === p.lead_id ? <Loader2 size={13} className="animate-spin" /> : <Link2 size={13} />}
                       Link to {p.match_code}
@@ -179,7 +199,8 @@ export default function PendingConvert({ onChanged }: { onChanged?: () => void }
                   {p.match_id && (
                     <button
                       onClick={() => setConvert(p)}
-                      className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-gray-500 hover:text-white"
+                      className="shrink-0 rounded-lg px-2 py-1.5 text-xs hover:underline"
+                      style={{ color: cls.muted }}
                     >
                       Different firm
                     </button>

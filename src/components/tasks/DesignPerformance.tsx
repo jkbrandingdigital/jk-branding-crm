@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import {
   AlertCircle, Award, CheckCircle2, Clock, Download, Loader2, RefreshCw, RotateCcw,
-  Target, Timer, TrendingDown, TrendingUp,
+  Target, Timer, TrendingDown, TrendingUp, X,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
@@ -143,6 +144,18 @@ function startOf(p: Period): string {
 }
 const day = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+
+// Date AND time. When the value carries no time (a plain 'YYYY-MM-DD'),
+// only the date is shown — a made-up midnight would read as a real start
+// time that never happened.
+const dt = (iso: string | null) => {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  const date = d.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
+  if (iso.length <= 10) return date
+  const time = d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+  return `${date} ${time}`
+}
 
 const axisLabel = (iso: string, grain: Grain) => {
   const d = new Date(`${iso}T00:00:00`)
@@ -289,20 +302,43 @@ export default function DesignPerformance() {
   const { can, isSuper, ready } = usePermissions()
   const chart = useChartTheme()
 
-  // Daily. A designer's day is the thing anyone actually asks about;
-  // a month-to-date figure on open is a number nobody wanted yet.
-  const [period, setPeriod] = useState<Period>('today')
+  // Monthly on open — the month-to-date picture is what the team looks
+  // at first. Daily and the rest are one click away.
+  const [period, setPeriod] = useState<Period>('month')
   const [grain, setGrain] = useState<Grain>('day')
-  const [from, setFrom] = useState(startOf('today'))
+  const [from, setFrom] = useState(startOf('month'))
   const [to, setTo] = useState(today())
   const [who, setWho] = useState('')          // '' = everyone
+
+  /*
+    The task list has its own days, and opens on Daily.
+
+    The summary and charts above read a whole month, which is the right
+    scale for "how is the team doing". The task list is the opposite
+    question — what happened today — and a month of rows is not what
+    anyone wants to scroll on open. So it carries its own period and
+    starts on today, independent of the selector at the top.
+  */
+  const [tPeriod, setTPeriod] = useState<Period>('today')
+  const [tFrom, setTFrom] = useState(startOf('today'))
+  const [tTo, setTTo] = useState(today())
 
   const [summary, setSummary] = useState<Summary[]>([])
   const [series, setSeries] = useState<Point[]>([])
   const [rows, setRows] = useState<ReportRow[]>([])
+  // The task list has its own period (daily), so it has its own rows.
+  // The points, charts and team table stay on `rows`, which follows the
+  // page period above — pointing those at the daily list is what left
+  // the monthly summary showing nothing.
+  const [tableRows, setTableRows] = useState<ReportRow[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [person, setPerson] = useState<Person | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
+  // Filter the task list by task stage — New, In Feedback, Completed…
+  // 'all' is every stage.
+  const [stageF, setStageF] = useState('all')
+  // A task whose time history is open. Clicking any row opens it.
+  const [histFor, setHistFor] = useState<ReportRow | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -316,21 +352,24 @@ export default function DesignPerformance() {
   }, [ready, seeAll, user?.id])
 
   const args = useMemo(() => ({ p_from: from, p_to: to, p_user: who || null }), [from, to, who])
+  const tArgs = useMemo(() => ({ p_from: tFrom, p_to: tTo, p_user: who || null }), [tFrom, tTo, who])
 
   const load = useCallback(async () => {
-    const [s, g, r] = await Promise.all([
+    const [s, g, r, tr] = await Promise.all([
       supabase.rpc('design_perf_summary', args),
       supabase.rpc('design_perf_series', { p_grain: grain, ...args }),
       supabase.rpc('design_task_report', args),
+      supabase.rpc('design_task_report', tArgs),
     ])
     setLoading(false)
-    const e = s.error ?? g.error ?? r.error
+    const e = s.error ?? g.error ?? r.error ?? tr.error
     if (e) return setError(e.message)
     setError('')
     setSummary((s.data ?? []) as Summary[])
     setSeries((g.data ?? []) as Point[])
     setRows((r.data ?? []) as ReportRow[])
-  }, [args, grain])
+    setTableRows((tr.data ?? []) as ReportRow[])
+  }, [args, tArgs, grain])
 
   useEffect(() => {
     if (!ready) return
@@ -361,11 +400,19 @@ export default function DesignPerformance() {
     setTo(today())
   }
 
+  // The same, for the task list's own days.
+  function pickTablePeriod(p: Period) {
+    setTPeriod(p)
+    if (p === 'custom') return
+    setTFrom(startOf(p))
+    setTTo(today())
+  }
+
   // Excel opens a BOM'd CSV straight away — one file, no extra library,
   // the same way leads are exported.
   async function download() {
     setSaving(true)
-    const { data, error: e } = await supabase.rpc('design_task_report', args)
+    const { data, error: e } = await supabase.rpc('design_task_report', tArgs)
     setSaving(false)
     if (e) return setError(e.message)
 
@@ -423,6 +470,13 @@ export default function DesignPerformance() {
     : period === 'month' ? `This month · ${day(from)} to ${day(to)}`
     : period === 'year' ? `This year · ${day(from)} to ${day(to)}`
     : `${day(from)} to ${day(to)}`
+
+  const tablePeriodLabel =
+    tPeriod === 'today' ? `Today · ${day(tFrom)}`
+    : tPeriod === 'week' ? `This week · ${day(tFrom)} to ${day(tTo)}`
+    : tPeriod === 'month' ? `This month · ${day(tFrom)} to ${day(tTo)}`
+    : tPeriod === 'year' ? `This year · ${day(tFrom)} to ${day(tTo)}`
+    : `${day(tFrom)} to ${day(tTo)}`
 
   const eff = effOf(total.allowed, total.base)   // the original work, not the client's changes
   const onTimePct = total.done > 0 ? Math.round((total.onTime / total.done) * 1000) / 10 : null
@@ -587,12 +641,21 @@ export default function DesignPerformance() {
     [byDesigner],
   )
 
+  // The stages actually in this list, so the dropdown offers only what
+  // can be picked — no empty "Rejected" when nothing is rejected.
+  const stageList = useMemo(
+    () => [...new Set(tableRows.map((r) => r.stage).filter((x): x is string => !!x))],
+    [tableRows],
+  )
+
   const shown = useMemo(() => {
-    if (filter === 'done') return rows.filter((r) => r.is_done)
-    if (filter === 'open') return rows.filter((r) => !r.is_done)
-    if (filter === 'changes') return rows.filter((r) => r.client_changes + r.our_changes > 0)
-    return rows
-  }, [rows, filter])
+    let list = tableRows
+    if (filter === 'done') list = list.filter((r) => r.is_done)
+    else if (filter === 'open') list = list.filter((r) => !r.is_done)
+    else if (filter === 'changes') list = list.filter((r) => r.client_changes + r.our_changes > 0)
+    if (stageF !== 'all') list = list.filter((r) => r.stage === stageF)
+    return list
+  }, [tableRows, filter, stageF])
 
   const dataRaw = series.map((p) => ({
     label: axisLabel(p.period, grain),
@@ -1112,9 +1175,9 @@ export default function DesignPerformance() {
           something is waiting. */}
       <ExtraTimeInbox onDecided={() => { setLoading(true); void load() }} />
 
-      {/* ---- Every task, and what is running now ---- */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <section className={`${card} overflow-hidden lg:col-span-2`}>
+      {/* ---- Every task ---- */}
+      <div>
+        <section className={`${card} overflow-hidden`}>
           <div className="space-y-3 border-b border-[#242424] px-5 py-3.5">
             {/* Which days, and the Excel of exactly those days. Both live here
                 because this is the list a person actually looks at before
@@ -1123,15 +1186,15 @@ export default function DesignPerformance() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <span>
                 <h2 className="font-medium text-white">Every task</h2>
-                <p className="mt-0.5 text-xs text-gray-500">{periodLabel}</p>
+                <p className="mt-0.5 text-xs text-gray-500">{tablePeriodLabel}</p>
               </span>
               <button
                 onClick={download}
-                disabled={saving || rows.length === 0}
+                disabled={saving || tableRows.length === 0}
                 className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                Excel · {rows.length}
+                Excel · {tableRows.length}
               </button>
             </div>
 
@@ -1150,9 +1213,9 @@ export default function DesignPerformance() {
                 {PERIODS.map((p) => (
                   <button
                     key={p.key}
-                    onClick={() => pickPeriod(p.key)}
+                    onClick={() => pickTablePeriod(p.key)}
                     className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
-                      period === p.key
+                      tPeriod === p.key
                         ? 'bg-orange-500/15 font-medium text-orange-400'
                         : 'text-gray-400 hover:text-white'
                     }`}
@@ -1162,40 +1225,56 @@ export default function DesignPerformance() {
                 ))}
               </div>
 
-              {period === 'custom' && (
+              {tPeriod === 'custom' && (
                 <div className="flex items-center gap-2">
                   {/* The CRM's own picker, not the browser's. A page with
                       two kinds of calendar on it looks like two programs
                       stitched together — and the browser's is white. */}
-                  <DateField value={from} onChange={setFrom} placeholder="From" />
+                  <DateField value={tFrom} onChange={setTFrom} placeholder="From" />
                   <span className="text-xs text-gray-600">to</span>
-                  <DateField value={to} onChange={setTo} placeholder="To" />
+                  <DateField value={tTo} onChange={setTTo} placeholder="To" />
                 </div>
               )}
 
-              <div className="ml-auto flex gap-1">
-                {([
-                  ['all', `All ${rows.length}`],
-                  ['done', `Finished ${total.done}`],
-                  ['open', `Open ${open.length}`],
-                  ['changes', `Changed ${rows.filter((r) => r.client_changes + r.our_changes > 0).length}`],
-                ] as [Filter, string][]).map(([k, label]) => (
-                  <button
-                    key={k}
-                    onClick={() => setFilter(k)}
-                    className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
-                      filter === k ? 'bg-orange-500/15 font-medium text-orange-400' : 'text-gray-400 hover:text-white'
-                    }`}
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                {/* Filter by the task's own stage. Only the stages
+                    present in the list are offered, so it never shows an
+                    option that would come back empty. */}
+                {stageList.length > 0 && (
+                  <select
+                    value={stageF}
+                    onChange={(e) => setStageF(e.target.value)}
+                    aria-label="Filter by stage"
+                    className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2.5 py-1.5 text-xs text-gray-300 focus:border-orange-500 focus:outline-none"
                   >
-                    {label}
-                  </button>
-                ))}
+                    <option value="all">Any stage</option>
+                    {stageList.map((st) => <option key={st} value={st}>{st}</option>)}
+                  </select>
+                )}
+                <div className="flex gap-1">
+                  {([
+                    ['all', `All ${tableRows.length}`],
+                    ['done', `Finished ${tableRows.filter((r) => r.is_done).length}`],
+                    ['open', `Open ${tableRows.filter((r) => !r.is_done).length}`],
+                    ['changes', `Changed ${tableRows.filter((r) => r.client_changes + r.our_changes > 0).length}`],
+                  ] as [Filter, string][]).map(([k, label]) => (
+                    <button
+                      key={k}
+                      onClick={() => setFilter(k)}
+                      className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
+                        filter === k ? 'bg-orange-500/15 font-medium text-orange-400' : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
-          <div className={`max-h-[420px] overflow-auto ${scroll}`}>
-            <table className="w-full min-w-[780px] border-collapse text-sm">
+          <div className={`max-h-[72vh] overflow-auto ${scroll}`}>
+            <table className="w-full min-w-[760px] border-collapse text-sm">
               <thead className="sticky top-0 bg-[#151515]">
                 <tr style={{ borderBottom: `1px solid ${line}` }} className="text-left text-xs text-gray-500">
                   <th className="px-4 py-2.5 font-medium">#</th>
@@ -1204,13 +1283,20 @@ export default function DesignPerformance() {
                   {!who && <th className="px-4 py-2.5 font-medium">Designer</th>}
                   <th className="px-4 py-2.5 text-right font-medium">Allowed</th>
                   <th className="px-4 py-2.5 text-right font-medium">Actual</th>
-                  <th className="px-4 py-2.5 font-medium">Progress</th>
                   <th className="px-4 py-2.5 font-medium">Stage</th>
+                  <th className="px-4 py-2.5 font-medium">Started</th>
+                  <th className="px-4 py-2.5 font-medium">Finished</th>
                 </tr>
               </thead>
               <tbody>
                 {shown.map((r) => (
-                  <tr key={r.task_no} style={rule} className="hover:bg-[#1a1a1a]">
+                  <tr
+                    key={r.task_no}
+                    style={rule}
+                    onClick={() => setHistFor(r)}
+                    className="cursor-pointer hover:bg-[#1a1a1a]"
+                    title="Open the time history"
+                  >
                     <td className="px-4 py-2.5 text-gray-500">{r.task_no}</td>
                     <td className="max-w-[220px] px-4 py-2.5">
                       <span className="block truncate text-gray-200" title={r.subject}>{r.subject}</span>
@@ -1246,40 +1332,24 @@ export default function DesignPerformance() {
                         </span>
                       )}
                     </td>
-                    {/* How far through its allowed time. Past the line it
-                        turns red, which is the moment worth seeing on a
-                        list rather than in a report afterwards. */}
-                    <td className="w-[15%] px-4 py-2.5">
-                      {r.allowed_mins && r.allowed_mins > 0 ? (
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: rail }}>
-                            <div
-                              className="h-full rounded-full"
-                              style={{
-                                width: `${Math.min((r.base_mins / r.allowed_mins) * 100, 100)}%`,
-                                background: r.base_mins > r.allowed_mins ? bad : chart.series[0],
-                              }}
-                            />
-                          </div>
-                          <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-gray-500">
-                            {Math.round((r.base_mins / r.allowed_mins) * 100)}%
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-gray-600">—</span>
-                      )}
-                    </td>
                     <td className="px-4 py-2.5">
                       <span className={`rounded-full px-2 py-0.5 text-[11px] ${r.is_done ? '' : 'text-gray-400'}`}
                             style={r.is_done ? { background: 'rgba(5,150,105,0.14)', color: good } : { background: 'rgba(255,255,255,0.05)' }}>
                         {r.stage ?? '—'}
                       </span>
                     </td>
+                    {/* When the designer began and when it was finished.
+                        A finished job with no end time just has not been
+                        moved to a done stage yet. */}
+                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400">{dt(r.started_on)}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-xs" style={{ color: r.completed_on ? good : plain }}>
+                      {dt(r.completed_on)}
+                    </td>
                   </tr>
                 ))}
                 {shown.length === 0 && (
                   <tr>
-                    <td colSpan={who ? 7 : 8} className="px-4 py-10 text-center text-sm text-gray-500">
+                    <td colSpan={who ? 8 : 9} className="px-4 py-10 text-center text-sm text-gray-500">
                       {loading ? 'Loading…' : 'Nothing here.'}
                     </td>
                   </tr>
@@ -1287,51 +1357,6 @@ export default function DesignPerformance() {
               </tbody>
             </table>
           </div>
-        </section>
-
-        <section className={`${card} overflow-hidden`}>
-          <div className="border-b border-[#242424] px-5 py-3">
-            <h2 className="font-medium text-white">Open right now</h2>
-            <p className="mt-0.5 text-xs text-gray-500">How far through its allowed time each one is.</p>
-          </div>
-          <ul className={`max-h-[420px] overflow-auto ${scroll}`}>
-            {open.slice(0, 12).map((r, i) => {
-              const pct = r.allowed_mins && r.allowed_mins > 0
-                ? Math.min(999, Math.round((r.actual_mins / r.allowed_mins) * 100))
-                : null
-              const over = (pct ?? 0) > 100
-              return (
-                <li key={r.task_no} style={i === 0 ? undefined : rule} className="px-4 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm text-gray-200" title={r.subject}>{r.subject}</span>
-                      <span className="block text-xs text-gray-500">
-                        {r.work_type ?? <span style={{ color: warn }}>No work type</span>}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-xs tabular-nums" style={{ color: over ? bad : plain }}>
-                      {pct === null ? '—' : `${pct}%`}
-                    </span>
-                  </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full" style={{ background: rail }}>
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${Math.min(pct ?? 0, 100)}%`, background: over ? bad : chart.series[0] }}
-                    />
-                  </div>
-                  <p className="mt-1.5 text-[11px] text-gray-500">
-                    {mins(r.actual_mins)}{r.allowed_mins === null ? ' · no allowed time set' : ` of ${mins(r.allowed_mins)}`}
-                    {r.in_changes && <span style={{ color: warn }}> · in changes</span>}
-                  </p>
-                </li>
-              )
-            })}
-            {open.length === 0 && (
-              <li className="px-4 py-10 text-center text-sm text-gray-500">
-                {loading ? 'Loading…' : 'Nothing open.'}
-              </li>
-            )}
-          </ul>
         </section>
       </div>
 
@@ -1460,8 +1485,138 @@ export default function DesignPerformance() {
         Penalties on jobs still running are provisional and are shown apart from the settled ones. Only design work with a work type set is counted. Efficiency is measured on the original work:
         the hours that follow a client's change round are counted separately and held against nobody.
         A redo caused by our own mistake stays in the original work, because that is our own time to
-        make up. "Open right now" lists every unfinished job, whenever it was started.
+        make up.
       </p>
+
+      {histFor && (
+        <TaskTimeHistory
+          taskNo={histFor.task_no}
+          subject={histFor.subject}
+          onClose={() => setHistFor(null)}
+        />
+      )}
     </div>
+  )
+}
+
+/*
+  The sittings on one task — start, stop, and why it was paused.
+
+  This is the same record the task drawer's History tab shows, pulled
+  up here so a coordinator can see where a job's time went without
+  leaving the performance page. Opened by clicking any row.
+*/
+const HIST_REASON: Record<string, string> = {
+  switched: 'moved to another task',
+  urgent: 'urgent work came in',
+  waiting: 'waiting on content',
+  break: 'break',
+  done: 'finished',
+  day_end: 'end of day',
+  auto: 'left running, closed automatically',
+}
+const histClock = (iso: string) =>
+  new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+const histDay = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
+
+type Sit = {
+  id: string
+  started_at: string
+  ended_at: string | null
+  end_reason: string | null
+  end_note: string | null
+  part_kind: string | null
+  part_no: number | null
+  piece_no: number | null
+}
+
+function TaskTimeHistory({ taskNo, subject, onClose }: { taskNo: number; subject: string; onClose: () => void }) {
+  const [rows, setRows] = useState<Sit[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [onClose])
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const t = await supabase.from('tasks').select('id').eq('task_no', taskNo).maybeSingle()
+      const id = (t.data as { id?: string } | null)?.id
+      if (!id) { if (alive) { setErr('That task is gone.'); setLoading(false) } return }
+      const { data, error } = await supabase
+        .from('task_sessions')
+        .select('id, started_at, ended_at, end_reason, end_note, part_kind, part_no, piece_no')
+        .eq('task_id', id)
+        .order('started_at', { ascending: false })
+      if (!alive) return
+      if (error) setErr(error.message)
+      else setRows((data ?? []) as Sit[])
+      setLoading(false)
+    })()
+    return () => { alive = false }
+  }, [taskNo])
+
+  const secs = (r: Sit) => (new Date(r.ended_at ?? Date.now()).getTime() - new Date(r.started_at).getTime()) / 1000
+  const piece = (r: Sit) =>
+    r.part_kind === 'change'
+      ? `Changes · round ${r.part_no ?? 1}`
+      : `Option ${r.part_no ?? 1}${(r.piece_no ?? 1) > 1 ? ` · piece ${r.piece_no}` : ''}`
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#161616]">
+        <div className="flex items-start justify-between gap-3 border-b border-[#242424] px-5 py-3.5">
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-semibold text-white">{subject}</h3>
+            <p className="mt-0.5 text-xs text-gray-500">#{taskNo} · time history</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-gray-400 hover:text-white">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <p className="py-10 text-center text-gray-500"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></p>
+          ) : err ? (
+            <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">{err}</p>
+          ) : rows.length === 0 ? (
+            <p className="py-10 text-center text-sm text-gray-500">No time recorded on this task yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {rows.map((r) => (
+                <li key={r.id} className="flex gap-3 text-sm">
+                  <Clock size={13} className="mt-1 shrink-0 text-sky-400/80" />
+                  <span className="min-w-0 flex-1">
+                    <span className="text-gray-200">
+                      {mins(secs(r) / 60)}
+                      <span className="text-gray-500">
+                        {' · '}{histDay(r.started_at)} {histClock(r.started_at)}
+                        {r.ended_at ? ` – ${histClock(r.ended_at)}` : ' · still running'}
+                      </span>
+                    </span>
+                    <span className="block text-xs text-gray-500">
+                      {piece(r)}
+                      {r.ended_at && r.end_reason ? ` · stopped: ${HIST_REASON[r.end_reason] ?? r.end_reason}` : ''}
+                    </span>
+                    {r.end_note && <span className="block text-xs text-gray-300">"{r.end_note}"</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }

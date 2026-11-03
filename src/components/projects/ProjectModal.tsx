@@ -14,6 +14,16 @@ import type { ProjectRow, ProjectStage } from '../customers/customerUtils'
   money with it, and nobody reading the register afterwards could tell
   that it had happened. If it really is the wrong client, the project is
   closed and a new one opened, which leaves a trail.
+
+  PRICE, ONCE THE PROJECT EXISTS, IS NOT EDITED IN PLACE — it is revised.
+  A sales person settles ₹18,000, the client later talks it down to
+  ₹17,500, and that change has to reach the sales figures and the
+  incentive. So an existing project's value is read-only here and carries
+  a "Revise price" button instead. It goes through project_revise_price(),
+  which (a) logs the old->new, (b) lets the person who sold it do this even
+  without full project-edit rights, and (c) leaves the money on the same
+  booking month, so performance simply re-counts. New projects still take
+  their opening value straight on this form.
 */
 
 export default function ProjectModal({
@@ -54,6 +64,17 @@ export default function ProjectModal({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
+  // Revise-price, for an existing project only.
+  const [revising, setRevising] = useState(false)
+  const [newAmount, setNewAmount] = useState('')
+  const [reviseNote, setReviseNote] = useState('')
+  const [reviseBusy, setReviseBusy] = useState(false)
+  const [reviseErr, setReviseErr] = useState('')
+
+  // A designer gets value_amount back as null and should not see a price
+  // or a way to change one.
+  const canSeeMoney = !project || project.value_amount != null
+
   useEffect(() => {
     void (async () => {
       const { data } = await supabase
@@ -78,10 +99,13 @@ export default function ProjectModal({
     setBusy(true)
     setErr('')
 
+    // value_amount is left out on an update on purpose — an existing
+    // project's price only moves through the revise flow below, so that
+    // every change is logged and the sales figures re-count. On insert the
+    // opening value is set here.
     const patch = {
       title: title.trim(),
       stage_id: stageId || null,
-      value_amount: Number(value) || 0,
       booked_on: booked || new Date().toLocaleDateString('en-CA'),
       start_date: start || null,
       due_date: due || null,
@@ -95,10 +119,31 @@ export default function ProjectModal({
 
     const { error } = project
       ? await supabase.from('projects').update(patch).eq('id', project.id)
-      : await supabase.from('projects').insert({ ...patch, customer_id: customer.id })
+      : await supabase.from('projects').insert({ ...patch, value_amount: Number(value) || 0, customer_id: customer.id })
 
     setBusy(false)
     if (error) return setErr(error.message)
+    onSaved()
+  }
+
+  async function revisePrice() {
+    if (!project) return
+    const amt = Number(newAmount)
+    if (newAmount.trim() === '' || Number.isNaN(amt) || amt < 0) {
+      return setReviseErr('Enter a valid revised price')
+    }
+    setReviseBusy(true)
+    setReviseErr('')
+    const { error } = await supabase.rpc('project_revise_price', {
+      p_project: project.id,
+      p_amount: amt,
+      p_note: reviseNote.trim() || null,
+    })
+    setReviseBusy(false)
+    if (error) return setReviseErr(error.message)
+    setValue(String(amt))
+    setRevising(false)
+    // Reload the board so the new value, badges and totals all follow.
     onSaved()
   }
 
@@ -196,7 +241,70 @@ export default function ProjectModal({
             </div>
             <div>
               <label className={label}>Value (₹)</label>
-              <input type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} className={input} />
+              {!project ? (
+                // New project: the opening price.
+                <input type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} className={input} />
+              ) : (
+                // Existing project: read-only, revised through the RPC.
+                <div className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm tabular-nums text-white">
+                      {!canSeeMoney ? '—' : `₹${Number(value || 0).toLocaleString('en-IN')}`}
+                    </span>
+                    {canSeeMoney && !revising && (
+                      <button
+                        type="button"
+                        onClick={() => { setNewAmount(value); setReviseNote(''); setReviseErr(''); setRevising(true) }}
+                        className="shrink-0 rounded-md border border-[#2a2a2a] px-2 py-1 text-xs text-gray-300 hover:border-orange-500/60 hover:text-orange-300"
+                      >
+                        Revise price
+                      </button>
+                    )}
+                  </div>
+
+                  {revising && (
+                    <div className="mt-3 space-y-2 border-t border-[#242424] pt-3">
+                      <input
+                        type="number"
+                        min={0}
+                        value={newAmount}
+                        onChange={(e) => setNewAmount(e.target.value)}
+                        placeholder="New price"
+                        className={input}
+                        autoFocus
+                      />
+                      <input
+                        value={reviseNote}
+                        onChange={(e) => setReviseNote(e.target.value)}
+                        placeholder="Reason (optional) — e.g. client negotiated"
+                        className={input}
+                      />
+                      {reviseErr && <p className="text-xs text-red-400">{reviseErr}</p>}
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setRevising(false); setReviseErr('') }}
+                          className="rounded-md border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={revisePrice}
+                          disabled={reviseBusy}
+                          className="flex items-center gap-1.5 rounded-md bg-orange-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+                        >
+                          {reviseBusy && <Loader2 size={13} className="animate-spin" />}
+                          Save new price
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-gray-600">
+                        The change is logged, and the sales performance and incentive update to match.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

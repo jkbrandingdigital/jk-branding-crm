@@ -278,7 +278,7 @@ export default function SalesTeamTable() {
                 return (
                   <tr
                     key={r.user_id}
-                    onClick={() => navigate(`/admin/employee/${r.user_id}`)}
+                    onClick={() => navigate(`/admin/employee/${encodeURIComponent(r.emp_code || r.user_id)}`)}
                     className="cursor-pointer hover:bg-[#1a1a1a]"
                   >
                     <td className="px-4 py-3 tabular-nums text-gray-600" style={rule}>{i + 1}</td>

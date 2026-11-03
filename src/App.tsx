@@ -20,6 +20,10 @@ import ManagerTargets from './pages/manager/Targets'
 import ManagerReports from './pages/manager/Reports'
 import ManagerEmployeeReport from './pages/manager/EmployeeReport'
 import ManagerLeads from './pages/manager/Leads'
+// The manager fills their own daily report with the same screen sales use;
+// it carries no layout of its own, so the route wraps it in ManagerLayout.
+import DailyReport from './pages/sales/DailyReport'
+import ManagerLayout from './components/ManagerLayout'
 import AdminLeadAssignment from './pages/admin/LeadAssignment'
 import AdminSettings from './pages/admin/Settings'
 import HrLeads from './pages/hr/Leads'
@@ -298,6 +302,7 @@ function AppRoutes() {
           <Route path="/manager/performance" element={<ManagerPerformance />} />
           <Route path="/manager/targets" element={<ManagerTargets />} />
           <Route path="/manager/reports" element={<ManagerReports />} />
+          <Route path="/manager/daily-report" element={<ManagerLayout><DailyReport /></ManagerLayout>} />
           <Route path="/manager/employee/:id" element={<ManagerEmployeeReport />} />
           <Route path="/manager/my-attendance" element={<ManagerAttendance />} />
           <Route path="/manager/attendance" element={<ManagerAttendancePage />} />

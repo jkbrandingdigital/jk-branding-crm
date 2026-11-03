@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
-import { Check, Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save, UserPlus } from 'lucide-react'
+import { Check, Plus, Search, LayoutGrid, List, Phone, MessageCircle, Star, X, AlertCircle, RefreshCw, Tag, TrendingUp, Trash2, UserCog, Download, UploadCloud, SlidersHorizontal, Building2, CalendarDays, User, Send, CalendarClock, Filter as FilterIcon, Bookmark, Save, UserPlus, ChevronDown } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { inr, inrCompact } from '../../lib/format'
+import { useChartTheme } from '../../lib/chartTheme'
 import LeadDrawer from './LeadDrawer'
 import { DateField, DateTimeField } from '../DateField'
 import ImportLeads from './ImportLeads'
@@ -88,9 +89,9 @@ const FILTER_KEY = 'jk_lead_filters'
 type Filters = {
   source: string
   stage: string
-  owner: string
+  owners: string[]
   creator: string
-  label: string
+  labels: string[]
   madeFrom: string
   madeTo: string
   fuFrom: string
@@ -98,14 +99,14 @@ type Filters = {
   overdueOnly: boolean
 }
 const NO_FILTERS: Filters = {
-  source: 'all', stage: 'all', owner: 'all', creator: 'all', label: 'all',
+  source: 'all', stage: 'all', owners: [], creator: 'all', labels: [],
   madeFrom: '', madeTo: '', fuFrom: '', fuTo: '', overdueOnly: false,
 }
 type SavedFilter = { name: string; f: Filters }
 
 const countOn = (f: Filters) =>
-  (f.source !== 'all' ? 1 : 0) + (f.stage !== 'all' ? 1 : 0) + (f.owner !== 'all' ? 1 : 0) +
-  (f.creator !== 'all' ? 1 : 0) + (f.label !== 'all' ? 1 : 0) +
+  (f.source !== 'all' ? 1 : 0) + (f.stage !== 'all' ? 1 : 0) + (f.owners.length ? 1 : 0) +
+  (f.creator !== 'all' ? 1 : 0) + (f.labels.length ? 1 : 0) +
   (f.madeFrom || f.madeTo ? 1 : 0) + (f.fuFrom || f.fuTo ? 1 : 0) + (f.overdueOnly ? 1 : 0)
 
 // ---------------------------------------------------------------------
@@ -165,12 +166,25 @@ function applyLeadFilters(query: LeadQuery, f: Filters, text: string, openStageI
 
   if (f.source !== 'all') qy = qy.eq('source', f.source)
   if (f.stage !== 'all') qy = qy.eq('stage_id', f.stage)
-  if (f.owner === 'none') qy = qy.is('assigned_to', null)
-  else if (f.owner !== 'all') qy = qy.eq('assigned_to', f.owner)
+  // Assign to — any of the chosen people, and/or the unassigned pile.
+  // Each `.or()` is its own AND group, so owners AND labels AND text all
+  // still narrow together.
+  if (f.owners.length) {
+    const ids = f.owners.filter((o) => o !== 'none')
+    const parts: string[] = []
+    if (ids.length) parts.push(`assigned_to.in.(${ids.join(',')})`)
+    if (f.owners.includes('none')) parts.push('assigned_to.is.null')
+    if (parts.length) qy = qy.or(parts.join(','))
+  }
   if (f.creator !== 'all') qy = qy.eq('created_by', f.creator)
-  // A lead carries several labels now, so "has this one" is a contains
-  if (f.label === 'none') qy = qy.is('label_id', null)
-  else if (f.label !== 'all') qy = qy.contains('label_ids', [f.label])
+  // A lead carries several labels, so "has ANY of these".
+  if (f.labels.length) {
+    const ids = f.labels.filter((l) => l !== 'none')
+    const parts: string[] = []
+    if (ids.length) parts.push(`label_ids.ov.{${ids.join(',')}}`)
+    if (f.labels.includes('none')) parts.push('label_ids.is.null')
+    if (parts.length) qy = qy.or(parts.join(','))
+  }
 
   if (f.madeFrom) qy = qy.gte('created_at', f.madeFrom)
   if (f.madeTo) qy = qy.lt('created_at', nextDay(f.madeTo))
@@ -202,9 +216,9 @@ const summaryArgs = (f: Filters, text: string, openStageIds: string[]) => ({
   p_q: cleanQ(text) || null,
   p_source: f.source === 'all' ? null : f.source,
   p_stage: f.stage === 'all' ? null : f.stage,
-  p_owner: f.owner === 'all' ? null : f.owner,
+  p_owners: f.owners,
   p_creator: f.creator === 'all' ? null : f.creator,
-  p_label: f.label === 'all' ? null : f.label,
+  p_labels: f.labels,
   p_made_from: f.madeFrom || null,
   p_made_to: f.madeTo || null,
   p_fu_from: f.fuFrom || null,
@@ -213,10 +227,27 @@ const summaryArgs = (f: Filters, text: string, openStageIds: string[]) => ({
   p_open_stages: openStageIds,
 })
 
+// Older saved sets kept `owner`/`label` as single strings. Read them
+// back as the lists the filter now uses, so a saved set from before this
+// change does not crash on `.length`.
+function normFilters(raw: unknown): Filters {
+  const f = (raw ?? {}) as Record<string, unknown>
+  const toArr = (list: unknown, single: unknown): string[] =>
+    Array.isArray(list) ? (list as string[])
+      : typeof single === 'string' && single !== 'all' ? [single] : []
+  return {
+    ...NO_FILTERS,
+    ...(f as Partial<Filters>),
+    owners: toArr(f.owners, f.owner),
+    labels: toArr(f.labels, f.label),
+  }
+}
+
 function readSaved(): SavedFilter[] {
   try {
     const raw = localStorage.getItem(FILTER_KEY)
-    return raw ? (JSON.parse(raw) as SavedFilter[]) : []
+    const list = raw ? (JSON.parse(raw) as { name: string; f: unknown }[]) : []
+    return list.map((s) => ({ name: s.name, f: normFilters(s.f) }))
   } catch {
     return []
   }
@@ -244,6 +275,90 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1.5 block text-xs text-gray-500">{label}</span>
       {children}
     </label>
+  )
+}
+
+/*
+  Pick several at once — for the Assign and Labels filters, so a report
+  can cover two people or two labels together. Nothing picked means no
+  filter at all, the same as the old "All".
+
+  The dropdown is the panel's own, not the browser's: a native multi
+  select needs Ctrl-click to add a second, which nobody discovers, and
+  on the cream theme it turns white.
+*/
+function MultiPick({
+  options, selected, onChange, allLabel, noun, trigger,
+}: {
+  options: { value: string; label: string }[]
+  selected: string[]
+  onChange: (v: string[]) => void
+  allLabel: string
+  noun: string
+  trigger: string
+}) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const away = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [open])
+
+  const toggle = (v: string) =>
+    onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v])
+
+  const names = options.filter((o) => selected.includes(o.value)).map((o) => o.label)
+  const summary =
+    names.length === 0 ? allLabel
+      : names.length <= 2 ? names.join(', ')
+      : `${names.length} ${noun}s`
+
+  return (
+    <div className="relative" ref={box}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`${trigger} flex items-center justify-between gap-2 text-left`}
+      >
+        <span className={`truncate ${names.length ? '' : 'text-gray-400'}`}>{summary}</span>
+        <ChevronDown size={15} className={`shrink-0 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-[#2a2a2a] bg-[#191919] py-1 shadow-xl">
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="block w-full px-3 py-1.5 text-left text-xs text-gray-400 hover:bg-[#222] hover:text-white"
+            >
+              Clear
+            </button>
+          )}
+          {options.map((o) => {
+            const on = selected.includes(o.value)
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => toggle(o.value)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-gray-300 hover:bg-[#222] hover:text-white"
+              >
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? 'border-orange-500 bg-orange-500' : 'border-[#3a3a3a]'}`}>
+                  {on && <Check size={12} className="text-white" />}
+                </span>
+                <span className="truncate">{o.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -417,8 +532,8 @@ export default function LeadsBoard(
   }, [onlyLabel, labels])
 
   const ef = useMemo(() => {
-    let x: Filters = mineOnly && myId ? { ...f, owner: myId } : f
-    if (lockedLabelId) x = { ...x, label: lockedLabelId }
+    let x: Filters = mineOnly && myId ? { ...f, owners: [myId] } : f
+    if (lockedLabelId) x = { ...x, labels: [lockedLabelId] }
     return x
   }, [f, myId, mineOnly, lockedLabelId])
 
@@ -443,15 +558,14 @@ export default function LeadsBoard(
       const { data: u } = await supabase.auth.getUser()
       const me = u.user?.id ?? null
 
-      let totQ = supabase.from('leads').select('id', { count: 'exact', head: true }).is('deleted_at', null)
-      if (mineOnly && me) totQ = totQ.eq('assigned_to', me)
-
-      const [st, sf, lb, cr, tot, src] = await Promise.all([
+      // The grand total is only a heading. An exact count over twelve
+      // thousand rows is slow, so it is fetched on its own below rather
+      // than held inside this block — the board must not wait for it.
+      const [st, sf, lb, cr, src] = await Promise.all([
         supabase.from('lead_stages').select('*').eq('is_active', true).order('sort_order'),
         loadStaff(),
         supabase.from('lead_labels').select('*').eq('is_active', true).order('sort_order'),
         supabase.from('lead_cancel_reasons').select('id, name').eq('is_active', true).order('sort_order'),
-        totQ,
         loadSources(true),
       ])
       setMyId(me)
@@ -460,7 +574,6 @@ export default function LeadsBoard(
       setLabels((lb.data ?? []) as Label[])
       setLabelsLoaded(true)
       setReasons((cr.data ?? []) as { id: string; name: string }[])
-      setTotalAll(tot.count ?? 0)
       setSources([...src])
       setError(null)
     } catch (e) {
@@ -472,6 +585,20 @@ export default function LeadsBoard(
   useEffect(() => {
     void loadMeta()
   }, [loadMeta])
+
+  // Grand total for the heading, on its own so a slow count never holds up
+  // the board. mineOnly waits for myId so it does not count everyone first.
+  useEffect(() => {
+    if (mineOnly && !myId) return
+    let alive = true
+    ;(async () => {
+      let q = supabase.from('leads').select('id', { count: 'exact', head: true }).is('deleted_at', null)
+      if (mineOnly && myId) q = q.eq('assigned_to', myId)
+      const { count } = await q
+      if (alive && count != null) setTotalAll(count)
+    })()
+    return () => { alive = false }
+  }, [mineOnly, myId])
 
   // `ready`, not `can`: usePermissions hands back a fresh `can` on every
   // render, so depending on it would re-run this for ever.
@@ -746,6 +873,17 @@ export default function LeadsBoard(
     number that plainly exists came back blank, which is the one answer
     that must never be given.
   */
+   // Aa strip kayam screen par chhe, etle dark-only rang na chale —
+  // cream theme par pale-grey akshar gayab thai jay chhe.
+  const { dark } = useChartTheme()
+  const elseCls = {
+    box:  dark ? { background: 'rgba(120,53,15,0.20)', borderColor: 'rgba(180,83,9,0.40)' } : { background: 'rgba(251,191,36,0.10)', borderColor: 'rgba(180,83,9,0.35)' },
+    head: dark ? '#fcd34d' : '#92400e',
+    name: dark ? '#e5e7eb' : '#2b2722',
+    dim:  dark ? '#9ca3af' : '#6b6356',
+    chip: dark ? { background: '#2a2a2a', color: '#e5e7eb' } : { background: '#e9e4da', color: '#2b2722' },
+    line: dark ? 'rgba(180,83,9,0.25)' : 'rgba(180,83,9,0.22)',
+  }
   const [elsewhere, setElsewhere] = useState<LeadElsewhere[]>([])
   const seesEveryLead = !mineOnly && can('lead_view_all')
 
@@ -943,7 +1081,7 @@ export default function LeadsBoard(
 
   // ---------- Add lead ----------
   function openAdd() {
-    setNl({ ...emptyNew(), assign: can('lead_assign') ? 'auto' : 'me' })
+    setNl({ ...emptyNew(), assign: 'me' })
     setDup(null)
     setAddErr(null)
     setAdding(true)
@@ -1364,11 +1502,17 @@ export default function LeadsBoard(
                       control — it reads as broken. */}
                   {!mineOnly && (
                     <Field label="Assign to">
-                      <select value={f.owner} onChange={(e) => set({ owner: e.target.value })} className={panelSelect}>
-                        <option value="all">All assign</option>
-                        <option value="none">Unassigned</option>
-                        {owners.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                      </select>
+                      <MultiPick
+                        allLabel="All assign"
+                        noun="person"
+                        selected={f.owners}
+                        onChange={(v) => set({ owners: v })}
+                        trigger={panelSelect}
+                        options={[
+                          { value: 'none', label: 'Unassigned' },
+                          ...owners.map((o) => ({ value: o.id, label: o.full_name })),
+                        ]}
+                      />
                     </Field>
                   )}
 
@@ -1377,11 +1521,17 @@ export default function LeadsBoard(
                       choice, it is a trap. */}
                   {!lockedLabelId && (
                     <Field label="Labels">
-                      <select value={f.label} onChange={(e) => set({ label: e.target.value })} className={panelSelect}>
-                        <option value="all">All labels</option>
-                        <option value="none">No label</option>
-                        {labels.map((lb) => <option key={lb.id} value={lb.id}>{lb.name}</option>)}
-                      </select>
+                      <MultiPick
+                        allLabel="All labels"
+                        noun="label"
+                        selected={f.labels}
+                        onChange={(v) => set({ labels: v })}
+                        trigger={panelSelect}
+                        options={[
+                          { value: 'none', label: 'No label' },
+                          ...labels.map((lb) => ({ value: lb.id, label: lb.name })),
+                        ]}
+                      />
                     </Field>
                   )}
 
@@ -1494,32 +1644,29 @@ export default function LeadsBoard(
       {/* Already with somebody else. Shown whether or not the search
           also turned up leads of your own — one of each is exactly the
           case worth catching. */}
-      {elsewhereOnly.length > 0 && (
-        <section className="mt-4 overflow-hidden rounded-xl border border-amber-700/40 bg-amber-950/20">
-          <p className="border-b border-amber-700/30 px-4 py-2.5 text-sm text-amber-300">
+            {elsewhereOnly.length > 0 && (
+        <section className="mt-4 overflow-hidden rounded-xl border" style={elseCls.box}>
+          <p className="border-b px-4 py-2.5 text-sm" style={{ borderColor: elseCls.line, color: elseCls.head }}>
             {elsewhereOnly.length === 1 ? 'This one is already with' : `${elsewhereOnly.length} of these are already with`}{' '}
             someone else — check before you call.
           </p>
-          <ul className="divide-y divide-amber-700/20">
+          <ul>
             {elsewhereOnly.map((l) => (
-              <li key={l.lead_no} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm">
-                <span className="font-mono text-xs text-gray-500">#{l.lead_no}</span>
-                <span className="min-w-0 flex-1 truncate text-gray-200">
+              <li key={l.lead_no} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2.5 text-sm first:border-t-0" style={{ borderColor: elseCls.line }}>
+                <span className="font-mono text-xs" style={{ color: elseCls.dim }}>#{l.lead_no}</span>
+                <span className="min-w-0 flex-1 truncate" style={{ color: elseCls.name }}>
                   {l.name || '—'}
-                  {l.company && <span className="text-gray-500"> · {l.company}</span>}
+                  {l.company && <span style={{ color: elseCls.dim }}> · {l.company}</span>}
                 </span>
-                {l.phone_hint && <span className="shrink-0 tabular-nums text-xs text-gray-500">{l.phone_hint}</span>}
+                {l.phone_hint && <span className="shrink-0 tabular-nums text-xs" style={{ color: elseCls.dim }}>{l.phone_hint}</span>}
                 {l.stage_name && (
-                  <span className="shrink-0 rounded-full bg-[#2a2a2a] px-2 py-0.5 text-[11px] font-medium text-gray-200">
+                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium" style={elseCls.chip}>
                     {l.stage_name}
                   </span>
                 )}
-                <span className="shrink-0 text-xs text-amber-300">
-                  {/* Unassigned is a real answer and a useful one: the
-                      lead exists, nobody is on it, so ask before you
-                      take it rather than ringing over someone. */}
+                <span className="shrink-0 text-xs" style={{ color: elseCls.head }}>
                   {l.assigned_name || 'Nobody yet'}
-                  {l.branch_name && <span className="text-amber-300/60"> · {l.branch_name}</span>}
+                  {l.branch_name && <span style={{ color: elseCls.dim }}> · {l.branch_name}</span>}
                 </span>
               </li>
             ))}

@@ -10,7 +10,7 @@ import { useChartTheme } from '../../lib/chartTheme'
 
 // ---------- Types ----------
 type Branch = { id: string; name: string; city: string | null }
-type Profile = { id: string; full_name: string | null; branch_id: string | null; is_active: boolean | null }
+type Profile = { id: string; full_name: string | null; branch_id: string | null; is_active: boolean | null; emp_code: string | null }
 type Report = {
   user_id: string
   branch_id: string | null
@@ -34,6 +34,19 @@ type Deal = {
   work_date: string
   client_name: string | null
   amount: number | null
+}
+// Confirmed money, one row per seller, from sales_target_performance — the
+// same source the Sales Performance screen reads. Revenue, deals and the
+// branch chart come from here, not from daily_reports, so the dashboard
+// shows real booked business and every branch appears, not only the ones
+// whose staff happen to type a revenue figure into their daily report.
+type Perf = {
+  user_id: string
+  full_name: string | null
+  branch_id: string | null
+  is_manager: boolean
+  confirmed: number | null
+  confirmed_deals: number | null
 }
 type Period = 'today' | '7d' | 'month' | 'lastMonth'
 
@@ -86,6 +99,11 @@ export default function AdminDashboard() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [salesIds, setSalesIds] = useState<Set<string>>(new Set())
   const [reports, setReports] = useState<Report[]>([])
+  const [perf, setPerf] = useState<Perf[]>([])
+  // Company (House): confirmed money that is nobody's sale — an admin's own
+  // deal, or a customer with no sales owner. Added back so the company
+  // total reconciles (sales + House).
+  const [house, setHouse] = useState<{ branch_id: string | null; full_name: string; amount: number; deals: number }[]>([])
   const [deals, setDeals] = useState<Deal[]>([])
   const [presentToday, setPresentToday] = useState<string[]>([])
   const [pendingLeaves, setPendingLeaves] = useState<string[]>([])
@@ -100,7 +118,7 @@ export default function AdminDashboard() {
     ;(async () => {
       const [b, p, r] = await Promise.all([
         supabase.from('branches').select('id, name, city').eq('is_active', true).order('name'),
-        supabase.from('profiles').select('id, full_name, branch_id, is_active'),
+        supabase.from('profiles').select('id, full_name, branch_id, is_active, emp_code'),
         supabase.from('user_roles').select('user_id').eq('role', 'sales'),
       ])
       if (b.error || p.error) {
@@ -136,7 +154,7 @@ export default function AdminDashboard() {
         dq = dq.eq('branch_id', branchId)
       }
 
-      const [r, d, a, l] = await Promise.all([
+      const [r, d, a, l, pf, hs] = await Promise.all([
         rq,
         dq,
         // `check_in`, not `check_in_time`. The attendance table was
@@ -149,9 +167,23 @@ export default function AdminDashboard() {
         // tile has been counting a table nothing writes to — it would
         // have read 0 for ever and looked like good news.
         supabase.from('leave_requests').select('user_id').eq('state', 'Waiting'),
+        // Confirmed money per seller for the chosen window and branch.
+        // null branch = every branch the viewer can see (a Super Admin
+        // sees all). Managers who sell are included, with their own deals.
+        supabase.rpc('sales_target_performance', {
+          p_from: range.from,
+          p_to: range.to,
+          p_branch: branchId === 'all' ? null : branchId,
+        }),
+        // Company (House) — deals credited to nobody on the sales roster.
+        supabase.rpc('sales_house', {
+          p_from: range.from,
+          p_to: range.to,
+          p_branch: branchId === 'all' ? null : branchId,
+        }),
       ])
 
-      const firstError = r.error ?? d.error ?? a.error ?? l.error
+      const firstError = r.error ?? d.error ?? a.error ?? l.error ?? pf.error ?? hs.error
       if (firstError) {
         setError(firstError.message)
         setLoading(false)
@@ -161,6 +193,8 @@ export default function AdminDashboard() {
       setDeals(d.data ?? [])
       setPresentToday((a.data ?? []).map((x) => x.user_id))
       setPendingLeaves((l.data ?? []).map((x) => x.user_id))
+      setPerf((pf.data ?? []) as Perf[])
+      setHouse((hs.data ?? []) as typeof house)
       setLoading(false)
     })()
   }, [range, branchId])
@@ -170,6 +204,8 @@ export default function AdminDashboard() {
   const branchMap = useMemo(() => new Map(branches.map((b) => [b.id, b])), [branches])
   const inBranch = (userId: string) => branchId === 'all' || profileMap.get(userId)?.branch_id === branchId
 
+  // Reported activity (calls, leads, inquiry sources) still comes from the
+  // daily reports — that is what those numbers are.
   const totals = useMemo(() => {
     const t = { calls: 0, quality: 0, positive: 0, hot: 0, deals: 0, revenue: 0, fb: 0, indiamart: 0, whatsapp: 0, oldRef: 0, incoming: 0 }
     for (const r of reports) {
@@ -188,10 +224,35 @@ export default function AdminDashboard() {
     return t
   }, [reports])
 
+  // Money = confirmed deals, not self-reported revenue.
+  const confirmed = useMemo(() => {
+    let rev = 0
+    let deals = 0
+    for (const x of perf) {
+      rev += n(x.confirmed)
+      deals += n(x.confirmed_deals)
+    }
+    return { rev, deals }
+  }, [perf])
+
+  // Company (House) totals, and the company figure = sales + House.
+  const houseTotal = useMemo(() => {
+    let rev = 0
+    let deals = 0
+    for (const h of house) {
+      rev += n(h.amount)
+      deals += n(h.deals)
+    }
+    return { rev, deals }
+  }, [house])
+
+  const companyRev = confirmed.rev + houseTotal.rev
+  const companyDeals = confirmed.deals + houseTotal.deals
+
   const activeEmployees = profiles.filter((p) => p.is_active !== false && inBranch(p.id)).length
   const presentCount = new Set(presentToday.filter(inBranch)).size
   const pendingCount = pendingLeaves.filter(inBranch).length
-  const avgDeal = totals.deals > 0 ? totals.revenue / totals.deals : 0
+  const avgDeal = companyDeals > 0 ? companyRev / companyDeals : 0
 
   const trend = useMemo(() => {
     const byDate = new Map<string, number>()
@@ -201,36 +262,53 @@ export default function AdminDashboard() {
     return out
   }, [reports, range])
 
+  // Branch-wise confirmed revenue. Every branch shows, because this reads
+  // booked deals, not who filed a daily report.
   const branchRevenue = useMemo(() => {
     const sums = new Map<string, number>()
-    for (const r of reports) if (r.branch_id) sums.set(r.branch_id, (sums.get(r.branch_id) ?? 0) + n(r.revenue))
+    for (const x of perf) if (x.branch_id) sums.set(x.branch_id, (sums.get(x.branch_id) ?? 0) + n(x.confirmed))
+    // House money belongs to a branch too, so the bars reconcile with the total.
+    for (const h of house) if (h.branch_id) sums.set(h.branch_id, (sums.get(h.branch_id) ?? 0) + n(h.amount))
     return branches.map((b) => ({ name: b.name, revenue: sums.get(b.id) ?? 0 }))
-  }, [reports, branches])
+  }, [perf, house, branches])
 
-  // Every active sales employee (in the chosen branch), even with no reports yet
+  // Every active sales employee (in the chosen branch), plus any manager who
+  // sold. Calls / hot / reports come from the daily reports; deals and
+  // revenue come from confirmed business.
   const performers = useMemo(() => {
-    const m = new Map<string, { calls: number; hot: number; deals: number; revenue: number; reports: number }>()
+    type Row = { calls: number; hot: number; deals: number; revenue: number; reports: number; isManager: boolean }
+    const blank = (): Row => ({ calls: 0, hot: 0, deals: 0, revenue: 0, reports: 0, isManager: false })
+    const m = new Map<string, Row>()
+
     for (const p of profiles) {
       if (p.is_active === false || !salesIds.has(p.id)) continue
       if (branchId !== 'all' && p.branch_id !== branchId) continue
-      m.set(p.id, { calls: 0, hot: 0, deals: 0, revenue: 0, reports: 0 })
+      m.set(p.id, blank())
     }
+    // Sellers from the confirmed feed (includes managers with their own deals).
+    for (const x of perf) {
+      if (!m.has(x.user_id)) m.set(x.user_id, blank())
+      const cur = m.get(x.user_id)!
+      cur.revenue += n(x.confirmed)
+      cur.deals += n(x.confirmed_deals)
+      if (x.is_manager) cur.isManager = true
+    }
+    // Reported activity for whoever is already in the table.
     for (const r of reports) {
-      const cur = m.get(r.user_id) ?? { calls: 0, hot: 0, deals: 0, revenue: 0, reports: 0 }
+      const cur = m.get(r.user_id)
+      if (!cur) continue
       cur.reports += 1
       cur.calls += n(r.calls)
       cur.hot += n(r.hot_leads)
-      cur.deals += n(r.deals_closed)
-      cur.revenue += n(r.revenue)
-      m.set(r.user_id, cur)
     }
+
     return [...m.entries()]
       .map(([userId, s]) => {
         const p = profileMap.get(userId)
-        return { userId, name: p?.full_name ?? 'Unknown', branch: branchMap.get(p?.branch_id ?? '')?.name ?? '—', ...s }
+        return { userId, code: p?.emp_code ?? null, name: p?.full_name ?? 'Unknown', branch: branchMap.get(p?.branch_id ?? '')?.name ?? '—', ...s }
       })
       .sort((a, b) => b.revenue - a.revenue || b.calls - a.calls)
-  }, [reports, profiles, salesIds, branchId, profileMap, branchMap])
+  }, [reports, profiles, salesIds, perf, branchId, profileMap, branchMap])
 
   const funnel = [
     { label: 'Calls', value: totals.calls },
@@ -295,12 +373,17 @@ export default function AdminDashboard() {
           {/* Hero: revenue + funnel */}
           <section className="mt-6 grid gap-6 rounded-2xl border border-[#242424] bg-[#151515] p-6 lg:grid-cols-5">
             <div className="lg:col-span-2 lg:border-r lg:border-[#242424] lg:pr-6">
-              <p className="text-sm text-gray-400">Total revenue</p>
-              <p className="mt-2 text-4xl font-bold tracking-tight text-orange-500 sm:text-5xl">{formatINR(totals.revenue)}</p>
+              <p className="text-sm text-gray-400">Confirmed revenue</p>
+              <p className="mt-2 text-4xl font-bold tracking-tight text-orange-500 sm:text-5xl">{formatINR(companyRev)}</p>
+              {houseTotal.rev > 0 && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Sales {formatINR(confirmed.rev)} · Company/House {formatINR(houseTotal.rev)}
+                </p>
+              )}
               <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p className="text-gray-400">Deals closed</p>
-                  <p className="mt-1 text-xl font-semibold">{totals.deals}</p>
+                  <p className="text-gray-400">Confirmed deals</p>
+                  <p className="mt-1 text-xl font-semibold">{companyDeals}</p>
                 </div>
                 <div>
                   <p className="text-gray-400">Average deal</p>
@@ -310,7 +393,7 @@ export default function AdminDashboard() {
             </div>
 
             <div className="lg:col-span-3">
-              <p className="text-sm text-gray-400">Sales funnel</p>
+              <p className="text-sm text-gray-400">Sales funnel <span className="text-gray-600">· daily reports</span></p>
               <div className="mt-3 space-y-2.5">
                 {funnel.map((s, i) => {
                   const prev = i > 0 ? funnel[i - 1].value : 0
@@ -345,7 +428,7 @@ export default function AdminDashboard() {
 
           {/* Trend + sources */}
           <section className="mt-6 grid gap-6 lg:grid-cols-3">
-            <Panel title="Revenue trend" className="lg:col-span-2">
+            <Panel title="Reported revenue trend" className="lg:col-span-2">
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={trend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -453,13 +536,16 @@ export default function AdminDashboard() {
                     {performers.map((p, i) => (
                       <tr
                         key={p.userId}
-                        onClick={() => navigate(`/admin/employee/${p.userId}`)}
+                        onClick={() => navigate(`/admin/employee/${encodeURIComponent(p.code || p.userId)}`)}
                         className="cursor-pointer border-b border-[#1c1c1c] last:border-0 hover:bg-[#1a1a1a]"
                         title="Open full report"
                       >
                         <td className="py-2.5 pr-3 text-gray-500">{i + 1}</td>
                         <td className="py-2.5 pr-4">
                           <span className={i === 0 && p.revenue > 0 ? 'font-semibold text-orange-400' : ''}>{p.name}</span>
+                          {p.isManager && (
+                            <span className="ml-2 rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-400">Manager</span>
+                          )}
                         </td>
                         <td className="py-2.5 pr-4 text-gray-400">{p.branch}</td>
                         <td className="py-2.5 pr-4 text-right tabular-nums">{p.calls.toLocaleString('en-IN')}</td>

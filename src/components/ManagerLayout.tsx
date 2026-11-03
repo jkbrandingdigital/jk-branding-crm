@@ -60,6 +60,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     {
     title: 'Me',
     items: [
+      { label: 'My Daily Report', path: '/manager/daily-report', icon: FileText, ready: true },
       { label: 'Scan attendance', path: '/scan', icon: QrCode, ready: true },
       { label: 'My attendance', path: '/manager/my-attendance', icon: CalendarCheck, ready: true },
       { label: 'My leave', path: '/manager/my-leave', icon: CalendarOff, ready: true },

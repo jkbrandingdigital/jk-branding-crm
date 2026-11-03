@@ -15,7 +15,6 @@ import {
   loadTarget, nameOf, prevOf, SOURCE_LABEL, SOURCE_NOTE, sum, trendOf,
   type ServiceRow, type Source, type TargetRow,
 } from './salesPerf'
-import IncentiveCard from './IncentiveCard'
 
 /*
   Target performance — the measure that actually decides how a sales
@@ -275,7 +274,7 @@ export default function TargetPerformance({
             <ArrowLeft size={13} /> Whole team
           </button>
           <button
-            onClick={() => navigate(`${basePath}/employee/${person.user_id}`)}
+            onClick={() => navigate(`${basePath}/employee/${encodeURIComponent(person.emp_code || person.user_id)}`)}
             className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300"
           >
             Full report <ArrowUpRight size={13} />
@@ -326,24 +325,6 @@ export default function TargetPerformance({
           value={totDeals > 0 ? inr(Math.round(totGot / totDeals)) : '—'}
           foot={<Trend value={trendOf(totGot, totPrev)} />}
         />
-      </div>
-
-      {/* ---------- what it pays ----------
-          Directly under the four numbers, because this is the one a
-          sales person looks for first and the only figure on the page
-          that is theirs to take home.
-
-          It always reads confirmed projects, whatever the toggle above
-          says. A daily report is typed by hand and carries no service,
-          so it can neither be checked nor split — and money that is
-          paid out has to come from the side that cannot be typed up. */}
-      <div className="mt-4">
-        <IncentiveCard from={from} to={to} userId={userId !== 'all' ? userId : null} />
-        {source === 'reported' && (
-          <p className="mt-2 text-xs text-gray-500">
-            Worked out from confirmed projects, so it will not match the Achieved figure above.
-          </p>
-        )}
       </div>
 
       {/* ---------- overview strip ----------

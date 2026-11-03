@@ -1,9 +1,9 @@
 // src/components/attendance/words.ts
 //
-// What a punch is CALLED on screen — and it is NOT what the database
-// calls it. Read this before changing anything here.
+// What a punch is CALLED on screen — and it is NOT always what the
+// database calls it. Read this before changing anything here.
 //
-// The database names a punch by where the person went:
+// The database names a lunch punch by where the person went:
 //     'Lunch out' = left the office for lunch
 //     'Lunch in'  = came back in
 //
@@ -16,17 +16,22 @@
 // loud, so that is what the screens show, and the database keeps its
 // own names because thousands of scans are already recorded under them.
 //
-// Everything that shows a punch to a person imports from here. One
-// reversed map in one file is a thing you can check; three copies of it
-// across three screens is a bug nobody will find, because each one
-// looks right on its own.
+// Break and meeting do NOT reverse — 'Step out'/'Meeting out' is leaving,
+// its partner is coming back, and the screen says exactly that.
+//
+// Everything that shows a punch to a person imports from here. One map
+// in one file is a thing you can check; three copies of it across three
+// screens is a bug nobody will find, because each one looks right on its
+// own.
 
 export const KIND_WORDS: Record<string, string> = {
   In: 'In',
-  'Lunch out': 'Lunch in',    // ← reversed on purpose
-  'Lunch in': 'Lunch out',    // ← reversed on purpose
-  'Step out': 'Stepped out',
+  'Lunch out': 'Lunch in',     // ← reversed on purpose
+  'Lunch in': 'Lunch out',     // ← reversed on purpose
+  'Step out': 'Break',
   Back: 'Back',
+  'Meeting out': 'Meeting',
+  'Meeting in': 'Back',
   Out: 'Out',
 }
 
@@ -34,13 +39,21 @@ export const KIND_WORDS: Record<string, string> = {
 export const says = (kind: string | null | undefined) =>
   kind ? KIND_WORDS[kind] ?? kind : '—'
 
-/** What the big button says when this punch is next. */
+/**
+ * What the button says when this punch is the next one.
+ *
+ * These are the words on the scan page. A person picks WHY they are
+ * stepping away — Lunch, Break, Meeting — and the return scan says what
+ * it is closing.
+ */
 export const BUTTON_WORDS: Record<string, string> = {
   In: 'Scan in',
-  'Lunch out': 'Lunch in',
-  'Lunch in': 'Lunch out',
-  'Step out': 'Step out',
+  'Lunch out': 'Lunch',              // going to lunch
+  'Lunch in': 'Back from lunch',     // the return, shown by itself
+  'Step out': 'Break',
   Back: 'Back',
+  'Meeting out': 'Meeting',
+  'Meeting in': 'Back from meeting',
   Out: 'Scan out',
 }
 

@@ -110,7 +110,7 @@ export const fromInputDT = (v: string) => (v ? new Date(v).toISOString() : null)
 
 export const fmtDT = (iso: string | null) =>
   iso
-    ? new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
+    ? new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
     : '—'
 
 export const isOverdue = (l: Lead, stage?: Stage) =>

@@ -104,22 +104,29 @@ export const dealsOf = (r: TargetRow, s: Source) =>
 // ---------------------------------------------------------------------
 // Periods
 // ---------------------------------------------------------------------
-export type PeriodKey = 'month' | 'last' | 'year' | 'custom'
+export type PeriodKey = 'today' | 'week' | 'month' | 'year' | 'custom'
 
 export const PERIODS: { key: PeriodKey; label: string }[] = [
-  { key: 'month', label: 'This month' },
-  { key: 'last', label: 'Last month' },
-  { key: 'year', label: 'This year' },
-  { key: 'custom', label: 'Pick dates' },
+  { key: 'today', label: 'Daily' },
+  { key: 'week', label: 'Weekly' },
+  { key: 'month', label: 'Monthly' },
+  { key: 'year', label: 'Yearly' },
+  { key: 'custom', label: 'Custom' },
 ]
 
+// Every range is inclusive and, apart from Custom, ends today — so Weekly
+// is this week so far, Yearly is this year so far, and so on.
 export function rangeOf(key: PeriodKey, from: string, to: string): { from: string; to: string } {
   const today = istDate()
-  if (key === 'month') return { from: monthFirst(today.slice(0, 7)), to: today }
-  if (key === 'last') {
-    const ym = addMonths(today.slice(0, 7), -1)
-    return { from: monthFirst(ym), to: monthLast(ym) }
+  if (key === 'today') return { from: today, to: today }
+  if (key === 'week') {
+    // This week, Monday to today.
+    const d = new Date(today + 'T00:00:00Z')
+    const back = (d.getUTCDay() + 6) % 7 // Mon = 0 … Sun = 6
+    d.setUTCDate(d.getUTCDate() - back)
+    return { from: d.toISOString().slice(0, 10), to: today }
   }
+  if (key === 'month') return { from: monthFirst(today.slice(0, 7)), to: today }
   if (key === 'year') return { from: `${today.slice(0, 4)}-01-01`, to: today }
   return { from: from || monthFirst(today.slice(0, 7)), to: to || today }
 }

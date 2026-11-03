@@ -36,8 +36,10 @@ type Day = {
   late_minutes: number
   lunch_minutes: number
   break_minutes: number
+  meeting_minutes: number
   gross_minutes: number
   minutes_worked: number
+  overtime_minutes: number
   lunch_open: boolean
   lunch_late_min: number
   reasons_pending: number
@@ -88,7 +90,7 @@ export default function MyAttendance() {
         // One unbroken string: supabase-js reads this at the type level
         // to work out the row shape, and a string joined with + is not
         // something it can read — it hands back GenericStringError instead.
-        .select('work_date, status, check_in, check_out, punches, is_late, late_minutes, lunch_minutes, break_minutes, gross_minutes, minutes_worked, lunch_open, lunch_late_min, reasons_pending, remarks')
+        .select('work_date, status, check_in, check_out, punches, is_late, late_minutes, lunch_minutes, break_minutes, meeting_minutes, gross_minutes, minutes_worked, overtime_minutes, lunch_open, lunch_late_min, reasons_pending, remarks')
         .gte('work_date', from)
         .lte('work_date', to)
         .order('work_date', { ascending: false })
@@ -197,6 +199,9 @@ export default function MyAttendance() {
                       </span>
                       <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
                         <span className="inline-flex items-center gap-1"><Clock size={10} /> {hhmm(d.minutes_worked)}</span>
+                        {d.overtime_minutes > 0 && (
+                          <span className="text-sky-400">+{hhmm(d.overtime_minutes)} OT</span>
+                        )}
                         {d.lunch_minutes > 0 && (
                           <span className="inline-flex items-center gap-1"><Coffee size={10} /> {d.lunch_minutes}m</span>
                         )}
@@ -227,8 +232,10 @@ export default function MyAttendance() {
                       <dl className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
                         <Pair k="In to out" v={hhmm(d.gross_minutes)} />
                         <Pair k="Lunch" v={`${d.lunch_minutes}m`} />
-                        <Pair k="Stepped out" v={`${d.break_minutes}m`} />
-                        <Pair k="Paid" v={hhmm(d.minutes_worked)} strong />
+                        <Pair k="Break" v={`${d.break_minutes}m`} />
+                        {d.meeting_minutes > 0 && <Pair k="Meeting" v={`${d.meeting_minutes}m`} />}
+                        <Pair k="Regular" v={hhmm(d.minutes_worked)} strong />
+                        {d.overtime_minutes > 0 && <Pair k="Overtime" v={hhmm(d.overtime_minutes)} strong />}
                       </dl>
                       {d.lunch_late_min > 0 && (
                         <p className="mt-2 text-amber-400">Back from lunch {d.lunch_late_min} minutes late.</p>

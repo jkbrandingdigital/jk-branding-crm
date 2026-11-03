@@ -7,6 +7,7 @@ import DonutChart, { PIE_COLORS } from './DonutChart'
 import { DateField } from './DateField'
 import TargetPerformance from './sales/TargetPerformance'
 import ActivityPerformance from './sales/ActivityPerformance'
+import IncentiveCard from './sales/IncentiveCard'
 import { PERIODS, rangeOf, type PeriodKey } from './sales/salesPerf'
 import { istDate, inr } from '../lib/format'
 import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../lib/targets'
@@ -27,6 +28,11 @@ import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../lib/targets
 
   The old leaderboard is gone because of that. Its branch comparison is
   still here, under Branches.
+
+  Incentive sits at the very bottom of the Target tab — the last thing
+  on the page, because it is the figure a sales person reads last and
+  takes home. It always reads confirmed projects, whatever else the tab
+  shows.
 */
 
 type Branch = { id: string; name: string }
@@ -89,6 +95,13 @@ export default function SalesPerformance({
   const [userId, setUserId] = useState(searchParams.get('user') ?? 'all')
   const [error, setError] = useState<string | null>(null)
 
+  // Company (House): confirmed money credited to nobody on the sales
+  // roster — an admin's own deal, or a customer with no sales owner.
+  // Broken down by who, so two admins do not blur into one lump.
+  const [houseList, setHouseList] = useState<{ uid: string; name: string; amount: number; deals: number }[]>([])
+  // Which House person's deals are being looked at.
+  const [housePick, setHousePick] = useState<{ uid: string; name: string } | null>(null)
+
   // Branch managers are locked to their own branch even without the prop
   const [autoLock, setAutoLock] = useState<string | null>(null)
   const lock = lockedBranchId ?? autoLock
@@ -133,13 +146,15 @@ export default function SalesPerformance({
       const [b, p, r] = await Promise.all([
         supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
         supabase.from('profiles').select('id, full_name, branch_id, is_active').order('full_name'),
-        supabase.from('user_roles').select('user_id').eq('role', 'sales'),
+        // Branch managers sell too, and have a row in the performance
+        // RPCs, so they belong in the person picker alongside sales.
+        supabase.from('user_roles').select('user_id').in('role', ['sales', 'branch_manager']),
       ])
       if (b.error || p.error) return setError((b.error ?? p.error)!.message)
       setBranches(b.data ?? [])
-      const salesIds = new Set((r.data ?? []).map((x) => x.user_id))
+      const sellerIds = new Set((r.data ?? []).map((x) => x.user_id))
       const all = (p.data ?? []).filter((x) => x.is_active !== false)
-      setPeople(salesIds.size > 0 ? all.filter((x) => salesIds.has(x.id)) : all)
+      setPeople(sellerIds.size > 0 ? all.filter((x) => sellerIds.has(x.id)) : all)
     })()
   }, [])
 
@@ -171,6 +186,35 @@ export default function SalesPerformance({
       }
     })()
   }, [tab, ym])
+
+  // Company (House) total for the chosen window and branch. Only on the
+  // Target tab, and never on a sales person's own page — it is a team
+  // figure, not theirs.
+  useEffect(() => {
+    if (selfOnly || tab !== 'target') return
+    let alive = true
+    ;(async () => {
+      const { data, error } = await supabase.rpc('sales_house', {
+        p_from: range.from,
+        p_to: range.to,
+        p_branch: branchId === 'all' ? null : branchId,
+      })
+      if (!alive || error) return
+      // Rows come per person per branch; fold the branches into one line
+      // per person for the card.
+      const rows = (data ?? []) as { uid: string; full_name: string; amount: number; deals: number }[]
+      const byUid = new Map<string, { uid: string; name: string; amount: number; deals: number }>()
+      for (const r of rows) {
+        const key = r.uid ?? r.full_name
+        const cur = byUid.get(key) ?? { uid: r.uid, name: r.full_name, amount: 0, deals: 0 }
+        cur.amount += Number(r.amount ?? 0)
+        cur.deals += Number(r.deals ?? 0)
+        byUid.set(key, cur)
+      }
+      setHouseList([...byUid.values()].sort((a, b) => b.amount - a.amount))
+    })()
+    return () => { alive = false }
+  }, [selfOnly, tab, range.from, range.to, branchId])
 
   const branchRows = useMemo(() => {
     return branches
@@ -304,6 +348,48 @@ export default function SalesPerformance({
           />
         )}
 
+        {/* Company (House) — deals that are nobody's sale, kept off every
+            person's score but in the company total, and shown by who. */}
+        {selfResolved && tab === 'target' && !selfOnly && houseList.length > 0 && (() => {
+          const total = houseList.reduce((s, h) => s + h.amount, 0)
+          const totalDeals = houseList.reduce((s, h) => s + h.deals, 0)
+          return (
+            <div className="mt-4 rounded-2xl border border-[#242424] bg-[#151515] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-300">Company (House)</p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    Confirmed deals not credited to any sales person — entered by an admin, or a
+                    customer with no sales owner. Kept off everyone's score, but in the company total.
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-xl font-semibold tabular-nums text-gray-200">{inr(total)}</p>
+                  <p className="text-xs text-gray-500">{totalDeals} deal{totalDeals === 1 ? '' : 's'}</p>
+                </div>
+              </div>
+              {/* By who — so two admins never blur into one lump. */}
+              <ul className="mt-4 divide-y divide-[#222] border-t border-[#242424]">
+                {houseList.map((h) => (
+                  <li key={h.uid} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <span className="min-w-0 truncate text-gray-300">{h.name}</span>
+                    <span className="shrink-0 tabular-nums text-gray-400">
+                      {inr(h.amount)}
+                      <button
+                        type="button"
+                        onClick={() => setHousePick({ uid: h.uid, name: h.name })}
+                        className="ml-2 rounded px-1.5 py-0.5 text-xs text-orange-400 hover:bg-orange-500/10 hover:underline"
+                      >
+                        {h.deals} deal{h.deals === 1 ? '' : 's'}
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        })()}
+
         {selfResolved && tab === 'activity' && (
           <>
             <ActivityPerformance
@@ -393,6 +479,112 @@ export default function SalesPerformance({
               </section>
             )}
           </>
+        )}
+      </div>
+
+      {/* ---------- incentive, at the very bottom of the Target tab ----------
+          Kept to the Target tab because it is money against target; on
+          Activity (calls, leads) or Branches it would be out of place.
+          It reads confirmed projects for the period chosen above. */}
+      {selfResolved && tab === 'target' && (
+        <div className="mt-8">
+          <IncentiveCard from={range.from} to={range.to} userId={userId !== 'all' ? userId : null} />
+        </div>
+      )}
+
+      {housePick && (
+        <HouseDeals
+          pick={housePick}
+          from={range.from}
+          to={range.to}
+          branchId={branchId}
+          onClose={() => setHousePick(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// The deals behind one House line — opened from its "N deals" button.
+function HouseDeals({
+  pick, from, to, branchId, onClose,
+}: {
+  pick: { uid: string; name: string }
+  from: string
+  to: string
+  branchId: string
+  onClose: () => void
+}) {
+  const [rows, setRows] = useState<{
+    id: string; project_code: string; title: string
+    customer_name: string; amount: number; booked_on: string
+  }[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      setLoading(true)
+      const { data } = await supabase.rpc('sales_house_deals', {
+        p_uid: pick.uid,
+        p_from: from,
+        p_to: to,
+        p_branch: branchId === 'all' ? null : branchId,
+      })
+      if (!alive) return
+      setRows((data ?? []) as typeof rows)
+      setLoading(false)
+    })()
+    return () => { alive = false }
+  }, [pick.uid, from, to, branchId])
+
+  const total = rows.reduce((s, r) => s + Number(r.amount ?? 0), 0)
+  const dt = (d: string) =>
+    new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit', timeZone: 'UTC' })
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:items-center"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="my-auto w-full max-w-lg rounded-xl border border-[#2a2a2a] bg-[#161616] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
+          <div>
+            <h3 className="text-sm font-semibold text-white">{pick.name} · Company (House) deals</h3>
+            <p className="mt-0.5 text-xs text-gray-500">Confirmed deals not credited to any sales person.</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-gray-500 hover:text-white">✕</button>
+        </div>
+
+        <div className="max-h-[60vh] overflow-y-auto p-5">
+          {loading ? (
+            <p className="py-8 text-center text-sm text-gray-500">Loading…</p>
+          ) : rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-gray-500">No deals in this period.</p>
+          ) : (
+            <ul className="divide-y divide-[#222]">
+              {rows.map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate text-white">{r.title}</p>
+                    <p className="truncate text-xs text-gray-500">
+                      <span className="font-mono">{r.project_code}</span> · {r.customer_name} · {dt(r.booked_on)}
+                    </p>
+                  </div>
+                  <span className="shrink-0 font-medium tabular-nums text-gray-200">{inr(r.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {!loading && rows.length > 0 && (
+          <div className="flex items-center justify-between border-t border-[#242424] px-5 py-3 text-sm">
+            <span className="text-gray-400">{rows.length} deal{rows.length === 1 ? '' : 's'}</span>
+            <span className="font-semibold tabular-nums text-white">{inr(total)}</span>
+          </div>
         )}
       </div>
     </div>

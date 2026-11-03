@@ -48,7 +48,9 @@ function deviceKey(): string {
 
 // ── types ────────────────────────────────────────────────────────────────
 
-type Kind = 'In' | 'Lunch out' | 'Lunch in' | 'Step out' | 'Back' | 'Out'
+type Kind =
+  | 'In' | 'Lunch out' | 'Lunch in' | 'Step out' | 'Back'
+  | 'Meeting out' | 'Meeting in' | 'Out'
 
 type ScanResult = {
   ok: boolean
@@ -116,30 +118,38 @@ function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number) {
 /**
  * What this person could scan next, best guess first.
  *
- * This used to answer with ONE kind, and after 'In' that one kind was
- * always 'Out' — so the second scan of the day sent everybody home at
- * lunchtime. The lunch kinds existed in the database and record_scan()
- * accepted them; the phone simply never asked for one.
+ * Stepping away now has a REASON — Break, Meeting or Lunch — because the
+ * three are paid differently: a break comes off the day, a meeting does
+ * not, and lunch is whatever was actually taken. So from an "in" state
+ * the scanner offers all three plus going home, and the person picks.
  *
- * A normal day is four scans: in, out for lunch, back, home. So after
- * 'In' the first guess is lunch — but leaving early is a real thing, so
- * the other choices are on the screen too rather than hidden behind a
- * guess. Nobody should have to fight a default at a gate.
+ * An OPEN punch is closed on its own: once you have gone to lunch / on a
+ * break / into a meeting, the only thing the next scan can be is coming
+ * back, so that is the single button shown. record_scan() enforces the
+ * same pairing on the server, so a tampered app cannot smuggle a second
+ * "out" past it.
+ *
+ * Lunch is offered once a day, before it has been taken. A guess you
+ * cannot overrule is worse than no guess, so every option that is valid
+ * is on the screen, not hidden behind the primary one.
  */
 function choices(t: Today | null): { kind: Kind; label: string }[] {
   const last = t?.lastKind ?? null
   if (!last) return [{ kind: 'In', label: BUTTON_WORDS.In }]
-  if (last === 'Lunch out') return [{ kind: 'Lunch in', label: BUTTON_WORDS['Lunch in'] }]
-  if (last === 'Step out') return [{ kind: 'Back', label: BUTTON_WORDS.Back }]
 
-  const out = { kind: 'Out' as Kind, label: BUTTON_WORDS.Out }
-  const step = { kind: 'Step out' as Kind, label: BUTTON_WORDS['Step out'] }
-  const lunch = { kind: 'Lunch out' as Kind, label: BUTTON_WORDS['Lunch out'] }
+  // An open punch: the next scan can only close it.
+  if (last === 'Lunch out')   return [{ kind: 'Lunch in',   label: BUTTON_WORDS['Lunch in'] }]
+  if (last === 'Step out')    return [{ kind: 'Back',       label: BUTTON_WORDS.Back }]
+  if (last === 'Meeting out') return [{ kind: 'Meeting in', label: BUTTON_WORDS['Meeting in'] }]
 
-  // Lunch is only offered once a day, and only before it has been taken.
+  // An "in" state (In, or back from lunch / break / meeting): pick a reason.
+  const out   = { kind: 'Out' as Kind,         label: BUTTON_WORDS.Out }
+  const brk   = { kind: 'Step out' as Kind,    label: BUTTON_WORDS['Step out'] }
+  const mtg   = { kind: 'Meeting out' as Kind, label: BUTTON_WORDS['Meeting out'] }
+  const lunch = { kind: 'Lunch out' as Kind,   label: BUTTON_WORDS['Lunch out'] }
+
   const lunchDone = Boolean(t?.lunchOut)
-  if (last === 'In' && !lunchDone) return [lunch, step, out]
-  return [out, step]
+  return lunchDone ? [out, brk, mtg] : [lunch, brk, mtg, out]
 }
 
 // ── the page ─────────────────────────────────────────────────────────────
@@ -230,20 +240,29 @@ export default function ScanPage() {
     // climbing. The database never believed it (attendance_apply has
     // taken lunch and step-outs off since Hr_HR1d); only this card did.
     //
-    // So walk the day: every 'In', 'Lunch in' and 'Back' opens a
-    // stretch, every 'Lunch out', 'Step out' and 'Out' closes it. A
-    // stretch still open counts up to now.
+    // So walk the day: 'In', 'Lunch in', 'Back' and 'Meeting in' open a
+    // stretch, 'Lunch out', 'Step out' and 'Out' close it. A MEETING is
+    // worked time, so 'Meeting out' does NOT close the stretch — it
+    // flows straight through, exactly as the database counts it (lunch
+    // and break come off, a meeting does not). A stretch still open
+    // counts up to now.
+    const opensStretch = (k: Kind) =>
+      k === 'In' || k === 'Lunch in' || k === 'Back' || k === 'Meeting in'
+    const closesStretch = (k: Kind) =>
+      k === 'Lunch out' || k === 'Step out' || k === 'Out'
     const mins = (() => {
       let total = 0
       let openFrom: number | null = null
       for (const r of rows) {
         const t = new Date(r.scanned_at).getTime()
-        if (r.kind === 'In' || r.kind === 'Lunch in' || r.kind === 'Back') {
+        if (opensStretch(r.kind)) {
           if (openFrom === null) openFrom = t
-        } else if (openFrom !== null) {
+        } else if (closesStretch(r.kind) && openFrom !== null) {
           total += t - openFrom
           openFrom = null
         }
+        // 'Meeting out' is neither: the meeting is worked, so the
+        // stretch keeps running through it.
       }
       if (openFrom !== null) total += Date.now() - openFrom
       return Math.max(0, Math.round(total / 60000))

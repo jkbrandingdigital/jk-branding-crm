@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Coffee, Users, CheckCircle2, Clock3, UserX, ChevronLeft, ChevronRight,
-  Download, Search, Building2,
+  Download, Search, Building2, TrendingUp,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -58,6 +58,8 @@ type Row = {
   check_in: string | null
   check_out: string | null
   minutes_worked: number
+  overtime_minutes: number
+  meeting_minutes: number
   lunch_minutes: number
   late_minutes: number
   is_late: boolean
@@ -69,7 +71,8 @@ type Row = {
 type Counts = {
   total: number; present: number; late: number
   not_in: number; absent: number; on_time: number
-  lunch_late: number; lunch_open: number; minutes: number
+  lunch_late: number; lunch_open: number; overtime_people: number
+  minutes: number; overtime_minutes: number
 }
 
 type WeekDay = { day: string; present: number; late: number; absent: number; week_off: boolean }
@@ -163,10 +166,12 @@ export default function AttendanceBoard() {
     : []
 
   function csv() {
-    const head = ['Code', 'Name', 'Branch', 'Department', 'Status', 'In', 'Out', 'Worked', 'Late (min)']
+    const head = ['Code', 'Name', 'Branch', 'Department', 'Status', 'In', 'Out',
+      'Worked', 'Overtime', 'Meeting (min)', 'Late (min)']
     const lines = shown.map((x) => [
       x.emp_code, x.full_name, x.branch ?? '', x.department ?? '', x.status,
-      clock(x.check_in), clock(x.check_out), hhmm(x.minutes_worked), String(x.late_minutes),
+      clock(x.check_in), clock(x.check_out), hhmm(x.minutes_worked),
+      hhmm(x.overtime_minutes), String(x.meeting_minutes), String(x.late_minutes),
     ])
     // A BOM, so Excel opens it as UTF-8 and Gujarati names survive — the
     // same trick the design report uses.
@@ -233,7 +238,7 @@ export default function AttendanceBoard() {
 
       <div className={loading ? 'opacity-50' : ''}>
         {/* ── the four figures ───────────────────────────────────── */}
-        <section className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <section className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
           <Tile icon={<Users size={15} />} label="Who scans" value={counts?.total ?? 0} />
           <Tile
             icon={<CheckCircle2 size={15} />}
@@ -262,6 +267,13 @@ export default function AttendanceBoard() {
             value={(counts?.not_in ?? 0) + (counts?.absent ?? 0)}
             tone={today ? undefined
                   : (counts?.absent ?? 0) > 0 ? 'text-red-400' : undefined}
+          />
+          <Tile
+            icon={<TrendingUp size={15} />}
+            label="Overtime"
+            value={counts?.overtime_people ?? 0}
+            note={counts?.overtime_minutes ? `${hhmm(counts.overtime_minutes)} in all` : undefined}
+            tone={counts?.overtime_people ? 'text-sky-400' : undefined}
           />
         </section>
 
@@ -406,7 +418,19 @@ export default function AttendanceBoard() {
                       <td className="whitespace-nowrap py-3 pr-4 tabular-nums text-gray-300">{clock(x.check_out)}</td>
                       <td className="py-3 pr-4 tabular-nums text-gray-300">
                         {x.check_in ? hhmm(x.minutes_worked) : '—'}
+                        {/* Overtime is shown on its own, never folded into
+                            the regular hours — the whole point of Hr_HR31. */}
+                        {x.overtime_minutes > 0 && (
+                          <span className="ml-2 text-xs text-sky-400" title="Overtime, past the shift close">
+                            +{hhmm(x.overtime_minutes)} OT
+                          </span>
+                        )}
                         {x.lunch_minutes > 0 && <span className="ml-2 text-xs text-gray-600">lunch {x.lunch_minutes}m</span>}
+                        {x.meeting_minutes > 0 && (
+                          <span className="ml-2 text-xs text-gray-500" title="In a meeting — counted as worked">
+                            mtg {x.meeting_minutes}m
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 pr-5 text-right">
                         <Status s={x.status} late={x.is_late} />
