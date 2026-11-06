@@ -13,6 +13,7 @@ import { useChartTheme } from '../../lib/chartTheme'
 import { useAuth } from '../../contexts/AuthContext'
 import DonutChart from '../DonutChart'
 import { DateField } from '../DateField'
+import { CARD_TABLE } from '../CardTable'
 import GaugeRing from '../GaugeRing'
 import { loadStaff, type Staff } from '../leads/leadUtils'
 import { pctOf, zoneOf } from '../../lib/targets'
@@ -1274,7 +1275,9 @@ export default function DesignPerformance() {
           </div>
 
           <div className={`max-h-[72vh] overflow-auto ${scroll}`}>
-            <table className="w-full min-w-[760px] border-collapse text-sm">
+            {/* lg:min-w, not min-w: in card mode a 760px floor would
+                still apply and scroll the page sideways. */}
+            <table className={`w-full border-collapse text-sm lg:min-w-[760px] ${CARD_TABLE}`}>
               <thead className="sticky top-0 bg-[#151515]">
                 <tr style={{ borderBottom: `1px solid ${line}` }} className="text-left text-xs text-gray-500">
                   <th className="px-4 py-2.5 font-medium">#</th>
@@ -1297,8 +1300,9 @@ export default function DesignPerformance() {
                     className="cursor-pointer hover:bg-[#1a1a1a]"
                     title="Open the time history"
                   >
-                    <td className="px-4 py-2.5 text-gray-500">{r.task_no}</td>
-                    <td className="max-w-[220px] px-4 py-2.5">
+                    <td data-label="#" className="px-4 py-2.5 text-gray-500">{r.task_no}</td>
+                    {/* No label: on a card the subject is the heading. */}
+                    <td data-label="" className="max-w-[220px] px-4 py-2.5">
                       <span className="block truncate text-gray-200" title={r.subject}>{r.subject}</span>
                       {(r.client_changes > 0 || r.our_changes > 0) && (
                         <span className="text-[11px]" style={{ color: r.our_changes > 0 ? warn : plain }}>
@@ -1308,20 +1312,21 @@ export default function DesignPerformance() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-400">
+                    <td data-label="Work" className="px-4 py-2.5 text-gray-400">
                       {r.work_type ?? <span style={{ color: warn }}>No work type</span>}
                       {r.qty > 1 && <span className="text-gray-600"> · {r.qty} {r.unit}s</span>}
                     </td>
-                    {!who && <td className="max-w-[120px] truncate px-4 py-2.5 text-gray-400">{r.designer ?? '—'}</td>}
+                    {!who && <td data-label="Designer" className="max-w-[120px] truncate px-4 py-2.5 text-gray-400">{r.designer ?? '—'}</td>}
                     {/* No work type means no allowed time. It shows as a
                         dash, not a zero — a zero would read as "nothing
                         allowed", which would paint the row red. */}
-                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">
+                    <td data-label="Allowed" className="px-4 py-2.5 text-right tabular-nums text-gray-400">
                       {r.allowed_mins === null
                         ? <span title="No work type set on this task">—</span>
                         : mins(r.allowed_mins)}
                     </td>
                     <td
+                      data-label="Actual"
                       className="px-4 py-2.5 text-right font-medium tabular-nums"
                       style={{ color: r.allowed_mins === null ? plain : r.base_mins > r.allowed_mins ? bad : good }}
                     >
@@ -1332,7 +1337,7 @@ export default function DesignPerformance() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td data-label="Stage" className="px-4 py-2.5">
                       <span className={`rounded-full px-2 py-0.5 text-[11px] ${r.is_done ? '' : 'text-gray-400'}`}
                             style={r.is_done ? { background: 'rgba(5,150,105,0.14)', color: good } : { background: 'rgba(255,255,255,0.05)' }}>
                         {r.stage ?? '—'}
@@ -1341,15 +1346,15 @@ export default function DesignPerformance() {
                     {/* When the designer began and when it was finished.
                         A finished job with no end time just has not been
                         moved to a done stage yet. */}
-                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400">{dt(r.started_on)}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-xs" style={{ color: r.completed_on ? good : plain }}>
+                    <td data-label="Started" className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400">{dt(r.started_on)}</td>
+                    <td data-label="Finished" className="whitespace-nowrap px-4 py-2.5 text-xs" style={{ color: r.completed_on ? good : plain }}>
                       {dt(r.completed_on)}
                     </td>
                   </tr>
                 ))}
                 {shown.length === 0 && (
                   <tr>
-                    <td colSpan={who ? 8 : 9} className="px-4 py-10 text-center text-sm text-gray-500">
+                    <td data-label="" colSpan={who ? 8 : 9} className="px-4 py-10 text-center text-sm text-gray-500">
                       {loading ? 'Loading…' : 'Nothing here.'}
                     </td>
                   </tr>
@@ -1401,7 +1406,9 @@ export default function DesignPerformance() {
             </p>
           </div>
           <div className={`max-h-[360px] overflow-auto ${scroll}`}>
-            <table className="w-full min-w-[700px] border-collapse text-sm">
+            {/* lg:min-w, not min-w: in card mode a 700px floor would
+                still apply and scroll the page sideways. */}
+            <table className={`w-full border-collapse text-sm lg:min-w-[700px] ${CARD_TABLE}`}>
               <thead className="sticky top-0 bg-[#151515]">
                 <tr style={{ borderBottom: `1px solid ${line}` }} className="text-left text-xs text-gray-500">
                   <th className="px-4 py-2.5 font-medium">Designer</th>
@@ -1421,25 +1428,26 @@ export default function DesignPerformance() {
                     style={rule}
                     className={`hover:bg-[#1a1a1a] ${seeAll ? 'cursor-pointer' : ''}`}
                   >
-                    <td className="px-4 py-2.5 text-gray-200">{r.full_name ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-300">{r.done_tasks}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-300">
+                    {/* No label: on a card the designer is the heading. */}
+                    <td data-label="" className="px-4 py-2.5 text-gray-200">{r.full_name ?? '—'}</td>
+                    <td data-label="Finished" className="px-4 py-2.5 text-right tabular-nums text-gray-300">{r.done_tasks}</td>
+                    <td data-label="Gross" className="px-4 py-2.5 text-right tabular-nums text-gray-300">
                       {(byDesigner.get(r.full_name ?? '')?.gross ?? 0).toLocaleString('en-IN')}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums"
+                    <td data-label="Negative" className="px-4 py-2.5 text-right tabular-nums"
                         style={{ color: (byDesigner.get(r.full_name ?? '')?.penalty ?? 0) > 0 ? bad : plain }}>
                       {(byDesigner.get(r.full_name ?? '')?.penalty ?? 0) > 0
                         ? `−${(byDesigner.get(r.full_name ?? '')?.penalty ?? 0).toLocaleString('en-IN')}`
                         : '0'}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-medium tabular-nums text-white"
+                    <td data-label="Net" className="px-4 py-2.5 text-right font-medium tabular-nums text-white"
                         title={`${mins(r.allowed_mins)} of standard time`}>
                       {Math.max(
                         (byDesigner.get(r.full_name ?? '')?.gross ?? 0)
                         - (byDesigner.get(r.full_name ?? '')?.penalty ?? 0), 0,
                       ).toLocaleString('en-IN')}
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums"
+                    <td data-label="Quality" className="px-4 py-2.5 text-right tabular-nums"
                         title={`${r.our_changes} of our own redos`}
                         style={{ color: r.our_changes > 0 ? warn : plain }}>
                       {(() => {
@@ -1449,6 +1457,7 @@ export default function DesignPerformance() {
                       })()}
                     </td>
                     <td
+                      data-label="Efficiency"
                       className="px-4 py-2.5 text-right font-medium tabular-nums"
                       title={effOf(r.allowed_mins, r.base_mins) === null
                         ? 'Too little time on the clock to tell'
@@ -1465,7 +1474,7 @@ export default function DesignPerformance() {
                 ))}
                 {summary.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-500">
+                    <td data-label="" colSpan={7} className="px-4 py-10 text-center text-sm text-gray-500">
                       {loading ? 'Loading…' : 'Nothing finished in these days.'}
                     </td>
                   </tr>

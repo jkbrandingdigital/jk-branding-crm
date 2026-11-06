@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, Menu, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
-import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
+import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 import { istDate } from '../lib/format'
 
-export type SalesPage = 'evolution' | 'report' | 'performance' | 'leads'
+export type SalesPage = 'home' | 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
 type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'customers' | 'projects' | 'greetings' | 'scan' | 'attendance' | 'my-leave' |'my-payslips' | 'policies'
 const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
@@ -46,6 +46,10 @@ const FOLDABLE = ['Productivity', 'Business']
 // Still switched: Tasks, Reminders, Notes and Quotations are tools, not
 // everyone uses them.
 const NAV: { title: string; items: NavItem[] }[] = [
+  {
+    title: 'Overview',
+    items: [{ label: 'Dashboard', page: 'home', icon: LayoutDashboard }],
+  },
   {
     title: 'Today',
     items: [
@@ -140,6 +144,29 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
     ...s,
     items: s.items.filter((i) => !i.perm || (ready && can(i.perm))),
   })).filter((s) => s.items.length > 0)
+
+  /*
+    The four along the bottom of a phone.
+
+    A sales person's day is: did I file today's form, what are my leads
+    doing, and scan in. Those are not the four at the top of the sidebar —
+    the sidebar is ordered the way the CRM is built, and this is ordered
+    the way the day runs.
+
+    Scan earns a slot even though it is small, because it is the one thing
+    done with a hand full at a gate, twice a day, every day. Two taps for
+    that is one too many.
+
+    Tasks and the rest live behind More. They are opened at a desk.
+  */
+  const bottom: BottomItem[] = [
+    { label: 'Home', icon: LayoutDashboard, to: '/sales?page=home', active: active === 'home' },
+    { label: 'Leads', icon: Filter, to: '/sales?page=leads', active: active === 'leads' },
+    // The dot says today's report is already in — the one thing a sales
+    // person checks this menu for in the evening.
+    { label: 'Report', icon: Moon, to: '/sales?page=report', active: active === 'report', dot: done.report },
+    { label: 'Scan', icon: QrCode, to: '/scan', active: active === 'scan' },
+  ]
 
   // Whichever section holds the page you are on stays open
   useEffect(() => {
@@ -290,17 +317,14 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <button
-            onClick={() => setOpen(true)}
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-gray-300 lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu size={18} /> Menu
-          </button>
-          {children}
-        </main>
+        {/* The "Menu" button that used to sit here is gone: the bar along
+            the bottom carries the four, and More opens this same drawer.
+            A button in the top-left corner is the furthest point on a
+            phone from the thumb holding it. */}
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
       </div>
+
+      <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />
     </div>
   )
 }

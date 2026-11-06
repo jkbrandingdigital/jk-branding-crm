@@ -8,6 +8,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import ProjectModal from './ProjectModal'
+import { BOARD_WRAP, boardColumn, StagePicker, useBoardStage } from '../BoardMobile'
 import {
   downloadCsv, fmtDate, loadStages, money, STAGE_CLS,
   type ProjectRow, type ProjectStage,
@@ -86,6 +87,10 @@ export default function ProjectsBoard({ tasksPath }: { tasksPath?: string }) {
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   const canDelete = can('project_delete')
+
+  // Which stage a phone is showing. One column at a time below lg; on a
+  // monitor every column is there as before and this goes unread.
+  const [shownStage, setShownStage] = useBoardStage(stages)
 
   useEffect(() => {
     if (!msg) return
@@ -364,7 +369,19 @@ export default function ProjectsBoard({ tasksPath }: { tasksPath?: string }) {
 
       {/* ---------------- Board ---------------- */}
       {view === 'board' && (
-        <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-2">
+        <>
+        {/* Phone only. The board ignores the stage filter — every stage
+            has a column — so these counts are of what is on screen. */}
+        <StagePicker
+          stages={stages.map((s) => ({
+            id: s.id,
+            name: s.name,
+            count: shown.filter((p) => p.stage_id === s.id).length,
+          }))}
+          active={shownStage}
+          onPick={setShownStage}
+        />
+        <div className={`-mx-1 flex gap-3 ${BOARD_WRAP} px-1 pb-2`}>
           {stages.map((s) => {
             const col = shown.filter((p) => p.stage_id === s.id)
             return (
@@ -379,7 +396,7 @@ export default function ProjectsBoard({ tasksPath }: { tasksPath?: string }) {
                   setDragId(null)
                   if (p) void moveStage(p, s.id)
                 }}
-                className={`flex w-72 shrink-0 flex-col rounded-xl border bg-[#131313] transition-colors ${
+                className={`${boardColumn(s.id === shownStage, 'lg:w-72')} rounded-xl border bg-[#131313] transition-colors ${
                   overStage === s.id ? 'border-orange-500/60' : 'border-[#242424]'
                 }`}
               >
@@ -583,6 +600,7 @@ export default function ProjectsBoard({ tasksPath }: { tasksPath?: string }) {
             )
           })}
         </div>
+        </>
       )}
 
       {view === 'list' && (

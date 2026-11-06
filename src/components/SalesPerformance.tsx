@@ -11,6 +11,8 @@ import IncentiveCard from './sales/IncentiveCard'
 import { PERIODS, rangeOf, type PeriodKey } from './sales/salesPerf'
 import { istDate, inr } from '../lib/format'
 import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../lib/targets'
+import { CARD_TABLE } from './CardTable'
+import { SHEET_BACKDROP, sheetPanel } from './Sheet'
 
 /*
   Sales Performance — the shell.
@@ -422,7 +424,9 @@ export default function SalesPerformance({
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-sm">
+                {/* lg:min-w, not min-w: in card mode a 720px floor would
+                    still apply and scroll the page sideways. */}
+                <table className={`w-full text-sm lg:min-w-[720px] ${CARD_TABLE}`}>
                   <thead>
                     <tr className="border-b border-[#242424] text-left text-gray-400">
                       <th className="py-2 pr-4 font-normal">Branch</th>
@@ -443,8 +447,9 @@ export default function SalesPerformance({
                           onClick={() => { setBranchId(b.id); setTab('target') }}
                           className="cursor-pointer border-b border-[#1c1c1c] last:border-0 hover:bg-[#1a1a1a]"
                         >
-                          <td className="py-3 pr-4 font-medium">{b.name}</td>
-                          <td className="w-[32%] py-3 pr-4">
+                          {/* No label: on a card the branch is the heading. */}
+                          <td data-label="" className="py-3 pr-4 font-medium">{b.name}</td>
+                          <td data-label="Target progress" className="w-[32%] py-3 pr-4">
                             {b.target > 0 ? (
                               <div className="flex items-center gap-3">
                                 <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#222]">
@@ -456,16 +461,16 @@ export default function SalesPerformance({
                               <span className="text-xs text-gray-600">No target set</span>
                             )}
                           </td>
-                          <td className="py-3 pr-4 text-right font-medium tabular-nums">{inr(b.achieved)}</td>
-                          <td className="py-3 pr-4 text-right tabular-nums text-gray-400">{b.target > 0 ? inr(b.target) : '—'}</td>
-                          <td className="py-3 pr-4 text-right tabular-nums">{b.calls.toLocaleString('en-IN')}</td>
-                          <td className="py-3 pr-4 text-right tabular-nums">{b.deals}</td>
-                          <td className="py-3 text-right tabular-nums text-gray-400">{b.team}</td>
+                          <td data-label="Achieved" className="py-3 pr-4 text-right font-medium tabular-nums">{inr(b.achieved)}</td>
+                          <td data-label="Target" className="py-3 pr-4 text-right tabular-nums text-gray-400">{b.target > 0 ? inr(b.target) : '—'}</td>
+                          <td data-label="Calls" className="py-3 pr-4 text-right tabular-nums">{b.calls.toLocaleString('en-IN')}</td>
+                          <td data-label="Deals" className="py-3 pr-4 text-right tabular-nums">{b.deals}</td>
+                          <td data-label="Team" className="py-3 text-right tabular-nums text-gray-400">{b.team}</td>
                         </tr>
                       )
                     })}
                     {branchRows.length === 0 && (
-                      <tr><td colSpan={7} className="py-8 text-center text-gray-500">No branches yet.</td></tr>
+                      <tr><td data-label="" colSpan={7} className="py-8 text-center text-gray-500">No branches yet.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -544,21 +549,29 @@ function HouseDeals({
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm sm:items-center"
+      className={`${SHEET_BACKDROP} backdrop-blur-sm`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
       role="dialog"
       aria-modal="true"
     >
-      <div className="my-auto w-full max-w-lg rounded-xl border border-[#2a2a2a] bg-[#161616] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
+      <div
+        className={sheetPanel({
+          width: 'sm:max-w-lg',
+          round: 'sm:rounded-xl',
+          border: 'sm:border sm:border-[#2a2a2a]',
+          bg: 'bg-[#161616]',
+          extra: 'shadow-2xl',
+        })}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-[#242424] px-4 py-3.5 sm:px-5 sm:py-4">
           <div>
             <h3 className="text-sm font-semibold text-white">{pick.name} · Company (House) deals</h3>
             <p className="mt-0.5 text-xs text-gray-500">Confirmed deals not credited to any sales person.</p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-gray-500 hover:text-white">✕</button>
+          <button onClick={onClose} aria-label="Close" className="-mr-2 flex h-11 w-11 items-center justify-center rounded-md text-gray-500 hover:text-white sm:mr-0 sm:h-auto sm:w-auto sm:p-1">✕</button>
         </div>
 
-        <div className="max-h-[60vh] overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
           {loading ? (
             <p className="py-8 text-center text-sm text-gray-500">Loading…</p>
           ) : rows.length === 0 ? (
@@ -581,7 +594,7 @@ function HouseDeals({
         </div>
 
         {!loading && rows.length > 0 && (
-          <div className="flex items-center justify-between border-t border-[#242424] px-5 py-3 text-sm">
+          <div className="flex shrink-0 items-center justify-between border-t border-[#242424] px-4 py-3 text-sm sm:px-5">
             <span className="text-gray-400">{rows.length} deal{rows.length === 1 ? '' : 's'}</span>
             <span className="font-semibold tabular-nums text-white">{inr(total)}</span>
           </div>

@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Package, Menu, X, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
+import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Package, X, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
-import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
+import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 type NavItem = { label: string; path?: string; icon: LucideIcon; perm?: string }
@@ -78,6 +78,28 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
   })).filter((s) => s.items.length > 0)
 
   const isActive = (path: string) => (path === '/design' ? pathname === '/design' : pathname.startsWith(path))
+
+  /*
+    The four along the bottom of a phone.
+
+    A designer lives in Tasks — that is where the clock is, and the clock
+    runs against one option of one job at a time. Their own performance is
+    the second thing they check, because the allowed time is what it is
+    measured against. Then Scan.
+
+    Printing Media and Job Work belong to one designer out of the team, so
+    they are never going to earn a slot everybody carries; they are in
+    More, where they always were.
+  */
+  const bottom: BottomItem[] = [
+    ...[
+      { label: 'Home', icon: LayoutDashboard, to: '/design', active: pathname === '/design', show: true },
+      { label: 'Tasks', icon: ListTodo, to: '/design/tasks', active: isActive('/design/tasks'), show: !ready || can('mod_tasks') },
+      { label: 'To-Do', icon: ListChecks, to: '/design/todos', active: isActive('/design/todos'), show: !ready || can('mod_todos') },
+      { label: 'My work', icon: TrendingUp, to: '/design/performance', active: isActive('/design/performance'), show: !ready || can('design_perf') },
+    ].filter((x) => x.show).slice(0, 3).map(({ show: _show, ...x }) => x),
+    { label: 'Scan', icon: QrCode, to: '/scan', active: false },
+  ]
 
   const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
@@ -181,17 +203,10 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <button
-            onClick={() => setOpen(true)}
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-gray-300 lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu size={18} /> Menu
-          </button>
-          {children}
-        </main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
       </div>
+
+      <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />
     </div>
   )
 }

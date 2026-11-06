@@ -21,6 +21,8 @@ import {
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { PosterSheet, QrImage, downloadQr, type PosterInfo } from './QrPoster'
+import { CARD_TABLE } from '../CardTable'
+import { SHEET_FRAME, sheetPanel } from '../Sheet'
 
 // ── types ────────────────────────────────────────────────────────────────
 
@@ -797,7 +799,9 @@ export default function ScanSetup() {
             <p className="py-6 text-center text-sm text-gray-500">No attempt on this day.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm">
+              {/* lg:min-w, not min-w: in card mode a 720px floor would
+                  still apply and scroll the page sideways. */}
+              <table className={`w-full text-sm lg:min-w-[720px] ${CARD_TABLE}`}>
                 <thead>
                   <tr className="border-b border-[#242424] text-left text-xs text-gray-500">
                     <th className="py-2 pr-3 font-normal">Time</th>
@@ -810,12 +814,13 @@ export default function ScanSetup() {
                 <tbody>
                   {scans.map((s) => (
                     <tr key={s.id} className="border-b border-[#1a1a1a] last:border-0">
-                      <td className="whitespace-nowrap py-2 pr-3 tabular-nums text-gray-300">{clock(s.at)}</td>
-                      <td className="py-2 pr-3">
+                      <td data-label="Time" className="whitespace-nowrap py-2 pr-3 tabular-nums text-gray-300">{clock(s.at)}</td>
+                      {/* No label: on a card the name is the heading. */}
+                      <td data-label="" className="py-2 pr-3">
                         <span className="block text-white">{s.full_name}</span>
                         <span className="block font-mono text-xs text-gray-600">{s.emp_code}</span>
                       </td>
-                      <td className="py-2 pr-3">
+                      <td data-label="What" className="py-2 pr-3">
                         {s.ok ? (
                           <span className="inline-flex items-center gap-1.5">
                             <span className="rounded-full bg-green-950/60 px-2 py-0.5 text-xs text-green-400">{s.kind}</span>
@@ -826,12 +831,12 @@ export default function ScanSetup() {
                           <span className="rounded-full bg-red-950/40 px-2 py-0.5 text-xs text-red-400">Refused</span>
                         )}
                       </td>
-                      <td className="whitespace-nowrap py-2 pr-3 text-xs text-gray-500">
+                      <td data-label="Where" className="whitespace-nowrap py-2 pr-3 text-xs text-gray-500">
                         {s.site ?? '—'}
                         {s.distance_m != null && <> · {metres(s.distance_m)}</>}
                         {s.accuracy_m != null && <> · ±{Math.round(s.accuracy_m)} m</>}
                       </td>
-                      <td className="py-2 pr-3 text-xs text-gray-400">
+                      <td data-label="Why not" className="py-2 pr-3 text-xs text-gray-400">
                         {s.refuse_reason ?? (s.late_reason ? <span className="text-gray-500">&ldquo;{s.late_reason}&rdquo;</span> : '—')}
                       </td>
                     </tr>
@@ -891,17 +896,25 @@ export default function ScanSetup() {
 
       {/* ── the place panel ──────────────────────────────────────────── */}
       {editSite && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6" onClick={() => !busy && setEditSite(null)}>
+        <div className={SHEET_FRAME} onClick={() => !busy && setEditSite(null)}>
           <div className="absolute inset-0 bg-black/70" />
-          <aside className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[#242424] bg-[#121212]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-[#222] bg-[#171717] px-6 py-4">
+          <aside
+            className={sheetPanel({
+              width: 'sm:max-w-lg',
+              round: 'sm:rounded-2xl',
+              border: 'sm:border sm:border-[#242424]',
+              extra: 'relative',
+            })}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-[#222] bg-[#171717] px-4 py-3.5 sm:px-6 sm:py-4">
               <h2 className="font-semibold">{editSite === 'new' ? 'Add a place' : editSite.name}</h2>
-              <button onClick={() => setEditSite(null)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+              <button onClick={() => setEditSite(null)} className="-mr-2 flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-white sm:mr-0 sm:h-auto sm:w-auto sm:p-2" aria-label="Close">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
               {editSite === 'new' && (
                 <label className="block">
                   <span className="mb-1.5 block text-xs text-gray-400">Branch *</span>
@@ -981,9 +994,9 @@ export default function ScanSetup() {
               )}
             </div>
 
-            <div className="flex justify-end gap-3 border-t border-[#222] px-6 py-4">
-              <button onClick={() => setEditSite(null)} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
-              <button onClick={saveSite} disabled={busy} className="rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60">
+            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-[#222] px-4 py-3 sm:flex-row sm:justify-end sm:gap-3 sm:px-6 sm:py-4">
+              <button onClick={() => setEditSite(null)} className="w-full rounded-lg px-4 py-2.5 text-sm text-gray-400 hover:text-white sm:w-auto sm:py-2">Cancel</button>
+              <button onClick={saveSite} disabled={busy} className="w-full rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 sm:w-auto sm:py-2">
                 {busy ? 'Saving…' : editSite === 'new' ? 'Add place' : 'Save'}
               </button>
             </div>

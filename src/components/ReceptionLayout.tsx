@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { ClipboardList, UserPlus, FileBarChart, AlarmClock, StickyNote, ListChecks, QrCode, CalendarCheck, CalendarOff, Wallet, BookOpen, Menu, X, type LucideIcon } from 'lucide-react'
+import { ClipboardList, UserPlus, FileBarChart, AlarmClock, StickyNote, ListChecks, QrCode, CalendarCheck, CalendarOff, Wallet, BookOpen, X, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { supabase } from '../lib/supabase'
-import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
+import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 export type ReceptionNav =
@@ -84,6 +84,21 @@ export default function ReceptionLayout({ active, children }: { active: Receptio
 
   useEffect(() => setOpen(false), [pathname])
 
+  /*
+    The four along the bottom of a phone.
+
+    Add Visitor gets a slot of its own even though it is one row down in
+    the sidebar: somebody is standing at the desk waiting while it is
+    typed, and that is the one moment in this CRM where a second of
+    fumbling is in front of a guest.
+  */
+  const bottom: BottomItem[] = [
+    { label: 'Today', icon: ClipboardList, to: ROUTE.today, active: active === 'today' },
+    { label: 'Add', icon: UserPlus, to: ROUTE.add, active: active === 'add' },
+    { label: 'Report', icon: FileBarChart, to: ROUTE.report, active: active === 'report' },
+    { label: 'Scan', icon: QrCode, to: ROUTE.scan, active: active === 'scan' },
+  ]
+
   const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
       <SidebarToggle narrow={narrow} onToggle={() => setCollapsed(!narrow)} />
@@ -162,13 +177,10 @@ export default function ReceptionLayout({ active, children }: { active: Receptio
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <button onClick={() => setOpen(true)} className="mb-4 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-gray-300 lg:hidden" aria-label="Open menu">
-            <Menu size={18} /> Menu
-          </button>
-          {children}
-        </main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
       </div>
+
+      <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />
     </div>
   )
 }

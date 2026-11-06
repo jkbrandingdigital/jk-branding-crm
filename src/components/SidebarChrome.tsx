@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
-import { Menu, type LucideIcon } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Menu, MoreHorizontal, type LucideIcon } from 'lucide-react'
 
 /*
   The bits of sidebar every layout shares.
 
-  There are five sidebars — admin, sales, HR, manager, design — and they
-  are not the same shape: some fold their sections, some do not, and the
-  sales one navigates by query string. What they do share is the narrow
-  rail: the same width, the same button in the same corner, the same
-  remembered choice. Written out five times, those three facts would drift
-  apart within a month, and a person moving between two screens would find
-  the menu behaving differently on each.
+  There are eight sidebars — admin, manager, sales, HR, design, dispatch,
+  accounts, reception — and they are not the same shape: some fold their
+  sections, some do not, and the sales one navigates by query string. What
+  they do share is the narrow rail: the same width, the same button in the
+  same corner, the same remembered choice. Written out eight times, those
+  three facts would drift apart within a month, and a person moving between
+  two screens would find the menu behaving differently on each.
 
   So the shape stays with each layout, and only the chrome lives here.
 */
@@ -62,6 +63,120 @@ export function SidebarToggle({ narrow, onToggle }: { narrow: boolean; onToggle:
     </div>
   )
 }
+
+/*
+  ── The bar along the bottom of a phone ──
+
+  On a phone the sidebar was a button marked "Menu" at the top of the
+  page: every single thing this app does was two taps away, and the first
+  of those taps was in the corner furthest from a thumb. Somebody
+  scanning in at the gate had to reach the top-left of the screen with
+  one hand full.
+
+  So the four things a person opens all day sit along the bottom, where
+  the thumb already is, and everything else is behind "More" — which is
+  the drawer that was already there. Nothing was taken away; it just
+  stopped being the only way in.
+
+  FOUR, and then More. Five slots is what fits at 360 px without the
+  labels turning into stubs, and the fifth has to be More or the rest of
+  the CRM has no door at all.
+
+  Each layout decides its own four, because what a designer opens all day
+  and what a receptionist opens all day are not the same list. The layout
+  also works out `active` itself — sales navigates by query string, the
+  rest by path, and this component should not have to know that.
+
+  ── The bits that look fussy and are not ──
+
+  `env(safe-area-inset-bottom)` is the strip at the bottom of a phone
+  with a gesture bar. Without it the labels sit under the bar and the
+  taps land on the home gesture instead of the button.
+
+  `z-30`, under the drawer's `z-40`: More opens the drawer over the whole
+  screen, and a bar painted on top of its own backdrop looks broken.
+
+  Colours are class names, never a style attribute. The light theme sheet
+  re-paints classes; it cannot reach inline colours, which is how an
+  orange-on-orange row went invisible on cream once already.
+*/
+export type BottomItem = {
+  label: string
+  icon: LucideIcon
+  to: string
+  active: boolean
+  /* A small dot on the icon — today's report is in, this one needs you. */
+  dot?: boolean
+}
+
+export function BottomNav({
+  items, onMore, moreActive = false,
+}: {
+  items: BottomItem[]
+  onMore: () => void
+  moreActive?: boolean
+}) {
+  const four = items.slice(0, 4)
+
+  const cell = 'relative flex flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 text-[10px] font-medium leading-tight'
+
+  return (
+    <nav
+      aria-label="Main"
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-[#1f1f1f] bg-[#121212] lg:hidden"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      <ul className="flex items-stretch">
+        {four.map((item) => {
+          const Icon = item.icon
+          return (
+            <li key={item.label} className="flex flex-1">
+              <Link
+                to={item.to}
+                aria-current={item.active ? 'page' : undefined}
+                className={`${cell} min-h-[56px] ${item.active ? 'text-orange-400' : 'text-gray-500'}`}
+              >
+                {/* The open page gets a stripe along the top of its slot.
+                    Colour alone is not enough on a cream screen where the
+                    whole bar is already warm. */}
+                {item.active && <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-orange-500" />}
+                <span className="relative">
+                  <Icon size={21} strokeWidth={item.active ? 2.3 : 2} />
+                  {item.dot && (
+                    <span className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-green-500 ring-2 ring-[#121212]" />
+                  )}
+                </span>
+                <span className="w-full truncate text-center">{item.label}</span>
+              </Link>
+            </li>
+          )
+        })}
+
+        <li className="flex flex-1">
+          <button
+            onClick={onMore}
+            aria-label="More"
+            aria-expanded={moreActive}
+            className={`${cell} min-h-[56px] w-full ${moreActive ? 'text-orange-400' : 'text-gray-500'}`}
+          >
+            <MoreHorizontal size={21} strokeWidth={2} />
+            <span className="w-full truncate text-center">More</span>
+          </button>
+        </li>
+      </ul>
+    </nav>
+  )
+}
+
+/*
+  How much room the bar takes, for the page behind it.
+
+  A page that does not reserve this ends with its last row — the Save
+  button, the last task in the list — sitting under the bar, unreachable
+  and with nothing to say it is there. On a desktop the bar is gone and
+  the usual padding comes back.
+*/
+export const MAIN_PAD = 'px-4 py-6 pb-[calc(4.75rem+env(safe-area-inset-bottom))] sm:px-8 sm:py-8 sm:pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-8'
 
 /*
   One colour for every menu icon — the CRM's own orange.

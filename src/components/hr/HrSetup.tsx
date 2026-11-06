@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { DateField } from '../DateField'
+import { CARD_TABLE } from '../CardTable'
 
 type Rules = {
   absent_penalty: number
@@ -308,7 +309,7 @@ export default function HrSetup() {
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm ${CARD_TABLE}`}>
               <thead>
                 <tr className="border-b border-[#1f1f1f] text-left text-xs text-gray-500">
                   <th className="px-5 py-2.5 font-normal">Name</th>
@@ -321,16 +322,17 @@ export default function HrSetup() {
               <tbody className="divide-y divide-[#1a1a1a]">
                 {pay.map((p) => (
                   <tr key={p.user_id} className="transition-colors hover:bg-[#181818]">
-                    <td className="px-5 py-3">
+                    {/* No label: on a card the name is the heading. */}
+                    <td data-label="" className="px-5 py-3">
                       <p className="font-medium">{p.full_name}</p>
                       <p className="font-mono text-[11px] text-gray-500">
                         {p.emp_code}{p.designation && ` · ${p.designation}`}
                       </p>
                     </td>
-                    <td className="px-3 py-3 text-gray-400">{p.branch ?? '—'}</td>
+                    <td data-label="Branch" className="px-3 py-3 text-gray-400">{p.branch ?? '—'}</td>
 
                     {editing === p.user_id ? (
-                      <td colSpan={3} className="px-3 py-2">
+                      <td data-label="A month" colSpan={3} className="px-3 py-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <input
                             type="number" min="0" step="500" autoFocus
@@ -354,14 +356,14 @@ export default function HrSetup() {
                       </td>
                     ) : (
                       <>
-                        <td className={`px-3 py-3 text-right tabular-nums ${
+                        <td data-label="A month" className={`px-3 py-3 text-right tabular-nums ${
                           p.monthly === null ? 'text-amber-400' : 'text-gray-200'}`}>
                           {p.monthly === null ? 'not set' : rupees(p.monthly)}
                         </td>
-                        <td className="px-3 py-3 text-right tabular-nums text-gray-500">
+                        <td data-label="A day" className="px-3 py-3 text-right tabular-nums text-gray-500">
                           {p.day_rate === null ? '—' : rupees(p.day_rate)}
                         </td>
-                        <td className="px-5 py-3 text-right">
+                        <td data-label="" className="px-5 py-3 text-right">
                           {rules.can_set_pay && (
                             <button
                               onClick={() => {

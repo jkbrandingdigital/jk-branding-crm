@@ -15,6 +15,7 @@ import ClientMasterForm from '../customers/ClientMasterForm'
 import LeadCreateMenu from './LeadCreateMenu'
 import { loadBranches, type Branch, type Customer } from '../customers/customerUtils'
 import { LABEL_CLS, type Label } from './labels'
+import { BOARD_WRAP, boardColumn, StagePicker, useBoardStage } from '../BoardMobile'
 import { SOURCES, sourceOf, loadSources, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadStaff, type Lead, type Source, type Stage, type Staff } from './leadUtils'
 
 type LeadL = Lead & { label_id?: string | null; label_ids?: string[] | null }
@@ -487,6 +488,10 @@ export default function LeadsBoard(
     () => stages.filter((st) => !hiddenStages.includes(st.id) && (f.stage === 'all' || f.stage === st.id)),
     [stages, hiddenStages, f.stage],
   )
+
+  // Which stage a phone is showing. One column at a time below lg; on a
+  // monitor every column is there as before and this goes unread.
+  const [shownStage, setShownStage] = useBoardStage(visibleStages)
 
   // A person's own work lives under /sales; everything else is a screen
   // that is meant to show more than one person's leads.
@@ -1676,7 +1681,22 @@ export default function LeadsBoard(
 
       {/* Board */}
       {view === 'board' ? (
-        <div className="mt-5 flex gap-4 overflow-x-auto pb-4 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
+        <>
+        {/* Phone only. The counts come from the summary, so a stage with
+            two hundred leads says two hundred, not the twenty that have
+            been fetched into the column so far. */}
+        <StagePicker
+          className="mt-5"
+          stages={visibleStages.map((st) => ({
+            id: st.id,
+            name: st.name,
+            color: st.color,
+            count: summary.byStage[st.id]?.cnt ?? 0,
+          }))}
+          active={shownStage}
+          onPick={setShownStage}
+        />
+        <div className={`mt-3 flex gap-4 ${BOARD_WRAP} pb-4 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin] lg:mt-5`}>
           {visibleStages.map((st) => {
             const col = cols[st.id]
             const items = col?.rows ?? []
@@ -1688,7 +1708,7 @@ export default function LeadsBoard(
                 key={st.id}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => dragId && moveTo(dragId, st.id)}
-                className="flex w-72 shrink-0 flex-col rounded-2xl border border-[#1f1f1f] bg-[#111]"
+                className={`${boardColumn(st.id === shownStage, 'lg:w-72')} rounded-2xl border border-[#1f1f1f] bg-[#111]`}
               >
                 <div className="flex items-center justify-between rounded-t-2xl px-4 py-3" style={{ background: st.color }}>
                   <span className="font-semibold text-white">{st.name}</span>
@@ -1697,7 +1717,13 @@ export default function LeadsBoard(
                     <span className="rounded-full bg-black/30 px-2 py-0.5 font-semibold">{total.toLocaleString('en-IN')}</span>
                   </span>
                 </div>
-                <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto p-3 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin]">
+                {/* A scrolling box inside a scrolling page is miserable on
+                    a phone — a flick either moves the column or the page
+                    and you cannot tell which until it has already gone the
+                    wrong way. So below lg the column just grows and the
+                    page scrolls. The 70vh box stays on a monitor, where it
+                    is what keeps the eight column headers in view. */}
+                <div className="flex max-h-none flex-col gap-3 overflow-y-auto p-3 [scrollbar-color:#2a2a2a_transparent] [scrollbar-width:thin] lg:max-h-[70vh]">
                   {items.length === 0 ? (
                     <p className="py-6 text-center text-xs text-gray-600">{col?.loading ? 'Loading…' : 'No leads'}</p>
                   ) : (
@@ -1734,6 +1760,7 @@ export default function LeadsBoard(
             )
           })}
         </div>
+        </>
       ) : (
         <section className="mt-5 overflow-x-auto rounded-2xl border border-[#242424] bg-[#151515]">
           <table className="w-full min-w-[1060px] text-sm">

@@ -25,6 +25,11 @@ export type WorkType = {
   note: string | null
   sort_order: number
   is_active: boolean
+  // A group (e.g. Brochure) holds parts instead of its own time; a part
+  // points at its group through parent_id. The coordinator picks the
+  // group, the designer sets its parts on the task.
+  is_group: boolean
+  parent_id: string | null
 }
 
 export type TaskAssignee = { user_id: string; assigned_by: string | null; assigned_at: string; is_current: boolean }

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Download, Filter } from 'lucide-react'
 import { DateField } from '../DateField'
 import EmployeeSelect from './EmployeeSelect'
+import { CARD_TABLE } from '../CardTable'
 import {
   visitsReport, getEmployees, STATUS_META, istTime, istDateShort, duration, downloadCSV,
   monthStartStr, istTodayStr, type VisitRow, type Employee,
@@ -71,8 +72,11 @@ export default function VisitorReport() {
 
       <p className="mt-3 text-sm text-gray-500">{loaded ? `${rows.length} visit${rows.length === 1 ? '' : 's'} found` : ''}</p>
 
-      <div className="mt-2 overflow-hidden rounded-xl border border-[#1f1f1f]">
-        <table className="min-w-full divide-y divide-[#1f1f1f] text-sm">
+      {/* No border or rounding on a phone: the rows are cards of their
+          own there, and a box drawn round a stack of cards is a second
+          frame saying nothing. */}
+      <div className="mt-2 overflow-hidden lg:rounded-xl lg:border lg:border-[#1f1f1f]">
+        <table className={`min-w-full divide-y divide-[#1f1f1f] text-sm ${CARD_TABLE}`}>
           <thead className="bg-[#161616] text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
             <tr>
               <th className="px-4 py-3">Visitor</th>
@@ -87,21 +91,22 @@ export default function VisitorReport() {
           </thead>
           <tbody className="divide-y divide-[#161616] bg-[#121212]">
             {rows.length === 0 ? (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500">{loaded ? 'No visits in this range.' : 'Choose a range and Apply.'}</td></tr>
+              <tr><td data-label="" colSpan={8} className="px-4 py-10 text-center text-gray-500">{loaded ? 'No visits in this range.' : 'Choose a range and Apply.'}</td></tr>
             ) : (
               rows.map((r) => (
                 <tr key={r.id} className="hover:bg-[#161616]">
-                  <td className="px-4 py-3">
+                  {/* No label: on a card the visitor's name is the heading. */}
+                  <td data-label="" className="px-4 py-3">
                     <div className="font-medium text-white">{r.full_name}</div>
                     <div className="text-xs text-gray-500">{r.mobile}</div>
                   </td>
-                  <td className="px-4 py-3 text-gray-400">{r.company_name || '—'}</td>
-                  <td className="px-4 py-3 text-gray-400">{istDateShort(r.check_in_at)}<div className="text-xs text-gray-600">{istTime(r.check_in_at)}</div></td>
-                  <td className="px-4 py-3 text-gray-400">{istTime(r.check_out_at)}</td>
-                  <td className="px-4 py-3 text-gray-400">{r.meeting_employee_name || '—'}</td>
-                  <td className="px-4 py-3 text-gray-400">{r.purpose}</td>
-                  <td className="px-4 py-3 text-gray-400">{duration(r.duration_minutes)}</td>
-                  <td className="px-4 py-3">
+                  <td data-label="Company" className="px-4 py-3 text-gray-400">{r.company_name || '—'}</td>
+                  <td data-label="Check-in" className="px-4 py-3 text-gray-400">{istDateShort(r.check_in_at)}<div className="text-xs text-gray-600">{istTime(r.check_in_at)}</div></td>
+                  <td data-label="Check-out" className="px-4 py-3 text-gray-400">{istTime(r.check_out_at)}</td>
+                  <td data-label="Meeting with" className="px-4 py-3 text-gray-400">{r.meeting_employee_name || '—'}</td>
+                  <td data-label="Purpose" className="px-4 py-3 text-gray-400">{r.purpose}</td>
+                  <td data-label="Duration" className="px-4 py-3 text-gray-400">{duration(r.duration_minutes)}</td>
+                  <td data-label="Status" className="px-4 py-3">
                     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_META[r.status].badge}`}>{STATUS_META[r.status].label}</span>
                   </td>
                 </tr>

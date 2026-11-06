@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellRing, Check, CheckCheck, FileText, ListTodo, UserPlus, Volume2, VolumeX, X } from 'lucide-react'
+import { Bell, BellRing, Check, CheckCheck, FileText, ListTodo, Smartphone, UserPlus, Volume2, VolumeX, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { enablePush, pushStatus, watchPush, type PushResult } from '../lib/push'
 import { fmtDT } from './leads/leadUtils'
 
 type Notif = {
@@ -51,6 +52,20 @@ export default function NotificationBell({
   const [toasts, setToasts] = useState<Notif[]>([])
   const [showRead, setShowRead] = useState(false)   // the bell holds what is still unread
   const boxRef = useRef<HTMLDivElement>(null)
+
+  /*
+    Whether this phone will be told with the app closed — and if not,
+    why not, in words.
+
+    Everything about push fails silently otherwise: permission never
+    asked, a subscription that was never recorded, a login that quietly
+    expired. All three look identical from the outside — the bell works,
+    the phone stays quiet, and nothing anywhere says so. On twenty
+    staff phones that is not something anyone can chase through a
+    console, so it is said here instead.
+  */
+  const [push, setPush] = useState<PushResult | null>(null)
+  const [pushBusy, setPushBusy] = useState(false)
 
   // Sound: per-viewer preference, kept in localStorage. Read via a ref in
   // the realtime handler so toggling it never re-subscribes the channel.
@@ -161,6 +176,24 @@ export default function NotificationBell({
     supabase.auth.getUser().then(({ data }) => setUid(data.user?.id ?? null))
   }, [])
 
+  /*
+    Keep this browser attached to whoever is logged in. Prompts for
+    nothing — it only refreshes a permission already given, and
+    re-records the endpoint when Chrome replaces it or the phone is
+    handed to a colleague. Whatever it finds goes on screen.
+  */
+  useEffect(() => {
+    if (!uid) return
+    void pushStatus().then(setPush)
+    return watchPush(setPush)
+  }, [uid])
+
+  async function turnOnPush() {
+    setPushBusy(true)
+    setPush(await enablePush(true))
+    setPushBusy(false)
+  }
+
   const loadCount = useCallback(async () => {
     if (!uid) return
     const { count: c } = await supabase
@@ -230,8 +263,17 @@ export default function NotificationBell({
     return () => document.removeEventListener('mousedown', close)
   }, [open])
 
+  /*
+    Opening the bell no longer asks for the permission on its own.
+
+    It used to, and that was the wrong moment: on a phone the prompt
+    arrives over the panel the person was trying to read, and a prompt
+    that turns up unasked is the one everybody denies — which cannot be
+    undone from inside the app afterwards. The panel now carries a line
+    saying where this phone stands, with a button, so the asking
+    happens when somebody actually means it.
+  */
   function toggle() {
-    if (!open && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     setOpen((o) => !o)
   }
 
@@ -310,7 +352,28 @@ export default function NotificationBell({
         </button>
 
         {open && (
-          <div className="absolute right-0 top-full z-30 mt-2 w-80 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#161616] shadow-lg sm:w-96">
+          /*
+            On a phone this used to hang off the screen.
+
+            `absolute right-0` lines the panel's right edge up with the
+            BELL's right edge, not the screen's — and the bell is not
+            the last thing in the header, the avatar is. So 320px of
+            panel ran left from a point already 50-odd pixels in from
+            the right, and the first column of it was past the left
+            edge: "Notifications" arrived as "otifications". Narrowing
+            it does not help; the anchor is what is wrong.
+
+            So below sm it is not anchored to the bell at all. It is
+            fixed, pinned to both edges with a small gutter, and sat
+            under the header — 60px, which is this header's own
+            px-3/py-2.5 plus a 40px button. The header does not scroll
+            away under it, because the header is in normal flow: once
+            it is out of view so is the bell, and the panel cannot be
+            opened in the first place.
+
+            From sm up it is the same dropdown it always was.
+          */
+          <div className="fixed left-3 right-3 top-[3.75rem] z-30 overflow-hidden rounded-lg border border-[#2a2a2a] bg-[#161616] shadow-lg sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96">
             <div className="flex items-center justify-between border-b border-[#2a2a2a] px-4 py-2.5">
               <div className="flex items-center gap-2">
                 <p className="text-sm font-medium text-white">{showRead ? 'All notifications' : 'Notifications'}</p>
@@ -327,6 +390,38 @@ export default function NotificationBell({
                 </button>
               )}
             </div>
+            {/*
+              Where this phone stands on notifications-with-the-app-closed.
+
+              Only when something needs doing. Switched on and working,
+              it says nothing — a line that is always there, usually
+              saying "all fine", stops being read within a week, and
+              this one has to be read on the day it matters.
+            */}
+            {push && push.state !== 'on' && (
+              <div className="flex items-start gap-2.5 border-b border-[#2a2a2a] bg-[#1b1710] px-4 py-3">
+                <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs leading-relaxed text-amber-200/90">{push.reason}</p>
+                  {/* The raw facts, small. A screenshot of this line says
+                      exactly where it stopped, without a console. */}
+                  <p className="mt-1 font-mono text-[10px] text-gray-500">{push.detail}</p>
+                  {/* Blocked can only be undone in the phone's own
+                      Settings, so offering a button there would be a
+                      button that cannot work. */}
+                  {push.state !== 'blocked' && push.state !== 'unsupported' && push.state !== 'unconfigured' && (
+                    <button
+                      onClick={turnOnPush}
+                      disabled={pushBusy}
+                      className="mt-2 rounded-md bg-orange-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+                    >
+                      {pushBusy ? 'One moment…' : 'Turn on phone notifications'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <ul className="max-h-96 overflow-y-auto">
               {items.length === 0 && (
                 <li className="px-4 py-8 text-center text-sm text-gray-500">
@@ -378,7 +473,19 @@ export default function NotificationBell({
 
       {/* Popups for reminders that just arrived */}
       {toasts.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-[60] flex w-80 flex-col gap-2" aria-live="polite">
+        /*
+          Same trouble, other corner. bottom-4 right-4 with a fixed
+          320px puts these on top of the bottom navigation on a phone —
+          the popup covers Scan and More, and tapping either dismisses
+          nothing and goes nowhere. So on a phone they span the width
+          with a gutter and sit above the bar: 4.75rem is the bar, the
+          safe-area inset is the gesture bar under it. The same figure
+          MAIN_PAD uses in SidebarChrome, so the two agree.
+        */
+        <div
+          className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-3 right-3 z-[60] flex flex-col gap-2 sm:bottom-4 sm:left-auto sm:right-4 sm:w-80"
+          aria-live="polite"
+        >
           {toasts.map((n) => (
             <div
               key={n.id}

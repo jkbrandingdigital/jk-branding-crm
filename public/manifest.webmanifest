@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "JK BrandOS™",
   "short_name": "JK BrandOS™",
   "description": "Leads, design work, printing and HR for JK Branding.",
@@ -13,7 +14,7 @@
   },
   "background_color": "#0f0f0f",
   "theme_color": "#0f0f0f",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "lang": "en-IN",
   "icons": [
     {
@@ -43,7 +44,8 @@
       "icons": [
         {
           "src": "/icons/icon-192.png",
-          "sizes": "192x192"
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     }

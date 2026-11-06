@@ -6,7 +6,7 @@ import {
 import { usePermissions } from '../../lib/permissions'
 import {
   fmtDT, fmtDate, inr, loadDetail, stageLabel, stageTone, daysLeft,
-  type JobWork, type JwDetail, type PrintName,
+  type JwDetail, type PrintName,
 } from './jobWorkUtils'
 import QcModal from './QcModal'
 import DispatchModal from './DispatchModal'

@@ -4,12 +4,12 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, Cake, FolderKanban, Timer, ChevronDown, Menu, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Package, ShieldCheck, QrCode, BookOpen, type LucideIcon,
+  Activity, Cake, FolderKanban, Timer, ChevronDown, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Package, ShieldCheck, QrCode, BookOpen, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
-import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
+import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
@@ -208,6 +208,30 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         .filter((g) => g.items.length > 0 || isSuper)
     : []
 
+  /*
+    The four along the bottom of a phone: three of this person's own, and
+    Scan.
+
+    An admin area sidebar is nine departments deep. Three slots cannot
+    represent it and should not try — these are the three opened all day,
+    and More is the whole thing, unchanged.
+
+    They are filtered on rights, because a sub admin switched on for one
+    department must not find a door to another sitting on their phone.
+    Whatever survives, Scan is the fourth: everybody scans.
+  */
+  const may = (perm: string) => isSuper || can(perm)
+  const bottom: BottomItem[] = [
+    ...[
+      { label: 'Home', icon: LayoutDashboard, to: '/admin', active: pathname === '/admin', show: isSuper },
+      { label: 'Leads', icon: Filter, to: '/admin/leads', active: isActive('/admin/leads'), show: may('mod_leads') },
+      { label: 'Tasks', icon: ListTodo, to: '/admin/tasks', active: isActive('/admin/tasks'), show: may('mod_tasks') },
+      { label: 'People', icon: Users, to: '/admin/employees', active: isActive('/admin/employees'), show: may('mod_employees') },
+      { label: 'Reports', icon: FileBarChart, to: '/admin/reports', active: isActive('/admin/reports'), show: may('mod_reports') },
+    ].filter((x) => x.show).slice(0, 3).map(({ show: _show, ...x }) => x),
+    { label: 'Scan', icon: QrCode, to: '/scan', active: false },
+  ]
+
   const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
       {/* Narrow or wide. Only on the desktop rail — the mobile drawer is
@@ -348,17 +372,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <button
-            onClick={() => setDrawer(true)}
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-gray-300 lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu size={18} /> Menu
-          </button>
-          {children}
-        </main>
+        {/* The "Menu" button that used to sit here is gone: the bar along
+            the bottom carries the four, and More opens this same drawer. */}
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
       </div>
+
+      <BottomNav items={bottom} onMore={() => setDrawer(true)} moreActive={drawer} />
     </div>
   )
 }

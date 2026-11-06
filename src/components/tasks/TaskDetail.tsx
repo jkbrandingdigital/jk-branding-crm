@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useChartTheme } from '../../lib/chartTheme'
 import { fmtDT, type Staff } from '../leads/leadUtils'
 import { RichHtml } from '../RichText'
+import { SHEET_BACKDROP, sheetPanel } from '../Sheet'
 import { CHANGE_SOURCES, currentAssignees, fmtTaskDT, mins, priorityOf, type Task, type TaskLabel, type TaskStage, type TimeStatus } from './taskUtils'
 import { hhmm, TaskTimerButton } from './WorkTimer'
 import ExtraTimeRequest from './ExtraTimeRequest'
@@ -44,6 +45,12 @@ type Child = {
   task_no: number
   subject: string
   work_qty: number
+  // Inner Pages of a brochure: the page count is a multiplier on the
+  // allowance, not a count of separate pieces. unit_qty holds it; unit is
+  // what one is called ("page"); per_unit says the time scales by it.
+  unit_qty: number
+  unit: string | null
+  per_unit: boolean
   stage_name: string | null
   is_done: boolean
   people: string | null
@@ -117,6 +124,9 @@ export default function TaskDetail({
     the number worth seeing: it is the work nobody is doing.
   */
   const [kids, setKids] = useState<Child[]>([])
+  // A part's page count being re-set (which part, and to what).
+  const [editUnitsFor, setEditUnitsFor] = useState<string | null>(null)
+  const [editUnitsVal, setEditUnitsVal] = useState(1)
   const [splitOpen, setSplitOpen] = useState(false)
   const [splitTo, setSplitTo] = useState('')
   const [splitQty, setSplitQty] = useState(1)
@@ -126,6 +136,36 @@ export default function TaskDetail({
   const [sending, setSending] = useState('')   // "2 of 5" while files go up
   const { dark } = useChartTheme()   // pale-on-cream cannot be read, so the tones swap
   const [error, setError] = useState('')
+
+  /*
+    Group jobs (Brochure): the parts this task is built from. The task
+    carries a group work type; its parts — Front-Back Concept, Inner Pages —
+    are set here, and the allowed time adds up from what is picked.
+  */
+  type Part2 = { id: string; name: string; minutes: number; per_unit: boolean; unit: string | null }
+  const [isGroupTask, setIsGroupTask] = useState(false)
+  const [groupParts, setGroupParts] = useState<Part2[]>([])     // the parts this group can hold
+  const [addQty, setAddQty] = useState<Record<string, number>>({})  // page count while adding a per-unit part
+  const [changeFor, setChangeFor] = useState<string | null>(null)   // which part's "changes" panel is open
+  const [addedTypes, setAddedTypes] = useState<Set<string>>(new Set())      // parts already on the job
+  const [kidParts, setKidParts] = useState<Record<string, Part[]>>({})      // each part's own options and change rounds
+
+  const loadParts = useCallback(async () => {
+    if (!task.work_type_id) { setIsGroupTask(false); setGroupParts([]); return }
+    const { data: wt } = await supabase.from('work_types').select('is_group').eq('id', task.work_type_id).maybeSingle()
+    if (!(wt as { is_group?: boolean } | null)?.is_group) {
+      setIsGroupTask(false); setGroupParts([]); return
+    }
+    setIsGroupTask(true)
+    const [ch, cw] = await Promise.all([
+      supabase.from('work_types').select('id, name, minutes, per_unit, unit')
+        .eq('parent_id', task.work_type_id).eq('is_active', true).order('sort_order'),
+      // Which parts are already on the job — so a part cannot be added twice.
+      supabase.from('tasks').select('work_type_id').eq('parent_task_id', task.id).is('deleted_at', null),
+    ])
+    setGroupParts((ch.data ?? []) as Part2[])
+    setAddedTypes(new Set((cw.data ?? []).map((r) => (r as { work_type_id: string }).work_type_id)))
+  }, [task.id, task.work_type_id])
 
   const loadTime = useCallback(async () => {
     const [t, st, pt, kd] = await Promise.all([
@@ -137,8 +177,77 @@ export default function TaskDetail({
     setTime((t.data ?? []) as TimeRow[])
     setStatus((st.data ?? null) as TimeStatus | null)
     setParts((pt.data ?? []) as Part[])
-    setKids((kd.data ?? []) as Child[])
+    const kidList = (kd.data ?? []) as Child[]
+    setKids(kidList)
+
+    /*
+      Each part's own options and change rounds, so a brochure part reads
+      exactly like any other job: Option 1, Option 2, Changes · round 1 —
+      each line with its own clock, not one lump of hours.
+    */
+    if (kidList.length > 0) {
+      const got = await Promise.all(kidList.map((k) => supabase.rpc('task_parts', { p_task: k.id })))
+      const map: Record<string, Part[]> = {}
+      kidList.forEach((k, i) => { map[k.id] = (got[i].data ?? []) as Part[] })
+      setKidParts(map)
+    } else {
+      setKidParts({})
+    }
   }, [task.id])
+
+  // Add a part to a group job. Each part becomes its own timed item with
+  // its own options and changes.
+  async function addPart(wtId: string, qty: number) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_add_part', { p_parent: task.id, p_work_type: wtId, p_qty: Math.max(1, qty || 1) })
+    setAdding(false)
+    if (e) return setError(e.message)
+    await Promise.all([loadTime(), loadParts()])
+  }
+  // A part's own option / change / removal — the same RPCs any task uses,
+  // pointed at the part.
+  async function childOption(childId: string) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_add_option', { p_task: childId, p_piece: 1 })
+    setAdding(false)
+    if (e) return setError(e.message)
+    await loadTime()
+  }
+  async function childChange(childId: string, source: string) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_add_change', { p_task: childId, p_source: source, p_note: null })
+    setAdding(false)
+    setChangeFor(null)
+    if (e) return setError(e.message)
+    await loadTime()
+  }
+  // A part's option taken back off — last of the piece, only while nothing
+  // has been worked on it. Same RPC any task uses, pointed at the part.
+  async function childRemoveOption(childId: string, piece: number) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_remove_option', { p_task: childId, p_piece: piece })
+    setAdding(false)
+    if (e) return setError(e.message)
+    await loadTime()
+  }
+  // Change a part's page count — the allowance moves with it. Only while
+  // nothing has been worked, so no one's spent time is quietly re-judged.
+  async function saveUnits(childId: string) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_set_part_units', { p_part: childId, p_qty: Math.max(1, editUnitsVal || 1) })
+    setAdding(false)
+    setEditUnitsFor(null)
+    if (e) return setError(e.message)
+    await Promise.all([loadTime(), loadParts()])
+  }
+
+  async function removePart(childId: string) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_remove_part', { p_part: childId })
+    setAdding(false)
+    if (e) return setError(e.message)
+    await Promise.all([loadTime(), loadParts()])
+  }
 
   async function splitTask() {
     if (!splitTo) return setError('Pick who gets this piece.')
@@ -214,6 +323,10 @@ export default function TaskDetail({
   useEffect(() => {
     void loadTime()
   }, [loadTime])
+
+  useEffect(() => {
+    void loadParts()
+  }, [loadParts])
   const fileRef = useRef<HTMLInputElement>(null)
 
   const stage = stages.find((s) => s.id === task.stage_id)
@@ -423,23 +536,31 @@ export default function TaskDetail({
   const shownSpent = isContainer ? Math.round((status?.rolled_spent_secs ?? 0) / 60) : spentMins
   const shownOver = shownAllowed > 0 && shownSpent > shownAllowed
 
+  /*
+    A label and its value.
+
+    Side by side on a desktop, where a 9rem label column lines every
+    value up. On a phone that column is a quarter of the screen and
+    "Customer mobile" wraps to two lines next to a number that then has
+    nowhere to go, so below sm the label simply sits above its value.
+  */
   const row = (k: string, v: React.ReactNode) => (
-    <div className="flex gap-3 border-b border-[#1f1f1f] py-2.5 text-sm last:border-0">
-      <span className="w-36 shrink-0 text-gray-500">{k}</span>
+    <div className="flex flex-col gap-0.5 border-b border-[#1f1f1f] py-2.5 text-sm last:border-0 sm:flex-row sm:gap-3">
+      <span className="text-gray-500 sm:w-36 sm:shrink-0">{k}</span>
       <span className="min-w-0 flex-1 text-gray-200">{v}</span>
     </div>
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div className={SHEET_BACKDROP} onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-detail-title"
-        className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#121212]"
+        className={sheetPanel({ width: 'sm:max-w-3xl' })}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-[#242424] bg-[#171717] px-5 py-3.5">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#242424] bg-[#171717] px-4 py-3 sm:px-5 sm:py-3.5">
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <h2 id="task-detail-title" className="truncate font-semibold text-white">{task.subject}</h2>
@@ -514,13 +635,16 @@ export default function TaskDetail({
           </div>
         </div>
 
-        <div className="flex gap-1 border-b border-[#242424] px-4">
+        {/* Four tabs do not fit across a 360px phone, so the row slides
+            sideways rather than squeezing the labels. shrink-0 is what
+            stops flex from compressing them instead of scrolling. */}
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-[#242424] px-4">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
               aria-current={tab === t.key}
-              className={`border-b-2 px-3 py-2.5 text-sm transition-colors ${
+              className={`shrink-0 border-b-2 px-3 py-2.5 text-sm transition-colors ${
                 tab === t.key ? 'border-orange-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
               }`}
             >
@@ -530,7 +654,10 @@ export default function TaskDetail({
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5">
+        {/* min-h-0 is what makes this scroll rather than stretch the
+            sheet: without it a long history pushes the panel past the
+            bottom of the phone and nothing scrolls at all. */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
           {error && <p className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm text-red-400">{error}</p>}
 
           {locked && (
@@ -555,6 +682,240 @@ export default function TaskDetail({
                   into the pieces, so one banner's time cannot be counted
                   twice. What is left unassigned stays on screen, because
                   that is the piece nobody has been told to do. */}
+              {/* A group job (Brochure): each part is its own timed item,
+                  with its own Start, its own options and its own changes —
+                  the same as any other service. The brochure adds them up. */}
+              {isGroupTask && !task.parent_task_id && (
+                <div className="mb-5 overflow-hidden rounded-lg border border-[#242424]">
+                  <div className="border-b border-[#242424] bg-[#171717] px-4 py-2">
+                    <p className="text-xs font-medium text-gray-300">{status?.work_type ?? 'Parts'}</p>
+                    <p className="mt-0.5 text-[11px] text-gray-500">
+                      Each part has its own timer, options and changes. The brochure adds them up.
+                    </p>
+                  </div>
+
+                  {/* Parts already on this job */}
+                  {kids.length > 0 && (
+                    <ul>
+                      {kids.map((k) => {
+                        const kps = kidParts[k.id] ?? []
+                        const opts = kps.filter((x) => x.part_kind === 'option')
+                        // Pages can be re-set only before any time lands on the part.
+                        const canEditUnits = canEdit && !locked && k.per_unit && k.spent_secs === 0
+                        return (
+                          <li key={k.id} className="border-b border-[#1f1f1f] px-4 py-2.5 last:border-0">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm text-gray-200">
+                                  {k.subject}
+                                  {/* How many pages this part is — why the time is what it is. */}
+                                  {k.per_unit && (
+                                    <span className="ml-1.5 text-[11px] font-normal text-gray-500">
+                                      · {k.unit_qty} {k.unit ?? 'unit'}{k.unit_qty === 1 ? '' : 's'}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="block truncate text-[11px] text-gray-500">
+                                  {k.people ?? 'Nobody'}{k.stage_name ? ` · ${k.stage_name}` : ''}
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-sm tabular-nums text-gray-300">
+                                {hhmm(k.spent_secs)}
+                                {k.allowed_mins ? <span className="text-gray-500"> of {mins(k.allowed_mins)}</span> : null}
+                              </span>
+                              {!locked && (
+                                <>
+                                  {/* Change the page count — only while untouched. */}
+                                  {canEditUnits && (
+                                    <button
+                                      onClick={() => { setEditUnitsFor(editUnitsFor === k.id ? null : k.id); setEditUnitsVal(k.unit_qty) }}
+                                      title="Change page count"
+                                      aria-label="Change page count"
+                                      className="rounded-md p-1 text-gray-500 hover:bg-[#222] hover:text-orange-300"
+                                    >
+                                      <Pencil size={13} />
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => childOption(k.id)}
+                                    disabled={adding}
+                                    className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-orange-500/60 hover:text-orange-300 disabled:opacity-50"
+                                  >
+                                    + option
+                                  </button>
+                                  <button
+                                    onClick={() => setChangeFor(changeFor === k.id ? null : k.id)}
+                                    className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-amber-500/60 hover:text-amber-300"
+                                  >
+                                    Changes
+                                  </button>
+                                  {k.spent_secs === 0 && (
+                                    <button
+                                      onClick={() => removePart(k.id)}
+                                      disabled={adding}
+                                      aria-label="Remove part"
+                                      title="Remove — nothing has been worked on it"
+                                      className="rounded-md p-1 text-gray-600 hover:bg-[#222] hover:text-red-400 disabled:opacity-50"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+
+                            {/* Re-set the page count. */}
+                            {editUnitsFor === k.id && !locked && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={999}
+                                  value={editUnitsVal}
+                                  onChange={(e) => setEditUnitsVal(Math.max(1, Number(e.target.value) || 1))}
+                                  className="w-20 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 text-sm tabular-nums text-white focus:border-orange-500 focus:outline-none"
+                                />
+                                <span className="text-[11px] text-gray-500">{k.unit ?? 'unit'}{editUnitsVal === 1 ? '' : 's'}</span>
+                                <button
+                                  onClick={() => saveUnits(k.id)}
+                                  disabled={adding}
+                                  className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => setEditUnitsFor(null)}
+                                  className="rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            )}
+
+                            {changeFor === k.id && !locked && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {CHANGE_SOURCES.map((c) => (
+                                  <button
+                                    key={c.key}
+                                    onClick={() => childChange(k.id, c.key)}
+                                    disabled={adding}
+                                    className="rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white disabled:opacity-50"
+                                  >
+                                    {c.label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Each option and change round — one line, one clock.
+                                Option 1 is here from the start, with its own Start,
+                                the same as any other service. */}
+                            {kps.length > 0 && (
+                              <ul className="mt-2 space-y-1.5 border-l border-[#2a2a2a] pl-3">
+                                {kps.map((pt) => {
+                                  const spentM = pt.spent_secs / 60
+                                  const over = pt.allowed_mins > 0 && spentM > pt.allowed_mins
+                                  return (
+                                    <li
+                                      key={`${k.id}-${pt.part_kind ?? 'none'}-${pt.piece_no ?? 0}-${pt.part_no ?? 0}`}
+                                      className="flex flex-wrap items-center gap-x-3 gap-y-1"
+                                    >
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-sm text-gray-300">
+                                          {pt.label}
+                                          {pt.running && <span className="ml-2 text-xs text-orange-400">running</span>}
+                                        </span>
+                                        {pt.workers && (
+                                          <span className="block truncate text-[11px] text-gray-500">{pt.workers}</span>
+                                        )}
+                                      </span>
+                                      <span className="shrink-0 text-sm tabular-nums">
+                                        <span style={{ color: over ? (dark ? '#fca5a5' : '#991b1b') : (dark ? '#d1d5db' : '#4b4536') }}>
+                                          {hhmm(pt.spent_secs)}
+                                        </span>
+                                        {pt.allowed_mins > 0 && <span className="text-gray-500"> of {mins(pt.allowed_mins)}</span>}
+                                      </span>
+                                      {!locked && pt.part_kind && (
+                                        <TaskTimerButton
+                                          taskId={k.id}
+                                          part={{ kind: pt.part_kind, no: pt.part_no ?? 1, piece: pt.piece_no ?? 1 }}
+                                          onChanged={loadTime}
+                                        />
+                                      )}
+                                      {/* Last option, untouched — take it back off with ✕.
+                                          One with time on it stays. */}
+                                      {canEdit && !locked && pt.part_kind === 'option'
+                                        && opts.length > 1
+                                        && pt.part_no === opts.length
+                                        && pt.spent_secs === 0 && (
+                                        <button
+                                          onClick={() => childRemoveOption(k.id, pt.piece_no ?? 1)}
+                                          disabled={adding}
+                                          aria-label={`Remove ${pt.label}`}
+                                          title="Remove this option — nothing has been worked on it"
+                                          className="rounded-md p-1 text-gray-600 hover:bg-[#222] hover:text-red-400 disabled:opacity-50"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      )}
+                                    </li>
+                                  )
+                                })}
+                              </ul>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+
+                  {/* Add a part */}
+                  {!locked && (
+                    <div className="border-t border-[#242424] bg-[#141414] px-4 py-3">
+                      <p className="mb-2 text-[11px] text-gray-500">Add a part</p>
+                      <div className="space-y-2">
+                        {/* A part already on the job is not offered again —
+                            take it off first if it has to change. */}
+                        {groupParts.filter((gp) => !addedTypes.has(gp.id)).map((gp) => (
+                          <div key={gp.id} className="flex flex-wrap items-center gap-2">
+                            <span className="min-w-0 flex-1 text-sm text-gray-300">
+                              {gp.name}
+                              <span className="ml-1.5 text-[11px] text-gray-500">
+                                {gp.per_unit ? `${mins(gp.minutes)} per ${gp.unit ?? 'unit'}` : `${mins(gp.minutes)} fixed`}
+                              </span>
+                            </span>
+                            {gp.per_unit && (
+                              <input
+                                type="number"
+                                min={1}
+                                max={999}
+                                value={addQty[gp.id] ?? ''}
+                                onChange={(e) => setAddQty((m) => ({ ...m, [gp.id]: Math.max(1, Number(e.target.value) || 1) }))}
+                                placeholder={gp.unit ?? 'qty'}
+                                className="w-20 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 text-sm tabular-nums text-white focus:border-orange-500 focus:outline-none"
+                              />
+                            )}
+                            <button
+                              onClick={() => addPart(gp.id, gp.per_unit ? (addQty[gp.id] ?? 1) : 1)}
+                              disabled={adding}
+                              className="rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:border-orange-500/60 hover:text-orange-300 disabled:opacity-50"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        ))}
+                        {groupParts.length === 0 && (
+                          <p className="text-sm text-gray-500">No parts set up for this job yet.</p>
+                        )}
+                        {groupParts.length > 0 && groupParts.every((gp) => addedTypes.has(gp.id)) && (
+                          <p className="text-sm text-gray-500">Every part is on the job.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {(status?.work_qty ?? 1) > 1 && !task.parent_task_id && (
                 <div className="mb-5 overflow-hidden rounded-lg border border-[#242424]">
                   <div className="flex flex-wrap items-center gap-3 border-b border-[#242424] bg-[#171717] px-4 py-2">
@@ -649,7 +1010,7 @@ export default function TaskDetail({
                 </div>
               )}
 
-              {parts.length > 0 && (status?.child_count ?? 0) === 0 && (
+              {parts.length > 0 && !isGroupTask && (status?.child_count ?? 0) === 0 && (
                 <div className="mb-5 overflow-hidden rounded-lg border border-[#242424]">
                   <div className="border-b border-[#242424] bg-[#171717] px-4 py-2">
                     <p className="text-xs font-medium text-gray-300">Where the time went</p>

@@ -13,6 +13,7 @@ import { DateTimeField } from '../DateField'
 import type { LeadLite } from '../reminders/reminderUtils'
 import LeadCreateMenu from './LeadCreateMenu'
 import ConvertLead from '../customers/ConvertLead'
+import { SHEET_FRAME, SHEET_FRAME_TOP, sheetPanel } from '../Sheet'
 
 type Activity = { id: string; user_id: string | null; type: string; body: string | null; meta: Record<string, unknown> | null; created_at: string }
 type LeadL = Lead & {
@@ -251,7 +252,9 @@ export default function LeadDrawer({
   const leadLabels = (lead?.label_ids ?? []).map((id) => labels.find((x) => x.id === id)).filter(Boolean) as Label[]
   const formFields = lead?.meta_fields && typeof lead.meta_fields === 'object' ? Object.entries(lead.meta_fields) : []
   const followUps = acts.filter((a) => a.meta?.follow_up || a.type === 'follow_up')
-  const iconBtn = 'rounded-lg p-2 text-gray-400 transition-colors hover:bg-[#1f1f1f] hover:text-white'
+  // Roomier on a phone. Ten of these sit in one row, and at p-2 they are
+  // 33px of target with 1px between them.
+  const iconBtn = 'rounded-lg p-2.5 text-gray-400 transition-colors hover:bg-[#1f1f1f] hover:text-white sm:p-2'
 
   const TABS: { key: TabKey; label: string; count?: number }[] = [
     { key: 'details', label: 'Details' },
@@ -260,14 +263,19 @@ export default function LeadDrawer({
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6" onClick={() => !busy && onClose()}>
+    <div className={SHEET_FRAME} onClick={() => !busy && onClose()}>
       <div className="absolute inset-0 bg-black/70" />
       <div
-        className="relative flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#242424] bg-[#121212]"
+        className={sheetPanel({
+          width: 'sm:max-w-5xl',
+          round: 'sm:rounded-2xl',
+          border: 'sm:border sm:border-[#242424]',
+          extra: 'relative',
+        })}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Title bar */}
-        <div className="flex items-start justify-between gap-3 border-b border-[#222] bg-[#171717] px-5 py-3.5">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#222] bg-[#171717] px-4 py-3 sm:px-5 sm:py-3.5">
           <div className="min-w-0">
             <p className="text-xs text-gray-500">Lead #{lead?.lead_no}</p>
             <h2 className="truncate text-lg font-semibold">{lead?.name ?? 'Loading…'}</h2>
@@ -289,7 +297,7 @@ export default function LeadDrawer({
 
         {/* Same number, different enquiry */}
         {siblings.length > 0 && (
-          <div className="border-b border-[#222] bg-[#1a1612] px-5 py-2.5">
+          <div className="shrink-0 border-b border-[#222] bg-[#1a1612] px-4 py-2.5 sm:px-5">
             <button
               onClick={() => setSibOpen((o) => !o)}
               aria-expanded={sibOpen}
@@ -336,7 +344,7 @@ export default function LeadDrawer({
         )}
 
         {/* Action row */}
-        <div className="relative flex flex-wrap items-center gap-1 border-b border-[#222] px-4 py-2">
+        <div className="relative flex shrink-0 flex-wrap items-center gap-1 border-b border-[#222] px-2 py-2 sm:px-4">
           {lead?.phone && (
             <a href={`tel:${lead.phone}`} className={iconBtn} title="Call">
               <Phone size={17} />
@@ -453,12 +461,12 @@ export default function LeadDrawer({
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-[#222] px-4">
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-[#222] px-4">
           {TABS.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm transition-colors ${
+              className={`-mb-px flex shrink-0 items-center gap-2 border-b-2 px-4 py-2.5 text-sm transition-colors ${
                 tab === t.key ? 'border-orange-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
               }`}
             >
@@ -469,7 +477,7 @@ export default function LeadDrawer({
         </div>
 
         {msg && (
-          <div className={`mx-5 mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${msg.type === 'success' ? 'border-green-900 bg-green-950/40 text-green-300' : 'border-red-900 bg-red-950/40 text-red-300'}`}>
+          <div className={`mx-4 mt-4 flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm sm:mx-5 ${msg.type === 'success' ? 'border-green-900 bg-green-950/40 text-green-300' : 'border-red-900 bg-red-950/40 text-red-300'}`}>
             {msg.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
             {msg.text}
           </div>
@@ -477,7 +485,7 @@ export default function LeadDrawer({
 
         {/* Body */}
         {lead && (
-          <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 sm:py-5">
             {tab === 'details' && (
               <div className="space-y-5">
                 {lead.cancel_reason && (
@@ -633,20 +641,33 @@ export default function LeadDrawer({
 
       {/* Add follow-up */}
       {fuOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => !busy && setFuOpen(false)}>
+        <div className={SHEET_FRAME_TOP} onClick={() => !busy && setFuOpen(false)}>
           <div className="absolute inset-0 bg-black/70" />
-          <div className="relative w-full max-w-md rounded-2xl border border-[#242424] bg-[#151515]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between border-b border-[#242424] px-5 py-4">
+          {/* This one had no height cap, which was fine on a desktop and
+              not on a phone: the date field, the preset list, the type
+              chips and a four-row message are taller than a screen, and
+              Submit sat below the bottom edge with nothing to scroll. */}
+          <div
+            className={sheetPanel({
+              width: 'sm:max-w-md',
+              round: 'sm:rounded-2xl',
+              border: 'sm:border sm:border-[#242424]',
+              bg: 'bg-[#151515]',
+              extra: 'relative',
+            })}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-start justify-between border-b border-[#242424] px-4 py-3.5 sm:px-5 sm:py-4">
               <div>
                 <h2 className="font-semibold">Add follow-up</h2>
                 <p className="mt-0.5 text-xs text-gray-500">#{lead?.lead_no} {lead?.name}</p>
               </div>
-              <button onClick={() => setFuOpen(false)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+              <button onClick={() => setFuOpen(false)} className="-mr-2 flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-white sm:mr-0 sm:h-auto sm:w-auto sm:p-2" aria-label="Close">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-4 px-5 py-5">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 sm:py-5">
               <label className="block">
                 <span className="mb-1.5 block text-xs text-gray-400">Next follow-up date <span className="text-orange-400">*</span></span>
                 <DateTimeField value={actFollow} onChange={setActFollow} />
@@ -696,14 +717,14 @@ export default function LeadDrawer({
               </label>
             </div>
 
-            <div className="flex justify-end gap-3 border-t border-[#242424] px-5 py-4">
-              <button onClick={() => setFuOpen(false)} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white">
+            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-[#242424] px-4 py-3 sm:flex-row sm:justify-end sm:gap-3 sm:px-5 sm:py-4">
+              <button onClick={() => setFuOpen(false)} className="w-full rounded-lg px-4 py-2.5 text-sm text-gray-400 hover:text-white sm:w-auto sm:py-2">
                 Cancel
               </button>
               <button
                 onClick={addActivity}
                 disabled={busy}
-                className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60 sm:w-auto sm:py-2"
               >
                 <Send size={14} /> {busy ? 'Saving…' : 'Submit'}
               </button>
@@ -714,20 +735,29 @@ export default function LeadDrawer({
 
       {/* Cancel reason */}
       {cancelStage && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => !busy && setCancelStage(null)}>
+        <div className={SHEET_FRAME_TOP} onClick={() => !busy && setCancelStage(null)}>
           <div className="absolute inset-0 bg-black/70" />
-          <div className="relative w-full max-w-lg rounded-2xl border border-[#242424] bg-[#151515]" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-[#242424] px-5 py-4">
+          <div
+            className={sheetPanel({
+              width: 'sm:max-w-lg',
+              round: 'sm:rounded-2xl',
+              border: 'sm:border sm:border-[#242424]',
+              bg: 'bg-[#151515]',
+              extra: 'relative',
+            })}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-[#242424] px-4 py-3.5 sm:px-5 sm:py-4">
               <div>
                 <h2 className="font-semibold">Cancel lead</h2>
                 <p className="mt-0.5 text-xs text-gray-500">Tell us why, so the reports stay useful.</p>
               </div>
-              <button onClick={() => setCancelStage(null)} className="rounded-lg p-2 text-gray-400 hover:text-white" aria-label="Close">
+              <button onClick={() => setCancelStage(null)} className="-mr-2 flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-white sm:mr-0 sm:h-auto sm:w-auto sm:p-2" aria-label="Close">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-4 px-5 py-5">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 sm:py-5">
               <p className="text-xs text-gray-400">Select reason <span className="text-orange-400">*</span></p>
               <ul className="grid auto-rows-fr gap-2 sm:grid-cols-2">
                 {reasons.map((r) => (
@@ -763,8 +793,8 @@ export default function LeadDrawer({
               </label>
             </div>
 
-            <div className="flex justify-end gap-3 border-t border-[#242424] px-5 py-4">
-              <button onClick={() => setCancelStage(null)} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white">
+            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-[#242424] px-4 py-3 sm:flex-row sm:justify-end sm:gap-3 sm:px-5 sm:py-4">
+              <button onClick={() => setCancelStage(null)} className="w-full rounded-lg px-4 py-2.5 text-sm text-gray-400 hover:text-white sm:w-auto sm:py-2">
                 Keep lead
               </button>
               <button
@@ -782,7 +812,7 @@ export default function LeadDrawer({
                   setCancelStage(null)
                 }}
                 disabled={!cancelPick || busy}
-                className="rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
+                className="w-full rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40 sm:w-auto sm:py-2"
               >
                 {busy ? 'Saving…' : 'Cancel lead'}
               </button>

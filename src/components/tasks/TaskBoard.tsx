@@ -11,6 +11,7 @@ import { useChartTheme } from '../../lib/chartTheme'
 import { loadStaff, type Staff } from '../leads/leadUtils'
 import { DateField } from '../DateField'
 import { plainText } from '../RichText'
+import { BOARD_WRAP, boardColumn, StagePicker, useBoardStage } from '../BoardMobile'
 import TaskModal from './TaskModal'
 import TaskDetail from './TaskDetail'
 import { TaskTimerButton } from './WorkTimer'
@@ -233,6 +234,10 @@ export default function TaskBoard() {
       (canClose || !isClosed(t)),
     [can, me, canClose, isClosed],
   )
+
+  // Which stage a phone is showing. One column at a time below lg; on a
+  // monitor every column is there as before and this goes unread.
+  const [shownStage, setShownStage] = useBoardStage(stages)
 
   // Stages this person may move a task into
   const openStages = useMemo(
@@ -799,7 +804,19 @@ export default function TaskBoard() {
       {loading ? (
         <div className="py-24 text-center text-gray-500"><Loader2 size={22} className="mx-auto animate-spin" /></div>
       ) : view === 'board' ? (
-        <div className="flex gap-4 overflow-x-auto pb-2">
+        <>
+        {/* Phone only. The counts are the filtered ones, so they agree
+            with what the column underneath actually holds. */}
+        <StagePicker
+          stages={stages.map((s) => ({
+            id: s.id,
+            name: s.name,
+            count: sorted.filter((t) => t.stage_id === s.id).length,
+          }))}
+          active={shownStage}
+          onPick={setShownStage}
+        />
+        <div className={`flex gap-4 ${BOARD_WRAP} pb-2`}>
           {stages.map((s) => {
             const items = sorted.filter((t) => t.stage_id === s.id)
             return (
@@ -807,7 +824,7 @@ export default function TaskBoard() {
                 key={s.id}
                 onDragOver={(e) => { if (dragId) e.preventDefault() }}
                 onDrop={() => { if (dragId) { moveTo(dragId, s.id); setDragId(null) } }}
-                className="flex w-72 shrink-0 flex-col rounded-xl border border-[#242424] bg-[#131313]"
+                className={`${boardColumn(s.id === shownStage, 'lg:w-72')} rounded-xl border border-[#242424] bg-[#131313]`}
               >
                 <div className="flex items-center justify-between rounded-t-xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-2.5">
                   <span className="text-sm font-semibold text-white">{s.name}</span>
@@ -821,6 +838,7 @@ export default function TaskBoard() {
             )
           })}
         </div>
+        </>
       ) : (
         <div className="overflow-hidden rounded-xl border border-[#242424] bg-[#151515]">
           <div className="overflow-x-auto">

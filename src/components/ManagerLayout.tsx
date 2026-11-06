@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  Activity, Cake, FolderKanban, Users2, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, Menu, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, QrCode, Wallet, BookOpen, type LucideIcon,
+  Activity, Cake, FolderKanban, Users2, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, QrCode, Wallet, BookOpen, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
-import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
+import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
@@ -109,6 +109,25 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
     ...s,
     items: s.items.filter((i) => !i.perm || (permsReady && can(i.perm))),
   })).filter((s) => s.items.length > 0)
+
+  /*
+    The four along the bottom of a phone.
+
+    A manager's day is their branch's numbers, their branch's leads, and
+    their own daily report — they sell too, and that form is theirs to
+    file like anybody else's. Then Scan.
+
+    Targets, quotations and the rest are desk work and stay behind More.
+  */
+  const bottom: BottomItem[] = [
+    ...[
+      { label: 'Home', icon: LayoutDashboard, to: '/manager', active: pathname === '/manager', show: true },
+      { label: 'Leads', icon: Filter, to: '/manager/leads', active: isActive('/manager/leads'), show: !permsReady || can('mod_leads') },
+      { label: 'Report', icon: FileText, to: '/manager/daily-report', active: isActive('/manager/daily-report'), show: true },
+      { label: 'Team', icon: FileBarChart, to: '/manager/reports', active: isActive('/manager/reports'), show: !permsReady || can('mod_reports') },
+    ].filter((x) => x.show).slice(0, 3).map(({ show: _show, ...x }) => x),
+    { label: 'Scan', icon: QrCode, to: '/scan', active: false },
+  ]
 
   // Whichever section holds the page you are on stays open
   useEffect(() => {
@@ -238,17 +257,10 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <button
-            onClick={() => setOpen(true)}
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-gray-300 lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu size={18} /> Menu
-          </button>
-          {children}
-        </main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
       </div>
+
+      <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />
     </div>
   )
 }

@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, Menu, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, QrCode, SlidersHorizontal, Wallet, Package, BookOpen, FileBarChart, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, QrCode, SlidersHorizontal, Wallet, Package, BookOpen, FileBarChart, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
-import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
+import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 
 type Item = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
 type Group = { title: string; items: Item[] }
@@ -85,6 +85,28 @@ export default function HrLayout({ children }: { children: ReactNode }) {
     const here = GROUPS.find((g) => g.items.some((i) => pathname === i.path || pathname.startsWith(i.path + '/')))?.title
     if (here) setShut((list) => list.filter((t) => t !== here))
   }, [pathname])
+
+  const hit = (path: string) => (path === '/hr' ? pathname === '/hr' : pathname.startsWith(path))
+
+  /*
+    The four along the bottom of a phone.
+
+    HR's day is the register and the requests sitting on it — who is in,
+    who asked for leave. Payroll and setup are month-end work done sitting
+    down, so they stay behind More.
+
+    Each is gated on the right that opens it: HR without leave_approve
+    must not find a door to the leave board on their phone.
+  */
+  const bottom: BottomItem[] = [
+    ...[
+      { label: 'Home', icon: LayoutDashboard, to: '/hr', active: pathname === '/hr', show: true },
+      { label: 'Register', icon: CalendarCheck, to: '/hr/attendance', active: hit('/hr/attendance'), show: !permsReady || can('attendance_view_all') },
+      { label: 'Leave', icon: CalendarOff, to: '/hr/leaves', active: hit('/hr/leaves'), show: !permsReady || can('leave_approve') },
+      { label: 'People', icon: Users, to: '/hr/employees', active: hit('/hr/employees'), show: !permsReady || can('mod_employees') },
+    ].filter((x) => x.show).slice(0, 3).map(({ show: _show, ...x }) => x),
+    { label: 'Scan', icon: QrCode, to: '/scan', active: false },
+  ]
 
   const linkCls = (active: boolean, narrow: boolean) =>
     `flex items-center rounded-lg py-2 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
@@ -203,17 +225,10 @@ export default function HrLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <button
-            onClick={() => setDrawer(true)}
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-gray-300 lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu size={18} /> Menu
-          </button>
-          {children}
-        </main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
       </div>
+
+      <BottomNav items={bottom} onMore={() => setDrawer(true)} moreActive={drawer} />
     </div>
   )
 }

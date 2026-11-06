@@ -75,6 +75,40 @@ export default function ProjectModal({
   // or a way to change one.
   const canSeeMoney = !project || project.value_amount != null
 
+  /*
+    An existing project reads its own booking date and services straight
+    from the table, whatever screen opened this form.
+
+    The customer page hands over a `project_list` row and the board hands
+    over a `project_board()` row, and the two do not carry the same
+    columns. Where `booked_on` was missing the form quietly fell back to
+    today — and then saved that, moving a project booked in September
+    into November's revenue without anyone touching the field. A form
+    that can overwrite a figure it was never shown is the bug; reading
+    the real row first is the fix.
+  */
+  const [hydrating, setHydrating] = useState(!!project)
+
+  useEffect(() => {
+    if (!project) return
+    let dead = false
+    void (async () => {
+      const { data } = await supabase
+        .from('projects')
+        .select('booked_on, service_keys')
+        .eq('id', project.id)
+        .maybeSingle()
+      if (dead) return
+      if (data) {
+        const row = data as { booked_on: string | null; service_keys: string[] | null }
+        if (row.booked_on) setBooked(row.booked_on)
+        setServices(row.service_keys ?? [])
+      }
+      setHydrating(false)
+    })()
+    return () => { dead = true }
+  }, [project])
+
   useEffect(() => {
     void (async () => {
       const { data } = await supabase
@@ -95,6 +129,9 @@ export default function ProjectModal({
   async function save() {
     if (!customer) return setErr('Which client is this for?')
     if (!title.trim()) return setErr('Give the project a name.')
+    // Still reading the real row — saving now would write a guessed
+    // booking date over the real one.
+    if (hydrating) return setErr('Still loading this project. Try again in a moment.')
 
     setBusy(true)
     setErr('')
@@ -347,7 +384,7 @@ export default function ProjectModal({
           </button>
           <button
             onClick={save}
-            disabled={busy}
+            disabled={busy || hydrating}
             className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
           >
             {busy && <Loader2 size={15} className="animate-spin" />}

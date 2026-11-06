@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.jkbrandingindia.jkbrandos",
+        "sha256_cert_fingerprints": ["1D:CC:94:97:48:29:8B:14:E4:E3:9D:16:B7:DB:F0:43:4D:98:3A:F1:F0:78:0C:96:4B:F7:A8:3C:B4:8B:64:18"]
+      }
+    }]

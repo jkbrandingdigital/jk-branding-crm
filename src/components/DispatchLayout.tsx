@@ -2,11 +2,11 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Package, ShieldCheck, Truck, CalendarOff, CalendarCheck, QrCode,
-  Wallet, BookOpen, Menu, X, type LucideIcon,
+  Wallet, BookOpen, X, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
-import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
+import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 /*
@@ -86,6 +86,21 @@ export default function DispatchLayout({ children }: { children: ReactNode }) {
   // match. Everything else may carry a sub-path.
   const isActive = (path: string) =>
     path === '/dispatch' ? pathname === '/dispatch' : pathname.startsWith(path)
+
+  /*
+    The four along the bottom of a phone, and this is the role they fit
+    best: the whole job is three screens, and two of them are this one
+    with a filter on. A phone is where this work actually happens —
+    standing over an open box, not at a desk.
+  */
+  const bottom: BottomItem[] = [
+    ...[
+      { label: 'Orders', icon: Package, to: '/dispatch', active: isActive('/dispatch'), show: !ready || can('mod_job_works') },
+      { label: 'To check', icon: ShieldCheck, to: '/dispatch/qc', active: isActive('/dispatch/qc'), show: !ready || can('dispatch_qc') },
+      { label: 'Shipped', icon: Truck, to: '/dispatch/shipped', active: isActive('/dispatch/shipped'), show: !ready || can('dispatch_courier') },
+    ].filter((x) => x.show).slice(0, 3).map(({ show: _show, ...x }) => x),
+    { label: 'Scan', icon: QrCode, to: '/scan', active: false },
+  ]
 
   const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
@@ -188,17 +203,10 @@ export default function DispatchLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <button
-            onClick={() => setOpen(true)}
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-gray-300 lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu size={18} /> Menu
-          </button>
-          {children}
-        </main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
       </div>
+
+      <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />
     </div>
   )
 }

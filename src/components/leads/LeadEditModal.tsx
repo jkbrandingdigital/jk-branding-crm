@@ -3,6 +3,7 @@ import { Loader2, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { SOURCES, type Lead, type Stage, type Staff } from './leadUtils'
 import { type Label } from './labels'
+import { SHEET_BACKDROP_TOP, sheetPanel } from '../Sheet'
 
 type LeadL = Lead & { label_id?: string | null }
 
@@ -61,22 +62,25 @@ export default function LeadEditModal({
   const assignable = staff.filter((s) => s.is_active)
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    /* z-[60], because this opens from inside the lead drawer and has to
+       sit over it. */
+    <div className={SHEET_BACKDROP_TOP} onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="lead-edit-title"
-        className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[#2a2a2a] bg-[#121212]"
+        className={sheetPanel({ width: 'sm:max-w-3xl', maxH: 'sm:max-h-[90vh]' })}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-[#242424] bg-[#171717] px-5 py-3.5">
+        <div className="flex shrink-0 items-center justify-between border-b border-[#242424] bg-[#171717] px-4 py-3 sm:px-5 sm:py-3.5">
           <h2 id="lead-edit-title" className="font-semibold text-white">Edit lead #{lead.lead_no}</h2>
-          <button onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-gray-400 hover:text-white">
+          {/* 44px, so a thumb hits it. */}
+          <button onClick={onClose} aria-label="Close" className="-mr-2 flex h-11 w-11 items-center justify-center rounded-lg text-gray-400 hover:text-white sm:mr-0 sm:h-auto sm:w-auto sm:p-1">
             <X size={20} />
           </button>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 sm:p-5">
           {error && <p className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm text-red-400">{error}</p>}
 
           <div className="grid gap-4 sm:grid-cols-3">
@@ -167,14 +171,18 @@ export default function LeadEditModal({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-[#242424] bg-[#171717] px-5 py-3">
-          <button onClick={onClose} className="rounded-lg border border-[#2a2a2a] px-4 py-2 text-sm text-gray-300 hover:text-white">
+        {/* On a phone the two buttons go full width and stack, Save on
+            top — a 5rem button in the corner of a 6-inch screen is a
+            target you miss. flex-col-reverse keeps Save first in the
+            markup, so tab order and the keyboard stay as they were. */}
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-[#242424] bg-[#171717] px-4 py-3 sm:flex-row sm:justify-end sm:gap-3 sm:px-5">
+          <button onClick={onClose} className="w-full rounded-lg border border-[#2a2a2a] px-4 py-2.5 text-sm text-gray-300 hover:text-white sm:w-auto sm:py-2">
             Cancel
           </button>
           <button
             onClick={submit}
             disabled={busy}
-            className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50 sm:w-auto sm:py-2"
           >
             {busy && <Loader2 size={16} className="animate-spin" />} Save lead
           </button>

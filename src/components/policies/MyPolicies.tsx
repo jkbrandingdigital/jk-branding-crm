@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  BookOpen, Check, AlertCircle, Calendar, Building2, RefreshCw,
+  BookOpen, Check, AlertCircle, Calendar, Building2, RefreshCw, FileText,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
@@ -32,6 +32,9 @@ type Policy = {
   title: string
   summary: string | null
   body: string
+  doc_type: 'policy' | 'sop'
+  file_path: string | null
+  file_name: string | null
   version: number
   department: string | null
   effective_from: string | null
@@ -53,12 +56,13 @@ export default function MyPolicies() {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const [pdfErr, setPdfErr] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     const { data, error } = await supabase
       .from('my_policies')
-      .select('id, code, title, summary, body, version, department, effective_from, must_read, published_at, updated_at, read_this_version, read_at')
+      .select('id, code, title, summary, body, doc_type, file_path, file_name, version, department, effective_from, must_read, published_at, updated_at, read_this_version, read_at')
     if (error) setErr(error.message)
     else {
       setErr(null)
@@ -95,6 +99,22 @@ export default function MyPolicies() {
 
   const open = useMemo(
     () => rows.find((p) => p.id === openId) ?? null, [rows, openId])
+
+  // The SOP bucket is private, so the file needs a signed URL — a short-
+  // lived link only this signed-in person gets. Opened in a new tab so
+  // the acknowledgement screen stays put behind it.
+  async function openPdf(p: Policy) {
+    setPdfErr(null)
+    if (!p.file_path) { setPdfErr('No file is attached.'); return }
+    const { data, error } = await supabase.storage
+      .from('sops')
+      .createSignedUrl(p.file_path, 600)
+    if (error || !data?.signedUrl) {
+      setPdfErr(error?.message ?? 'Could not open the PDF.')
+      return
+    }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
+  }
 
   async function markRead(id: string) {
     setBusy(true)
@@ -221,15 +241,35 @@ export default function MyPolicies() {
                 </div>
               </header>
 
-              {/*
-                The words. They are written by whoever holds policy_edit —
-                the same people who can change the salary rules — so the
-                HTML is the company's own, not a stranger's.
-              */}
-              <div
-                className="policy-body space-y-3 p-5 text-sm leading-relaxed text-gray-300"
-                dangerouslySetInnerHTML={{ __html: open.body || '<p>Nothing written yet.</p>' }}
-              />
+              {open.doc_type === 'sop' ? (
+                // An SOP is a PDF. Opening it fetches a short-lived signed
+                // URL — the bucket is private, so a plain link would not
+                // open — and shows it in a new tab.
+                <div className="p-5">
+                  <button
+                    onClick={() => void openPdf(open)}
+                    disabled={!open.file_path}
+                    className="flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-medium text-black hover:bg-orange-600 disabled:opacity-50"
+                  >
+                    <FileText size={16} /> Open the PDF
+                    {open.file_name && <span className="font-normal opacity-80">· {open.file_name}</span>}
+                  </button>
+                  {pdfErr && <p className="mt-2 text-xs text-red-300">{pdfErr}</p>}
+                  <p className="mt-3 text-xs text-gray-500">
+                    Read the whole procedure, then acknowledge it below.
+                  </p>
+                </div>
+              ) : (
+                /*
+                  The words. They are written by whoever holds policy_edit —
+                  the same people who can change the salary rules — so the
+                  HTML is the company's own, not a stranger's.
+                */
+                <div
+                  className="policy-body space-y-3 p-5 text-sm leading-relaxed text-gray-300"
+                  dangerouslySetInnerHTML={{ __html: open.body || '<p>Nothing written yet.</p>' }}
+                />
+              )}
 
               {/* ── The acknowledgement, at the end where it belongs ── */}
               <footer className="border-t border-[#242424] p-5">

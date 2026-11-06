@@ -86,7 +86,12 @@ export default function CustomerDetail({
           <span className={`rounded-full px-2 py-0.5 text-[11px] ${STAGE_CLS[p.stage_color ?? 'gray'] ?? STAGE_CLS.gray}`}>
             {p.stage_name ?? '—'}
           </span>
-          {Number(p.value_amount) > 0 && (
+          {/* value_amount is null when the money is not this person's to
+              see. Number(null) is 0, so the old check already hid both
+              that and a genuine zero — but TypeScript cannot read that
+              narrowing, so the null is ruled out first. Same behaviour,
+              just spelled out. */}
+          {p.value_amount != null && Number(p.value_amount) > 0 && (
             <span className="text-xs tabular-nums text-gray-400">{money(p.value_amount)}</span>
           )}
         </span>

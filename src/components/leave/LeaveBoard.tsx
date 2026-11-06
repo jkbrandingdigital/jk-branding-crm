@@ -27,6 +27,7 @@ import {
   ChevronLeft, ChevronRight, Clock,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { CARD_TABLE } from '../CardTable'
 
 type Waiting = {
   id: string; user_id: string; emp_code: string; full_name: string; branch: string | null
@@ -366,7 +367,7 @@ export default function LeaveBoard() {
           <p className="px-5 py-10 text-center text-sm text-gray-600">Nobody has asked for leave this month.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className={`w-full text-sm ${CARD_TABLE}`}>
               <thead>
                 <tr className="border-b border-[#1f1f1f] text-left text-xs text-gray-500">
                   <th className="px-5 py-2.5 font-normal">Name</th>
@@ -380,26 +381,27 @@ export default function LeaveBoard() {
               <tbody className="divide-y divide-[#1a1a1a]">
                 {rows.map((r) => (
                   <tr key={r.id} className="transition-colors hover:bg-[#181818]">
-                    <td className="px-5 py-3">
+                    {/* No label: on a card the name is the heading. */}
+                    <td data-label="" className="px-5 py-3">
                       <p className="font-medium">{r.full_name}</p>
                       <p className="font-mono text-[11px] text-gray-500">{r.emp_code}</p>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-gray-300">
+                    <td data-label="When" className="whitespace-nowrap px-3 py-3 text-gray-300">
                       {r.from_date === r.to_date ? day(r.from_date)
                         : `${day(r.from_date)} – ${day(r.to_date)}`}
                       {r.portion !== 'Full' && (
                         <span className="ml-1 text-xs text-gray-500">({r.portion})</span>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-gray-400">{r.type_name}</td>
-                    <td className="px-3 py-3 text-right tabular-nums text-gray-300">
+                    <td data-label="Kind" className="px-3 py-3 text-gray-400">{r.type_name}</td>
+                    <td data-label="Days" className="px-3 py-3 text-right tabular-nums text-gray-300">
                       {r.hours ? `${Number(r.hours)} h` : Number(r.days)}
                     </td>
-                    <td className={`px-3 py-3 text-right tabular-nums ${
+                    <td data-label="Cut" className={`px-3 py-3 text-right tabular-nums ${
                       Number(r.pay_cut) > 0 ? 'text-red-300' : 'text-gray-600'}`}>
                       {Number(r.pay_cut) > 0 ? rupees(r.pay_cut) : '—'}
                     </td>
-                    <td className="px-5 py-3"><Chip state={r.state} /></td>
+                    <td data-label="State" className="px-5 py-3"><Chip state={r.state} /></td>
                   </tr>
                 ))}
               </tbody>

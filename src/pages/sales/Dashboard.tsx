@@ -1,16 +1,19 @@
 import { useSearchParams } from 'react-router-dom'
 import SalesLayout, { type SalesPage } from '../../components/SalesLayout'
 import SalesPerformance from '../../components/SalesPerformance'
+import SalesHome from './SalesHome'
 import EvolutionForm from './EvolutionForm'
 import DailyReport from './DailyReport'
 import LeadsBoard from '../../components/leads/LeadsBoard'
 
-const PAGES: SalesPage[] = ['evolution', 'report', 'performance', 'leads']
+const PAGES: SalesPage[] = ['home', 'evolution', 'report', 'performance', 'leads']
 
-// Morning (before 2 PM IST) opens the Evolution Form, evening opens the Daily Report
+// The landing is now the dashboard. It used to open the Evolution Form in
+// the morning and the Daily Report in the evening; the dashboard shows the
+// state of both at a glance and links straight to whichever is still due,
+// so the person lands on the whole day rather than one form.
 function defaultPage(): SalesPage {
-  const hour = Number(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false }))
-  return hour < 14 ? 'evolution' : 'report'
+  return 'home'
 }
 
 export default function SalesDashboard() {
@@ -20,6 +23,7 @@ export default function SalesDashboard() {
 
   return (
     <SalesLayout active={page}>
+      {page === 'home' && <SalesHome />}
       {page === 'evolution' && <EvolutionForm />}
       {page === 'report' && <DailyReport />}
       {page === 'leads' && <LeadsBoard />}

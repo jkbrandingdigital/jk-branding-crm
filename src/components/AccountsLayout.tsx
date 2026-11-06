@@ -2,11 +2,11 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Wallet, Package, FileText, CalendarOff, CalendarCheck, QrCode,
-  BookOpen, Menu, X, type LucideIcon,
+  BookOpen, X, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
-import { NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar } from './SidebarChrome'
+import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 
 /*
@@ -76,6 +76,19 @@ export default function AccountsLayout({ children }: { children: ReactNode }) {
 
   const isActive = (path: string) =>
     path === '/accounts' ? pathname === '/accounts' : pathname.startsWith(path)
+
+  /*
+    The four along the bottom of a phone. Accounts is a three-screen
+    job, so all three fit, and Scan is the fourth — everybody scans.
+  */
+  const bottom: BottomItem[] = [
+    ...[
+      { label: 'Payments', icon: Wallet, to: '/accounts', active: isActive('/accounts'), show: !ready || can('job_work_payment') },
+      { label: 'Orders', icon: Package, to: '/accounts/job-works', active: isActive('/accounts/job-works'), show: !ready || can('mod_job_works') },
+      { label: 'Quotes', icon: FileText, to: '/accounts/quotations', active: isActive('/accounts/quotations'), show: !ready || can('mod_quotations') },
+    ].filter((x) => x.show).slice(0, 3).map(({ show: _show, ...x }) => x),
+    { label: 'Scan', icon: QrCode, to: '/scan', active: false },
+  ]
 
   const sidebarFor = (narrow: boolean) => (
     <nav className="flex h-full flex-col">
@@ -173,17 +186,10 @@ export default function AccountsLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
-          <button
-            onClick={() => setOpen(true)}
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-sm text-gray-300 lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu size={18} /> Menu
-          </button>
-          {children}
-        </main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
       </div>
+
+      <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />
     </div>
   )
 }

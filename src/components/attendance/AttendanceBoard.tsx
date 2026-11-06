@@ -22,6 +22,7 @@ import { DateField } from '../DateField'
 import { istDate } from '../../lib/format'
 import DayDrawer, { type DayPerson } from './DayDrawer'
 import RequestsCard from './RequestsCard'
+import { CARD_TABLE } from '../CardTable'
 
 
 // ── The colours ─────────────────────────────────────────────────
@@ -371,7 +372,9 @@ export default function AttendanceBoard() {
             <Empty text={loading ? 'Loading…' : 'Nobody matches this.'} pad />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-sm">
+              {/* lg:min-w, not min-w: in card mode an 820px floor would
+                  still apply and scroll the page sideways. */}
+              <table className={`w-full text-sm lg:min-w-[820px] ${CARD_TABLE}`}>
                 <thead>
                   <tr className="border-b border-[#242424] text-left text-xs text-gray-500">
                     <th className="px-5 py-3 font-normal">Code</th>
@@ -390,13 +393,14 @@ export default function AttendanceBoard() {
                       onClick={() => setOpen(x)}
                       className="cursor-pointer border-b border-[#1c1c1c] transition-colors last:border-0 hover:bg-[#1a1a1a]"
                     >
-                      <td className="px-5 py-3 font-mono text-xs text-gray-500">{x.emp_code}</td>
-                      <td className="py-3 pr-4">
+                      <td data-label="Code" className="px-5 py-3 font-mono text-xs text-gray-500">{x.emp_code}</td>
+                      {/* No label: on a card the name is the heading. */}
+                      <td data-label="" className="py-3 pr-4">
                         <p className="font-medium">{x.full_name}</p>
                         <p className="text-xs text-gray-500">{x.designation || x.department || '—'}</p>
                       </td>
-                      <td className="py-3 pr-4 text-xs text-gray-400">{x.branch ?? '—'}</td>
-                      <td className="whitespace-nowrap py-3 pr-4 tabular-nums text-gray-300">
+                      <td data-label="Branch" className="py-3 pr-4 text-xs text-gray-400">{x.branch ?? '—'}</td>
+                      <td data-label="In" className="whitespace-nowrap py-3 pr-4 tabular-nums text-gray-300">
                         {clock(x.check_in)}
                         {x.is_late && <span className="ml-2 text-xs text-amber-400">+{x.late_minutes}m</span>}
                         {/* Back late from lunch. The minutes have been
@@ -415,8 +419,8 @@ export default function AttendanceBoard() {
                           </span>
                         )}
                       </td>
-                      <td className="whitespace-nowrap py-3 pr-4 tabular-nums text-gray-300">{clock(x.check_out)}</td>
-                      <td className="py-3 pr-4 tabular-nums text-gray-300">
+                      <td data-label="Out" className="whitespace-nowrap py-3 pr-4 tabular-nums text-gray-300">{clock(x.check_out)}</td>
+                      <td data-label="Worked" className="py-3 pr-4 tabular-nums text-gray-300">
                         {x.check_in ? hhmm(x.minutes_worked) : '—'}
                         {/* Overtime is shown on its own, never folded into
                             the regular hours — the whole point of Hr_HR31. */}
@@ -432,7 +436,7 @@ export default function AttendanceBoard() {
                           </span>
                         )}
                       </td>
-                      <td className="py-3 pr-5 text-right">
+                      <td data-label="Status" className="py-3 pr-5 text-right">
                         <Status s={x.status} late={x.is_late} />
                       </td>
                     </tr>

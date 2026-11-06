@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { says } from './words'
+import { SHEET_FRAME, sheetPanel } from '../Sheet'
 
 type Scan = {
   id: string
@@ -169,7 +170,7 @@ export default function DayDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+    <div className={SHEET_FRAME}>
       <div
         className={`absolute inset-0 bg-black/60 backdrop-blur-[2px] transition-opacity duration-200 ${
           shown ? 'opacity-100' : 'opacity-0'
@@ -178,12 +179,22 @@ export default function DayDrawer({
       />
 
       <aside
-        className={`relative flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[#242424] bg-[#111] shadow-2xl transition-all duration-200 ease-out ${
-          shown ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.97] opacity-0'
+        className={`${sheetPanel({
+          width: 'sm:max-w-lg',
+          maxH: 'sm:max-h-[88vh]',
+          round: 'sm:rounded-2xl',
+          border: 'sm:border sm:border-[#242424]',
+          bg: 'bg-[#111]',
+          extra: 'relative shadow-2xl transition-all duration-200 ease-out',
+        })} ${
+          /* The slide-in stays, but on a phone the sheet comes up from
+             the bottom rather than growing out of the middle — scaling a
+             full-screen panel reads as the whole app shrinking. */
+          shown ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 opacity-0 sm:scale-[0.97]'
         }`}
       >
         {/* ── who and when ───────────────────────────────────────── */}
-        <header className="flex items-start gap-3 border-b border-[#242424] bg-[#151515] px-5 py-4">
+        <header className="flex shrink-0 items-start gap-3 border-b border-[#242424] bg-[#151515] px-5 py-4">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#1f1f1f] text-xs font-semibold text-gray-300">
             {person.full_name.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('')}
           </span>
@@ -199,7 +210,7 @@ export default function DayDrawer({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <p className="flex items-center gap-2 px-5 pt-4 text-xs text-gray-500">
             <CalendarDays size={13} /> {longDay(date)}
           </p>

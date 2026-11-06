@@ -161,6 +161,9 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
     question at all.
   */
   const chosen = workTypes.find((w) => w.id === workTypeId)
+  // A group (Brochure) has no time of its own — its parts are set on the
+  // task later, so quantity and the allowed line do not apply here.
+  const isGroup = Boolean(chosen?.is_group)
   const optionCount = task?.option_count ?? 1
   const allowed = allowedOf(chosen, workQty, optionCount)
 
@@ -314,7 +317,10 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                     className={input}
                   >
                     <option value="">Not set</option>
-                    {workTypes.map((w) => (
+                    {/* Group parts (parent_id set) are not pickable on their
+                        own — they live inside their group (Brochure). Only
+                        groups and standalone jobs show here. */}
+                    {workTypes.filter((w) => !w.parent_id).map((w) => (
                       <option key={w.id} value={w.id}>
                         {/*
                           "per" needs BOTH a unit and the per-unit flag.
@@ -322,12 +328,13 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                           "3h per null", which is the database talking to
                           itself in front of the user.
 
-                          No minutes at all is said plainly rather than
-                          shown as 0m — a job that looks like it takes no
-                          time is a job somebody picks by mistake.
+                          A group has no time of its own — its parts are set
+                          on the task — so it says that instead of a figure.
                         */}
-                        {w.name} · {w.minutes ? mins(w.minutes) : 'time not set'}
-                        {w.per_unit && w.unit ? ` per ${w.unit}` : ''}
+                        {w.name}
+                        {w.is_group
+                          ? ' · set the parts'
+                          : ` · ${w.minutes ? mins(w.minutes) : 'time not set'}${w.per_unit && w.unit ? ` per ${w.unit}` : ''}`}
                       </option>
                     ))}
                   </select>
@@ -338,7 +345,7 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                     them to one designer and two to another from the task
                     itself. Each slice gets its share of the time without
                     anyone working it out. */}
-                {chosen && (
+                {chosen && !isGroup && (
                   <div>
                     <label className={label} htmlFor="task-work-qty">How many</label>
                     <input
@@ -359,7 +366,7 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                 )}
               </div>
 
-              {chosen && (
+              {chosen && !isGroup && (
                 <div className="mt-3 text-sm text-gray-400">
                   Allowed time <span className="font-semibold text-white">{mins(allowed)}</span>
                   {' · '}{workQty} × {mins(chosen.minutes)}
@@ -368,6 +375,18 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                   <span className="mt-1 block text-xs text-gray-600">
                     Option 1 comes with the task. The designer adds option 2 onwards from the
                     task itself, and the allowed time goes up on its own.
+                  </span>
+                </div>
+              )}
+
+              {/* A group's parts are set on the task once it exists, so there
+                  is nothing to measure here yet. */}
+              {chosen && isGroup && (
+                <div className="mt-3 text-sm text-gray-400">
+                  <span className="text-white">{chosen.name}</span> has parts.
+                  <span className="mt-1 block text-xs text-gray-600">
+                    Create the task, then open it and set the parts — the allowed time adds up from
+                    what you pick (for example Front-Back Concept plus the inner pages).
                   </span>
                 </div>
               )}

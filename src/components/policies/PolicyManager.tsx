@@ -31,7 +31,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   BookOpen, Plus, Users, Eye, EyeOff, Trash2, Check, X, Search,
-  Bold, Italic, List, Heading, AlertCircle, RefreshCw, Save,
+  Bold, Italic, List, Heading, AlertCircle, RefreshCw, Save, FileText,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { DateField } from '../DateField'
@@ -57,6 +57,10 @@ type Draft = {
   department_id: string
   summary: string
   body: string
+  doc_type: 'policy' | 'sop'
+  file_path: string        // the stored path of the current PDF, if any
+  file_name: string        // what it is called
+  file: File | null        // a newly-picked PDF, not yet uploaded
   effective_from: string
   must_read: boolean
   is_published: boolean
@@ -66,6 +70,7 @@ type Draft = {
 
 const EMPTY: Draft = {
   id: null, title: '', department_id: '', summary: '', body: '',
+  doc_type: 'policy', file_path: '', file_name: '', file: null,
   effective_from: '', must_read: true, is_published: false, version: 1, audience: [],
 }
 
@@ -156,6 +161,10 @@ export default function PolicyManager() {
       department_id: p.department_id ? String(p.department_id) : '',
       summary: p.summary ? String(p.summary) : '',
       body: String(p.body ?? ''),
+      doc_type: p.doc_type === 'sop' ? 'sop' : 'policy',
+      file_path: p.file_path ? String(p.file_path) : '',
+      file_name: p.file_name ? String(p.file_name) : '',
+      file: null,
       effective_from: p.effective_from ? String(p.effective_from) : '',
       must_read: p.must_read !== false,
       is_published: p.is_published === true,
@@ -167,14 +176,35 @@ export default function PolicyManager() {
   async function save() {
     if (!draft) return
     setBusy(true); setErr(null); setNote(null)
+
+    // An SOP with a freshly-picked PDF uploads it to the private 'sops'
+    // bucket first, then saves its path. A random prefix keeps two files
+    // of the same name apart. The upload is gated in storage to the same
+    // right as writing a policy, so a non-editor is refused here anyway.
+    let filePath = draft.file_path
+    let fileName = draft.file_name
+    if (draft.doc_type === 'sop' && draft.file) {
+      const safe = draft.file.name.replace(/[^\w.\- ]+/g, '_')
+      const path = `${crypto.randomUUID()}-${safe}`
+      const up = await supabase.storage.from('sops').upload(path, draft.file, {
+        contentType: draft.file.type || 'application/pdf', upsert: false,
+      })
+      if (up.error) { setBusy(false); setErr(up.error.message); return }
+      filePath = path
+      fileName = draft.file.name
+    }
+
     const { data, error } = await supabase.rpc('policy_save', {
       p_id: draft.id,
       p_title: draft.title,
       p_dept: draft.department_id || null,
-      p_body: draft.body,
+      p_body: draft.doc_type === 'sop' ? null : draft.body,
       p_summary: draft.summary || null,
       p_from: draft.effective_from || null,
       p_must_read: draft.must_read,
+      p_doc_type: draft.doc_type,
+      p_file_path: filePath || null,
+      p_file_name: fileName || null,
     })
     if (error) { setBusy(false); setErr(error.message); return }
     const r = data as { ok: boolean; reason?: string; id?: string; version?: number; version_raised?: boolean }
@@ -497,11 +527,34 @@ function Editor({
             </div>
           )}
 
+          {/* Policy (words) or SOP (a PDF to follow). Only choosable on a
+              new one — changing kind on something people have read would
+              quietly swap what they acknowledged. */}
+          <Field label="What is this">
+            <div className="flex gap-2">
+              {(['policy', 'sop'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  disabled={!!draft.id}
+                  onClick={() => set({ doc_type: k })}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                    draft.doc_type === k
+                      ? 'border-orange-500/50 bg-orange-500/10 text-orange-300'
+                      : 'border-[#2a2a2a] text-gray-400 hover:text-white'
+                  } ${draft.id ? 'cursor-not-allowed opacity-60' : ''}`}
+                >
+                  {k === 'policy' ? 'Policy (written)' : 'SOP (a PDF)'}
+                </button>
+              ))}
+            </div>
+          </Field>
+
           <Field label="Title">
             <input
               value={draft.title}
               onChange={(e) => set({ title: e.target.value })}
-              placeholder="Leave and attendance rules"
+              placeholder={draft.doc_type === 'sop' ? 'Dispatch packing SOP' : 'Leave and attendance rules'}
               className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-orange-500"
             />
           </Field>
@@ -538,9 +591,47 @@ function Editor({
             />
           </Field>
 
-          <Field label="The policy">
-            <RichText value={draft.body} onChange={(v) => set({ body: v })} />
-          </Field>
+          {draft.doc_type === 'policy' ? (
+            <Field label="The policy">
+              <RichText value={draft.body} onChange={(v) => set({ body: v })} />
+            </Field>
+          ) : (
+            <Field label="The PDF">
+              <div className="rounded-lg border border-dashed border-[#2a2a2a] bg-[#1a1a1a] p-4">
+                {/* The file that is already attached, if any. */}
+                {draft.file_name && !draft.file && (
+                  <p className="mb-2 flex items-center gap-2 text-sm text-gray-300">
+                    <FileText size={15} className="text-orange-400" />
+                    {draft.file_name}
+                    <span className="text-xs text-gray-600">(attached)</span>
+                  </p>
+                )}
+                {draft.file && (
+                  <p className="mb-2 flex items-center gap-2 text-sm text-gray-300">
+                    <FileText size={15} className="text-orange-400" />
+                    {draft.file.name}
+                    <span className="text-xs text-gray-600">(will be uploaded on save)</span>
+                  </p>
+                )}
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    if (f && f.type && f.type !== 'application/pdf') {
+                      set({ file: null })
+                      return
+                    }
+                    set({ file: f })
+                  }}
+                  className="block w-full text-sm text-gray-400 file:mr-3 file:rounded-lg file:border-0 file:bg-orange-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-black hover:file:bg-orange-600"
+                />
+                <p className="mt-2 text-xs text-gray-600">
+                  A PDF only. Picking a new one replaces the attached file when you save.
+                </p>
+              </div>
+            </Field>
+          )}
 
           {/* Acknowledgement */}
           <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] p-3">
