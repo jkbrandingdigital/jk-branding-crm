@@ -46,6 +46,15 @@ type Figures = {
   paid_leave_days: number; unpaid_leave_days: number
   absent_days: number; absent_charged: number; not_yet_days: number
   late_count: number; late_half_days: number; penalty: number; day_cut: number
+  // Hr_HR36. late_half_days is what is CHARGED; _due is what the rule
+  // suggests; choice is null until HR or the super admin decides.
+  late_allowed?: number
+  late_half_days_due?: number
+  late_cut_amount?: number
+  late_cut_choice?: boolean | null
+  // Off the scanner: their days are paid as worked, never charged.
+  scan_tracked?: boolean
+  untracked_days?: number
 }
 
 type Slip = {
@@ -209,6 +218,13 @@ export default function EmployeePayroll({ userId, onBack }: {
     [st, basic],
   )
   const addedThisMonth = Number(page?.slip?.earnings ?? 0)
+
+  // The late arrivals past the allowance, and what has been decided.
+  // Locked once the built month has left Draft — the same rule the
+  // database applies, so a button never appears that would only fail.
+  const lateDue = Number(f?.late_half_days_due ?? 0)
+  const lateChoice = f?.late_cut_choice ?? null
+  const lateLocked = Boolean(page?.slip) && page?.slip?.run_state !== 'Draft'
 
   if (page && !page.ok) {
     return <p className="py-20 text-center text-sm text-gray-500">{page.reason}</p>
@@ -427,14 +443,93 @@ export default function EmployeePayroll({ userId, onBack }: {
           {/* ── the right column ───────────────────────────────── */}
           <div className="space-y-4">
             <Panel title="Attendance impact" hint={monthName(monthStr)}>
+              {/* Off the scanner: there are no scans to read, so the
+                  register charges nothing. Said up front, because a page
+                  full of zeros with no reason reads as broken. */}
+              {f?.scan_tracked === false && (
+                <p className="border-b border-sky-900/40 bg-sky-950/20 px-5 py-2.5 text-xs leading-relaxed text-sky-200/90">
+                  Not on the scanner — attendance is not deducted.
+                  {Number(f?.untracked_days) > 0 &&
+                    ` ${Number(f?.untracked_days)} working ${Number(f?.untracked_days) === 1 ? 'day is' : 'days are'} paid as worked.`}
+                  {' '}Leave they asked for still counts.
+                </p>
+              )}
+
               <div className="grid grid-cols-4 gap-2 p-4">
                 <Stat label="Worked" value={String(Number(f?.worked_days ?? 0))} tone="text-orange-400" />
                 <Stat label="Absent" value={String(Number(f?.absent_days ?? 0))}
                       tone={Number(f?.absent_days) > 0 ? 'text-red-300' : undefined} />
                 <Stat label="Late" value={String(f?.late_count ?? 0)}
                       tone={Number(f?.late_count) > 0 ? 'text-amber-400' : undefined} />
-                <Stat label="Half days" value={String(Number(f?.late_half_days ?? 0))} />
+                <Stat label="Cut for late"
+                      value={Number(f?.late_half_days ?? 0) > 0 ? `${Number(f?.late_half_days)} d` : '0'}
+                      tone={Number(f?.late_half_days) > 0 ? 'text-red-300' : undefined} />
               </div>
+
+              {/* ── the late arrivals: HR's call, not the system's ──
+                   From the fourth late arrival each one is half a day.
+                   That is worked out here, and SHOWN — nothing is taken
+                   off until somebody who runs payroll says so. */}
+              {lateDue > 0 && (
+                <div className="border-t border-[#242424] px-5 py-3.5">
+                  <p className="text-xs leading-relaxed text-gray-300">
+                    <span className="font-semibold tabular-nums">{f?.late_count}</span> late arrivals
+                    — {f?.late_allowed ?? 3} are allowed, so{' '}
+                    <span className="font-semibold tabular-nums">
+                      {lateDue} {lateDue === 1 ? 'day' : 'days'}
+                    </span>
+                    <span className="text-gray-500"> ({lateDue * 2} half days)</span> could be cut:{' '}
+                    <span className="font-semibold tabular-nums">{rupees(f?.late_cut_amount)}</span>
+                  </p>
+
+                  {lateChoice === true ? (
+                    <p className="mt-1.5 text-xs text-red-300">
+                      Cut — {rupees(f?.late_cut_amount)} comes off this month.
+                    </p>
+                  ) : lateChoice === false ? (
+                    <p className="mt-1.5 text-xs text-gray-400">
+                      Not cut — the late arrivals cost nothing this month.
+                    </p>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-amber-300">
+                      Not decided — nothing is cut until somebody chooses.
+                    </p>
+                  )}
+
+                  {lateLocked ? (
+                    <p className="mt-2 text-[11px] text-gray-600">
+                      The month has gone for approval — reopen it to change this.
+                    </p>
+                  ) : page?.can_edit && (
+                    <div className="mt-2.5 flex flex-wrap gap-2">
+                      {lateChoice !== true && (
+                        <button
+                          onClick={() => call('late_cut_set',
+                            { p_user: userId, p_month: monthStr, p_apply: true },
+                            `Cut ${rupees(f?.late_cut_amount)} for late arrivals.`)}
+                          disabled={busy}
+                          className={`${btn} bg-red-600/90 text-white hover:bg-red-600`}
+                        >
+                          {busy ? <Loader2 size={13} className="animate-spin" /> : null}
+                          Cut {rupees(f?.late_cut_amount)}
+                        </button>
+                      )}
+                      {lateChoice !== false && (
+                        <button
+                          onClick={() => call('late_cut_set',
+                            { p_user: userId, p_month: monthStr, p_apply: false },
+                            'Late arrivals not cut this month.')}
+                          disabled={busy}
+                          className={`${btn} border border-[#2a2a2a] text-gray-300 hover:bg-[#1a1a1a]`}
+                        >
+                          {lateChoice === true ? "Don't cut after all" : "Don't cut"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <p className="border-t border-[#242424] px-5 py-2.5 text-[11px] leading-relaxed text-gray-600">
                 Read from the register, not the payslip — so it is right before the month
                 is built. Absence counts at {Number(f?.penalty ?? 2)}× pay, and each day of
@@ -912,6 +1007,10 @@ export default function EmployeePayroll({ userId, onBack }: {
                 {Number(printing.absent_days) > 0 &&
                   ` · ${Number(printing.absent_days)} away without approved leave, charged as ${Number(printing.absent_charged)} days`}
                 {printing.late_count > 0 && ` · ${printing.late_count} late arrivals`}
+                {/* What the slip actually took for them — 0 when HR chose
+                    not to, so the line only appears when it cost money. */}
+                {Number(printing.late_half_days) > 0 &&
+                  `, ${Number(printing.late_half_days)} ${Number(printing.late_half_days) === 1 ? 'day' : 'days'} cut for them`}
               </p>
             </div>
           </div>

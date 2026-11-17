@@ -68,11 +68,23 @@ type Slip = {
 
 type Line = { id: string; kind: string; label: string; amount: number; note: string | null }
 
+// Rule (a), from 17 Nov 2026 (Fin_F4): only what was sold ABOVE the
+// month's target earns, at each service's own %. Counted from projects,
+// without GST — the same figure the Sales screen and Accounts show.
 type Incentive = {
   user_id: string; emp_code: string; full_name: string; branch: string | null
-  service_sold: number; product_sold: number; unmarked: number; sold: number
+  sold: number; above_target: number
+  breakdown: { service: string; share: number; pct: number; amount: number }[] | null
   target: number | null; target_met: boolean | null
   amount: number; payable: number
+}
+
+// Late arrivals past the allowance (Hr_HR36). half_days is in DAYS —
+// 0.5 for each late arrival from the fourth. choice is null until
+// somebody decides; nothing is cut before that.
+type LateDue = {
+  user_id: string; emp_code: string; full_name: string; branch: string | null
+  late_count: number; half_days: number; amount: number; choice: boolean | null
 }
 
 type Summary = {
@@ -175,6 +187,7 @@ export default function PayrollBoard() {
   const [slips, setSlips] = useState<Slip[]>([])
   const [sum, setSum] = useState<Summary | null>(null)
   const [inc, setInc] = useState<Incentive[]>([])
+  const [lates, setLates] = useState<LateDue[]>([])
   const [open, setOpen] = useState<string | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [printing, setPrinting] = useState<Slip | null>(null)
@@ -204,17 +217,20 @@ export default function PayrollBoard() {
   }, [year])
 
   const loadSlips = useCallback(async () => {
-    if (!pick) { setSlips([]); setSum(null); setInc([]); return }
+    if (!pick) { setSlips([]); setSum(null); setInc([]); setLates([]); return }
     const month = runs.find((r) => r.id === pick)?.month
-    const [s, m, i] = await Promise.all([
+    const [s, m, i, l] = await Promise.all([
       supabase.rpc('payslips_of', { p_run: pick }),
       supabase.rpc('payroll_summary', { p_run: pick }),
       month ? supabase.rpc('incentive_board', { p_month: month })
+            : Promise.resolve({ data: [] }),
+      month ? supabase.rpc('late_cuts_due', { p_month: month })
             : Promise.resolve({ data: [] }),
     ])
     setSlips((s.data ?? []) as unknown as Slip[])
     setSum((m.data ?? null) as unknown as Summary | null)
     setInc((i.data ?? []) as unknown as Incentive[])
+    setLates((l.data ?? []) as unknown as LateDue[])
   }, [pick, runs])
 
   useEffect(() => { loadRuns() }, [loadRuns])
@@ -591,19 +607,17 @@ export default function PayrollBoard() {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium">{p.full_name}</p>
                         <p className="text-xs text-gray-500">
-                          {rupees(p.service_sold)} service · {rupees(p.product_sold)} product
-                          {Number(p.unmarked) > 0 && (
-                            <span className="text-amber-300/80">
-                              {' '}· {rupees(p.unmarked)} not marked service or product
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-xs text-gray-600">
                           {p.target === null
-                            ? 'No target set for this month'
-                            : `${rupees(p.sold)} of ${rupees(p.target)} target`}
-                          {p.target_met === false && ' — not reached'}
+                            ? `${rupees(p.sold)} sold · no target set, so no incentive`
+                            : `${rupees(p.sold)} sold of ${rupees(p.target)} target`}
+                          {p.target_met === false && ' — not passed'}
+                          {Number(p.above_target) > 0 && <> · <span className="text-gray-300">{rupees(p.above_target)} above</span></>}
                         </p>
+                        {(p.breakdown ?? []).length > 0 && (
+                          <p className="text-xs text-gray-600">
+                            {(p.breakdown ?? []).map((b) => `${b.service} ${Number(b.pct)}% = ${rupees(b.amount)}`).join(' · ')}
+                          </p>
+                        )}
                       </div>
                       <span className={`text-sm font-semibold tabular-nums ${
                         Number(p.payable) > 0 ? 'text-green-300' : 'text-gray-600'}`}>
@@ -612,9 +626,12 @@ export default function PayrollBoard() {
                       {isDraft && slip && Number(p.payable) > 0 && (
                         <button
                           onClick={async () => {
-                            const okDone = await call('payslip_line_add', {
-                              p_slip: slip.id, p_kind: 'earning',
-                              p_label: 'Sales incentive', p_amount: Number(p.payable),
+                            // Through incentive_to_payslip, the same door
+                            // Accounts uses: it REPLACES an earlier
+                            // "Sales incentive" line, so HR and Accounts
+                            // both pressing Add can never pay it twice.
+                            const okDone = await call('incentive_to_payslip', {
+                              p_user: p.user_id, p_month: run!.month,
                             })
                             if (okDone) setSaid({ kind: 'ok', text: 'Added to the payslip.' })
                           }}
@@ -624,12 +641,81 @@ export default function PayrollBoard() {
                           <Plus size={14} /> Add
                         </button>
                       )}
-                      {Number(p.payable) === 0 && Number(p.amount) > 0 && (
-                        <span className="text-xs text-amber-300/80">held — target not met</span>
-                      )}
                     </li>
                   )
                 })}
+              </ul>
+            </Panel>
+          )}
+
+          {/* ── late arrivals past the allowance ───────────────────
+               The same shape as the incentive above, for the same
+               reason: the database works it out, a person decides.
+               Undecided people are listed first (late_cuts_due orders
+               them so), because they are the ones that need doing. */}
+          {lates.length > 0 && (
+            <Panel
+              title="Late arrivals"
+              hint={(() => {
+                const waiting = lates.filter((x) => x.choice === null).length
+                return waiting > 0
+                  ? `${waiting} to decide — nothing is cut until you choose`
+                  : 'all decided'
+              })()}
+              className="no-print mt-4"
+            >
+              <ul className="divide-y divide-[#1a1a1a]">
+                {lates.map((p) => (
+                  <li key={p.user_id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
+                    <Clock size={14} className={`shrink-0 ${p.choice === null ? 'text-amber-400' : 'text-gray-600'}`} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">{p.full_name}</p>
+                      <p className="text-xs text-gray-500">
+                        {p.late_count} late — {Number(p.half_days)} {Number(p.half_days) === 1 ? 'day' : 'days'}
+                        <span className="text-gray-600"> ({Number(p.half_days) * 2} half days)</span>
+                      </p>
+                    </div>
+
+                    <span className={`text-sm font-semibold tabular-nums ${
+                      p.choice === true ? 'text-red-300' : p.choice === false ? 'text-gray-600 line-through' : 'text-gray-300'}`}>
+                      {rupees(p.amount)}
+                    </span>
+
+                    {p.choice === true && <span className="text-xs text-red-300/80">cut</span>}
+                    {p.choice === false && <span className="text-xs text-gray-500">not cut</span>}
+                    {p.choice === null && <span className="text-xs text-amber-300/80">not decided</span>}
+
+                    {/* Only while the month is a draft — the database
+                        closes the choice after that, so no button is
+                        shown that would only fail. */}
+                    {isDraft && (
+                      <div className="flex gap-2">
+                        {p.choice !== true && (
+                          <button
+                            onClick={() => call('late_cut_set',
+                              { p_user: p.user_id, p_month: run.month, p_apply: true },
+                              () => setSaid({ kind: 'ok', text: `${p.full_name}: ${rupees(p.amount)} cut for late arrivals.` }))}
+                            disabled={busy}
+                            className={`${btn} border border-[#3a2a2a] text-red-300 hover:bg-red-950/40`}
+                          >
+                            Cut
+                          </button>
+                        )}
+                        {p.choice !== false && (
+                          <button
+                            onClick={() => call('late_cut_set',
+                              { p_user: p.user_id, p_month: run.month, p_apply: false },
+                              () => setSaid({ kind: 'ok', text: `${p.full_name}: late arrivals not cut.` }))}
+                            disabled={busy}
+                            className={`${btn} border border-[#2a2a2a] text-gray-300 hover:bg-[#1a1a1a]`}
+                          >
+                            Don&rsquo;t cut
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                ))}
               </ul>
             </Panel>
           )}
@@ -770,7 +856,7 @@ export default function PayrollBoard() {
                           {Number(s.unpaid_leave_days)} unpaid leave ·{' '}
                           {Number(s.absent_days)} absent (charged {Number(s.absent_charged)}) ·{' '}
                           {s.late_count} late{Number(s.late_half_days) > 0 &&
-                            `, ${Number(s.late_half_days)} half day off for it`}
+                            `, ${Number(s.late_half_days)} ${Number(s.late_half_days) === 1 ? 'day' : 'days'} cut for it`}
                           {Number(s.not_yet_days) > 0 && ` · ${Number(s.not_yet_days)} still to come`}
                         </p>
 
@@ -951,7 +1037,8 @@ export default function PayrollBoard() {
                 {Number(printing.absent_days) > 0 &&
                   ` · ${Number(printing.absent_days)} away without approved leave, charged as ${Number(printing.absent_charged)} days`}
                 {printing.late_count > 0 && ` · ${printing.late_count} late arrivals`}
-                {Number(printing.late_half_days) > 0 && `, costing ${Number(printing.late_half_days)} of a day`}
+                {Number(printing.late_half_days) > 0 &&
+                  `, ${Number(printing.late_half_days)} ${Number(printing.late_half_days) === 1 ? 'day' : 'days'} cut for them`}
               </p>
             </div>
 

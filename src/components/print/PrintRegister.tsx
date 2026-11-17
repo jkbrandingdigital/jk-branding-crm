@@ -12,6 +12,7 @@ import {
   downloadCsv, fmtDT, fmtTime, loadNames, PERIODS, windowOf,
   type Period, type PrintJob, type PrintName,
 } from './printUtils'
+import { authUser } from '../../lib/auth'
 
 /*
   Printing Media — the print register.
@@ -55,7 +56,7 @@ export default function PrintRegister() {
 
   useEffect(() => {
     void (async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user } } = await authUser()
       setMe(user?.id ?? '')
     })()
   }, [])

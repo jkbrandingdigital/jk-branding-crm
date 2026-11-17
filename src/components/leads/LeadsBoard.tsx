@@ -17,6 +17,7 @@ import { loadBranches, type Branch, type Customer } from '../customers/customerU
 import { LABEL_CLS, type Label } from './labels'
 import { BOARD_WRAP, boardColumn, StagePicker, useBoardStage } from '../BoardMobile'
 import { SOURCES, sourceOf, loadSources, fromInputDT, toInputDT, fmtDT, isOverdue, waLink, loadStaff, type Lead, type Source, type Stage, type Staff } from './leadUtils'
+import { authUser } from '../../lib/auth'
 
 type LeadL = Lead & { label_id?: string | null; label_ids?: string[] | null }
 
@@ -560,7 +561,7 @@ export default function LeadsBoard(
     try {
       // Who is asking has to be known before the total is counted, or
       // the heading says twelve thousand on a board showing forty.
-      const { data: u } = await supabase.auth.getUser()
+      const { data: u } = await authUser()
       const me = u.user?.id ?? null
 
       // The grand total is only a heading. An exact count over twelve

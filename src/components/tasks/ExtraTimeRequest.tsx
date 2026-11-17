@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Clock3, Loader2, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { mins } from './taskUtils'
+import { authUser } from '../../lib/auth'
 
 /*
   Asking for more time on a job.
@@ -49,7 +50,7 @@ export default function ExtraTimeRequest({
   const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await authUser()
     if (!user) return
 
     const [a, t, q] = await Promise.all([

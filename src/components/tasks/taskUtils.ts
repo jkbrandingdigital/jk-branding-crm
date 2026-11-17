@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase'
+import { authUser } from '../../lib/auth'
 
 export type TaskStage = {
   id: string
@@ -30,6 +31,13 @@ export type WorkType = {
   // group, the designer sets its parts on the task.
   is_group: boolean
   parent_id: string | null
+  // Time a client's change round adds, and time one mockup adds. Both are
+  // set per kind of work in Settings; a task keeps the figure it was given.
+  change_minutes?: number | null
+  mockup_minutes?: number | null
+  // Off for work that never has a mockup (banners, posts, video, logo…):
+  // its tasks show no "+ mockup".
+  allows_mockup?: boolean | null
 }
 
 export type TaskAssignee = { user_id: string; assigned_by: string | null; assigned_at: string; is_current: boolean }
@@ -215,7 +223,7 @@ export async function setAssignees(taskId: string, userIds: string[], existing: 
   const toAdd = keep.filter((u) => !had.includes(u))
   const toRevive = keep.filter((u) => had.includes(u) && !existing.find((a) => a.user_id === u)?.is_current)
   const toRetire = existing.filter((a) => a.is_current && !keep.includes(a.user_id)).map((a) => a.user_id)
-  const { data: who } = await supabase.auth.getUser()
+  const { data: who } = await authUser()
   const by = who.user?.id ?? null
 
   if (toRetire.length) {

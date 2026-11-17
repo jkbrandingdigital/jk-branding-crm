@@ -3,6 +3,108 @@ import { supabase } from './supabase'
 
 export type Perms = Record<string, boolean>
 
+/*
+  ── Read once, shared by everyone ──
+
+  This used to live inside the hook, so every component that called
+  usePermissions() asked the server for itself: getUser() and then
+  my_permissions, on mount, and again on INITIAL_SESSION — twice each.
+  A page with the layout, the header, the board, the bell and a timer
+  button is eight components, so one page load was sixteen requests for
+  one answer. The Supabase logs show it plainly: eight /auth/v1/user and
+  eight my_permissions inside the same second, from the same browser.
+  Across 31 people all day, that was most of the project's log quota.
+
+  Now the answer is kept here, at module level, and fetched once. Every
+  hook reads the same copy and is told when it changes.
+
+  It is fetched again only when the person changes — signing in as
+  someone else, or signing out. Not on SIGNED_IN as such: supabase-js
+  fires SIGNED_IN every time the tab regains focus, and re-reading the
+  rights on every alt-tab was another quiet stream of requests.
+
+  getSession(), not getUser(). getUser() asks the auth server every
+  time; getSession() reads the session the browser already holds. For
+  "who is this, and what may the screen show them" that is enough — the
+  real check is RLS on the server, which sees the token either way.
+*/
+let cache: Perms | null = null
+let cacheUser: string | null | undefined = undefined
+let inflight: Promise<void> | null = null
+let started = false
+const listeners = new Set<(p: Perms | null) => void>()
+
+function publish(p: Perms, uid: string | null) {
+  cache = p
+  cacheUser = uid
+  listeners.forEach((l) => l(p))
+}
+
+function load(force = false): Promise<void> {
+  if (inflight && !force) return inflight
+  const p = (async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    const uid = session?.user?.id ?? null
+    if (!uid) {
+      publish({}, null)
+      return
+    }
+    if (!force && uid === cacheUser && cache) return
+    const { data } = await supabase.rpc('my_permissions')
+    /*
+      Is it still the same person? The answer is published only if the
+      session now belongs to whoever it was asked for — so rights read
+      for someone who signed out mid-request are never shown to the
+      next person.
+
+      This replaced a generation counter, and the counter was a bug:
+      INITIAL_SESSION arrives just after the first request leaves, it
+      counted as "a different person", and the first answer was thrown
+      away — with nothing asked again, because the request it was
+      waiting on was that same one. Every screen sat on "Loading…".
+      Checking the person, not counting events, cannot do that.
+    */
+    const { data: { session: now } } = await supabase.auth.getSession()
+    if ((now?.user?.id ?? null) === uid) publish((data as Perms) ?? {}, uid)
+  })()
+  inflight = p
+  p.finally(() => { if (inflight === p) inflight = null })
+  return p
+}
+
+function start() {
+  if (started) return
+  started = true
+  // One listener for the whole app, not one per component.
+  supabase.auth.onAuthStateChange((event, session) => {
+    const uid = session?.user?.id ?? null
+    if (event === 'SIGNED_OUT') {
+      publish({}, null)
+      return
+    }
+    // Only a different person is worth a request. setTimeout keeps the
+    // Supabase client out of its own callback. If a request is already
+    // on its way it is let finish first, and only then is the person
+    // checked again — usually it was for this same person, and nothing
+    // more needs asking.
+    if (uid !== cacheUser) {
+      setTimeout(() => {
+        const after = inflight ?? Promise.resolve()
+        void after.then(() => { if (uid !== cacheUser) void load() })
+      }, 0)
+    }
+  })
+}
+
+/*
+  For a screen that has just changed the logged-in person's own rights
+  and needs them back now, without a reload. Nothing calls it yet; it is
+  here so that the day something does, it is one line.
+*/
+export function refreshPermissions() {
+  return load(true)
+}
+
 // Logged-in user's rights (role defaults + personal toggles).
 //
 //  all          → Super Admin. Everything, always.
@@ -10,36 +112,14 @@ export type Perms = Record<string, boolean>
 //                 what they find inside is decided switch by switch,
 //                 from Employees → "What they can open".
 export function usePermissions() {
-  const [perms, setPerms] = useState<Perms | null>(null)
+  const [perms, setPerms] = useState<Perms | null>(cache)
 
   useEffect(() => {
-    let alive = true
-
-    const read = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        if (alive) setPerms({})
-        return
-      }
-      const { data } = await supabase.rpc('my_permissions')
-      if (alive) setPerms((data as Perms) ?? {})
-    }
-
-    read()
-
-    // Logging in happens after this hook mounts, so read the rights again
-    // once the session is there. setTimeout keeps the Supabase client out
-    // of its own callback.
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
-        setTimeout(() => { if (alive) read() }, 0)
-      }
-    })
-
-    return () => {
-      alive = false
-      sub.subscription.unsubscribe()
-    }
+    start()
+    listeners.add(setPerms)
+    if (cache === null) void load()
+    else setPerms(cache)
+    return () => { listeners.delete(setPerms) }
   }, [])
 
   const isSuper = perms?.all === true

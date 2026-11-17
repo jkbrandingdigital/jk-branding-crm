@@ -115,6 +115,9 @@ export default function AttendanceBoard() {
   const [err, setErr] = useState<string | null>(null)
   const [open, setOpen] = useState<DayPerson | null>(null)
   const [canEdit, setCanEdit] = useState(false)
+  // Show only the people who were expected and have not scanned — the
+  // ones HR opens this page to ring.
+  const [onlyMissing, setOnlyMissing] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -143,14 +146,26 @@ export default function AttendanceBoard() {
 
   const today = date === istDate()
 
+  // The database already lists the people who have not scanned first
+  // (Hr_HR36), and says Leave or Off for the people who were never
+  // expected — so "missing" here is exactly the two statuses below and
+  // never somebody HR sent on leave.
+  const missingCount = useMemo(() => rows.filter((x) => isMissing(x.status)).length, [rows])
+
   const shown = useMemo(
     () =>
       rows.filter((x) => {
+        if (onlyMissing && !isMissing(x.status)) return false
         const t = `${x.full_name} ${x.emp_code} ${x.branch ?? ''} ${x.department ?? ''}`.toLowerCase()
         return !q || t.includes(q.toLowerCase())
       }),
-    [rows, q],
+    [rows, q, onlyMissing],
   )
+
+  // Nobody left to show once the filter has emptied itself — everybody
+  // scanned in while the page was open. Turn it off rather than leave
+  // an empty list that looks like a fault.
+  useEffect(() => { if (onlyMissing && missingCount === 0) setOnlyMissing(false) }, [onlyMissing, missingCount])
 
   // Branch and department counts come off the same rows as everything
   // else, so they add up to the tiles above them.
@@ -350,6 +365,28 @@ export default function AttendanceBoard() {
                 {shown.length} people{canEdit ? ' · tap a row to correct a day' : ''}
               </span>
             </h2>
+            {/* Who has not scanned, as a filter. Counted from the same
+                rows as the list, so the number on the chip is the number
+                of rows it leaves. */}
+            {missingCount > 0 && (
+              <button
+                onClick={() => setOnlyMissing((v) => !v)}
+                aria-pressed={onlyMissing}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                  onlyMissing
+                    ? today
+                      ? 'border-amber-500/60 bg-amber-500/15 text-amber-200'
+                      : 'border-red-500/60 bg-red-500/15 text-red-200'
+                    : today
+                      ? 'border-amber-900/60 text-amber-300 hover:bg-amber-500/10'
+                      : 'border-red-900/60 text-red-300 hover:bg-red-500/10'
+                }`}
+              >
+                <UserX size={13} />
+                {missingCount} {today ? 'not scanned yet' : 'did not scan'}
+                {onlyMissing && <span className="text-[11px] opacity-70">· show all</span>}
+              </button>
+            )}
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
@@ -391,7 +428,7 @@ export default function AttendanceBoard() {
                     <tr
                       key={x.user_id}
                       onClick={() => setOpen(x)}
-                      className="cursor-pointer border-b border-[#1c1c1c] transition-colors last:border-0 hover:bg-[#1a1a1a]"
+                      className={`cursor-pointer border-b border-[#1c1c1c] transition-colors last:border-0 ${missingRow(x.status)}`}
                     >
                       <td data-label="Code" className="px-5 py-3 font-mono text-xs text-gray-500">{x.emp_code}</td>
                       {/* No label: on a card the name is the heading. */}
@@ -471,6 +508,22 @@ export default function AttendanceBoard() {
 
 // ── pieces ───────────────────────────────────────────────────────────────
 
+// Expected in, and no scan. Leave, Half day, Off and holidays are NOT
+// missing — the database says those for the people nobody expected.
+function isMissing(s: string) {
+  return s === 'Absent' || s === 'Not in yet'
+}
+
+// The row of somebody who has not scanned stands out from the ones who
+// have. Amber while the day is still going — they may yet come in —
+// and red once it is over and they did not. A thin bar down the left
+// carries it in card mode too, where the tint alone is easy to miss.
+function missingRow(s: string) {
+  if (s === 'Not in yet') return 'bg-amber-500/[0.06] shadow-[inset_3px_0_0_#f59e0b] hover:bg-amber-500/10'
+  if (s === 'Absent') return 'bg-red-500/[0.06] shadow-[inset_3px_0_0_#dc2626] hover:bg-red-500/10'
+  return 'hover:bg-[#1a1a1a]'
+}
+
 function cell(v: string) {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
 }
@@ -510,7 +563,11 @@ function Status({ s, late }: { s: string; late: boolean }) {
     : s === 'Present' ? 'bg-amber-400/10 text-amber-300 ring-1 ring-amber-400/20'
     : s === 'Half day' ? 'bg-amber-400/10 text-amber-300 ring-1 ring-amber-400/20'
     : s === 'Leave' ? 'bg-sky-500/10 text-sky-300 ring-1 ring-sky-500/20'
-    : s === 'Not in yet' ? 'bg-[#1f1f1f] text-gray-400 ring-1 ring-[#2a2a2a]'
+    : s === 'Not in yet' ? 'bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20'
+    // Nobody was expected: weekly off, holiday, on hold. Quiet grey — it
+    // is not news, and red here would cry wolf every Sunday.
+    : s === 'Off' || s === 'Holiday' || s === 'Weekly off' || s === 'On hold'
+      ? 'bg-[#1f1f1f] text-gray-500 ring-1 ring-[#2a2a2a]'
     : 'bg-red-500/10 text-red-300 ring-1 ring-red-500/20'
   return (
     <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs ${cls}`}>

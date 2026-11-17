@@ -13,6 +13,7 @@ import { istDate, inr } from '../lib/format'
 import { zoneOf, pctOf, monthFirst, monthLast, monthTitle } from '../lib/targets'
 import { CARD_TABLE } from './CardTable'
 import { SHEET_BACKDROP, sheetPanel } from './Sheet'
+import { authUser } from '../lib/auth'
 
 /*
   Sales Performance — the shell.
@@ -126,7 +127,7 @@ export default function SalesPerformance({
 
   useEffect(() => {
     ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user } } = await authUser()
       if (selfOnly) {
         if (user?.id) setUserId(user.id)
         setSelfResolved(true)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck, Printer, Truck, Clock3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { DateField } from './DateField'
+import { authUser } from '../lib/auth'
 
 type Profile = {
   id: string
@@ -294,11 +295,13 @@ export default function StaffManager() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  // A new department, typed in right where it is needed.
+  const [newDept, setNewDept] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     const [{ data: u }, p, r, b, d, list, mods, rd, sp] = await Promise.all([
-      supabase.auth.getUser(),
+      authUser(),
       supabase
         .from('profiles')
         .select('id, emp_code, full_name, phone, branch_id, department_id, designation, date_of_joining, work_mode, is_active')
@@ -306,7 +309,8 @@ export default function StaffManager() {
       supabase.from('user_roles').select('user_id, role'),
       supabase.from('branches').select('id, name').eq('is_active', true).order('name'),
       supabase.from('departments').select('id, name').order('name'),
-      staffApi<{ users: AuthInfo[]; allowedRoles: string[]; callerRole: string }>({ action: 'list' }),
+      staffApi<{ users: AuthInfo[]; allowedRoles: string[]; callerRole: string
+                 departments?: Option[]; branches?: Option[] }>({ action: 'list' }),
       supabase.from('app_modules').select('key, label').eq('is_active', true).order('sort_order'),
       supabase.from('role_permission_defaults').select('role, perms'),
       supabase.from('staff_permissions').select('user_id, perms'),
@@ -316,8 +320,13 @@ export default function StaffManager() {
     else if (list.error) setMessage({ type: 'error', text: list.error })
     setProfiles(p.data ?? [])
     setRoles(new Map((r.data ?? []).map((x) => [x.user_id, x.role])))
-    setBranches(b.data ?? [])
-    setDepartments(d.data ?? [])
+    // The lists come from the edge function first: it reads them with the
+    // service key, so HR sees the same departments the Super Admin does.
+    // Read straight from the tables, a read rule meant for the Super
+    // Admin gave HR an empty list without any error. The direct reads stay
+    // as the fallback for an older edge function that does not send them.
+    setBranches(list.data?.branches ?? b.data ?? [])
+    setDepartments(list.data?.departments ?? d.data ?? [])
     setAuth(new Map((list.data?.users ?? []).map((x) => [x.id, x])))
     setAllowedRoles(list.data?.allowedRoles ?? [])
     setCallerRole(list.data?.callerRole ?? '')
@@ -408,7 +417,7 @@ export default function StaffManager() {
         setBusy(false)
         return setFormError(res.error)
       }
-      if (callerRole === 'super_admin' && editing.id !== myId) {
+      if (canGrant && editing.id !== myId) {
         const before = JSON.stringify(userPerms[editing.id] ?? {})
         if (JSON.stringify(permDraft) !== before) {
           const pr = await staffApi({ action: 'set_perms', user_id: editing.id, perms: permDraft })
@@ -447,6 +456,23 @@ export default function StaffManager() {
     setNewPassword('')
   }
 
+  // Super Admin and HR — the edge function checks it again. The new one is
+  // picked for this person straight away: nobody adds a department except
+  // to put somebody in it.
+  async function addDepartment() {
+    const name = (newDept ?? '').trim()
+    if (name.length < 2) return setFormError('Give the department a name.')
+    setBusy(true)
+    const res = await staffApi<Option>({ action: 'add_department', name })
+    setBusy(false)
+    if (res.error || !res.data) return setFormError(res.error ?? 'Not added.')
+    const made = res.data
+    setDepartments((list) => [...list, made].sort((a, b) => a.name.localeCompare(b.name)))
+    setForm((f) => ({ ...f, department_id: made.id }))
+    setNewDept(null)
+    setFormError(null)
+  }
+
   async function changeEmail(p: Profile) {
     const email = form.email.trim().toLowerCase()
     const current = (auth.get(p.id)?.email ?? '').toLowerCase()
@@ -468,10 +494,25 @@ export default function StaffManager() {
   const editingProfile = editing && editing !== 'new' ? editing : null
   const editingSelf = editingProfile?.id === myId
 
+  // Who may hand out access at all: the Super Admin, and HR. The edge
+  // function checks the same thing again — this only decides what shows.
+  const canGrant = callerRole === 'super_admin' || callerRole === 'hr'
+  // HR may give or take away only what HR has itself. Worked out the way
+  // the screen shows anybody's switches: the role's defaults, with that
+  // person's own overrides on top. The edge function reads the same two
+  // rows from the database and refuses anything else, so a switch shown
+  // here as locked could not have been saved anyway.
+  const myHolds = useMemo<Perms>(() => {
+    const myRole = myId ? roles.get(myId) ?? '' : ''
+    return { ...(roleDefaults[myRole] ?? {}), ...(myId ? userPerms[myId] ?? {} : {}) }
+  }, [myId, roles, roleDefaults, userPerms])
+  const iHold = (key: string) => callerRole === 'super_admin' || myHolds[key] === true
+
   const roleDefault = (key: string) => Boolean(roleDefaults[form.role]?.[key])
   const effective = (key: string) => (key in permDraft ? permDraft[key] : roleDefault(key))
   const isOverride = (key: string) => key in permDraft && permDraft[key] !== roleDefault(key)
   function togglePerm(key: string) {
+    if (!iHold(key)) return
     const next = !effective(key)
     setPermDraft((d) => {
       const copy = { ...d }
@@ -480,11 +521,12 @@ export default function StaffManager() {
       return copy
     })
   }
-  // Turn a whole department on or off in one go
+  // Turn a whole department on or off in one go — only the switches the
+  // caller holds; the rest of the group is left exactly as it was.
   function setMany(keys: string[], on: boolean) {
     setPermDraft((d) => {
       const copy = { ...d }
-      for (const k of keys) {
+      for (const k of keys.filter(iHold)) {
         if (on === Boolean(roleDefaults[form.role]?.[k])) delete copy[k]
         else copy[k] = on
       }
@@ -494,19 +536,25 @@ export default function StaffManager() {
 
   const PermToggle = ({ k, label }: { k: string; label: string }) => {
     const on = effective(k)
+    // Shown, not hidden: HR should see that the person has Settings even
+    // if HR cannot change it. A switch that vanishes looks like "off".
+    const locked = !iHold(k)
     return (
       <div className="min-w-[110px]">
-        <p className="mb-1.5 text-xs text-gray-300">
+        <p className={`mb-1.5 flex items-center gap-1 text-xs ${locked ? 'text-gray-500' : 'text-gray-300'}`}>
           {label}
-          {isOverride(k) && <span className="ml-1 text-[10px] text-orange-400">·</span>}
+          {isOverride(k) && <span className="text-[10px] text-orange-400">·</span>}
+          {locked && <Lock size={10} className="text-gray-600" aria-label="Only the Super Admin can change this" />}
         </p>
         <button
           type="button"
           role="switch"
           aria-checked={on}
           aria-label={label}
+          disabled={locked}
+          title={locked ? 'You do not have this yourself, so only the Super Admin can change it' : undefined}
           onClick={() => togglePerm(k)}
-          className={`flex h-6 w-11 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+          className={`flex h-6 w-11 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 disabled:cursor-not-allowed disabled:opacity-40 ${
             on ? 'bg-orange-500' : 'bg-[#2a2a2a]'
           }`}
         >
@@ -758,12 +806,55 @@ export default function StaffManager() {
                   <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={inputCls} inputMode="tel" />
                 </Field>
                 <Field label="Department">
-                  <select value={form.department_id} onChange={(e) => setForm({ ...form, department_id: e.target.value })} className={inputCls}>
-                    <option value="">—</option>
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
+                  {newDept === null ? (
+                    <>
+                      <select value={form.department_id} onChange={(e) => setForm({ ...form, department_id: e.target.value })} className={inputCls}>
+                        <option value="">—</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                      {canGrant && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); setNewDept('') }}
+                          className="mt-1 flex items-center gap-1 text-xs text-orange-400 hover:underline"
+                        >
+                          <Plus size={12} /> New department
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        value={newDept}
+                        autoFocus
+                        onChange={(e) => setNewDept(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); void addDepartment() }
+                          if (e.key === 'Escape') { e.preventDefault(); setNewDept(null) }
+                        }}
+                        placeholder="e.g. Digital Marketing"
+                        className={inputCls}
+                      />
+                      <button
+                        type="button"
+                        disabled={busy || newDept.trim().length < 2}
+                        onClick={(e) => { e.preventDefault(); void addDepartment() }}
+                        className="whitespace-nowrap rounded-lg border border-orange-500/60 px-3 text-sm text-orange-400 hover:bg-orange-500/10 disabled:opacity-50"
+                      >
+                        Add
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); setNewDept(null) }}
+                        className="rounded-lg px-2 text-gray-400 hover:text-white"
+                        aria-label="Cancel"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  )}
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -799,7 +890,7 @@ export default function StaffManager() {
                 extras below it are separate because most of the time the
                 answer to them is no.
               */}
-              {editingProfile && callerRole === 'super_admin' && !editingSelf && form.role === 'design_team' && (
+              {editingProfile && canGrant && !editingSelf && form.role === 'design_team' && (
                 <div className="border-t border-[#222] pt-4">
                   <div className="rounded-xl border border-[#242424] bg-[#151515] p-4">
                     <div className="flex items-start justify-between gap-4">
@@ -817,8 +908,10 @@ export default function StaffManager() {
                         role="switch"
                         aria-checked={effective('mod_print_jobs')}
                         aria-label="Printing Media"
+                        disabled={!iHold('mod_print_jobs')}
+                        title={!iHold('mod_print_jobs') ? 'You do not have this yourself, so only the Super Admin can change it' : undefined}
                         onClick={() => togglePerm('mod_print_jobs')}
-                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
                           effective('mod_print_jobs') ? 'bg-orange-500' : 'bg-[#2a2a2a]'
                         }`}
                       >
@@ -854,7 +947,7 @@ export default function StaffManager() {
                 because it is a decision about someone's job. That is the
                 same mistake Printing Media was hidden by, once.
               */}
-              {editingProfile && callerRole === 'super_admin' && !editingSelf && form.role === 'design_team' && (
+              {editingProfile && canGrant && !editingSelf && form.role === 'design_team' && (
                 <div className="border-t border-[#222] pt-4">
                   <div className="rounded-xl border border-[#242424] bg-[#151515] p-4">
                     <div className="flex items-start justify-between gap-4">
@@ -873,8 +966,10 @@ export default function StaffManager() {
                         role="switch"
                         aria-checked={effective('extra_time_approve')}
                         aria-label="Approve extra time"
+                        disabled={!iHold('extra_time_approve')}
+                        title={!iHold('extra_time_approve') ? 'You do not have this yourself, so only the Super Admin can change it' : undefined}
                         onClick={() => togglePerm('extra_time_approve')}
-                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
                           effective('extra_time_approve') ? 'bg-orange-500' : 'bg-[#2a2a2a]'
                         }`}
                       >
@@ -902,7 +997,7 @@ export default function StaffManager() {
                 default there, and a switch that only ever says yes is a
                 switch nobody should have to find.
               */}
-              {editingProfile && callerRole === 'super_admin' && !editingSelf
+              {editingProfile && canGrant && !editingSelf
                 && form.role !== 'dispatch' && form.role !== 'accounts' && (
                 <div className="border-t border-[#222] pt-4">
                   <div className="rounded-xl border border-[#242424] bg-[#151515] p-4">
@@ -922,8 +1017,10 @@ export default function StaffManager() {
                         role="switch"
                         aria-checked={effective('mod_dispatch')}
                         aria-label="Dispatch and QC"
+                        disabled={!iHold('mod_dispatch')}
+                        title={!iHold('mod_dispatch') ? 'You do not have this yourself, so only the Super Admin can change it' : undefined}
                         onClick={() => togglePerm('mod_dispatch')}
-                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
                           effective('mod_dispatch') ? 'bg-orange-500' : 'bg-[#2a2a2a]'
                         }`}
                       >
@@ -951,16 +1048,17 @@ export default function StaffManager() {
                 </div>
               )}
 
-              {editingProfile && callerRole === 'super_admin' && !editingSelf && (
+              {editingProfile && canGrant && !editingSelf && (
                 <div className="border-t border-[#222] pt-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <p className="flex items-center gap-2 text-sm font-medium text-gray-300">
                       <ShieldCheck size={15} /> What they can open
                     </p>
-                    <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-300">
+                    <label className={`flex items-center gap-2 text-sm ${iHold('is_subadmin') ? 'cursor-pointer text-gray-300' : 'cursor-not-allowed text-gray-500'}`}>
                       <input
                         type="checkbox"
                         checked={isSubAdmin}
+                        disabled={!iHold('is_subadmin')}
                         onChange={(e) =>
                           setPermDraft((d) => {
                             const copy = { ...d }
@@ -975,6 +1073,15 @@ export default function StaffManager() {
                     </label>
                   </div>
 
+                  {/* Said once, up front, so a locked switch is not a mystery. */}
+                  {callerRole === 'hr' && (
+                    <p className="mb-3 flex items-start gap-2 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-xs leading-relaxed text-gray-400">
+                      <Lock size={12} className="mt-0.5 shrink-0" />
+                      You can give or take away only what you have yourself. The locked ones are the
+                      Super Admin&rsquo;s to change.
+                    </p>
+                  )}
+
                   {isSubAdmin ? (
                     <>
                       <p className="rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs text-orange-300">
@@ -985,18 +1092,22 @@ export default function StaffManager() {
                       {ADMIN_GROUPS.map((g) => {
                         const items = g.keys.map((k) => moduleByKey.get(k)).filter(Boolean) as Module[]
                         if (items.length === 0) return null
-                        const allOn = items.every((m) => effective(m.key))
+                        // "All on" means all the ones this person may switch.
+                        const mine = items.filter((m) => iHold(m.key))
+                        const allOn = mine.length > 0 && mine.every((m) => effective(m.key))
                         return (
                           <div key={g.title} className="mt-5">
                             <div className="mb-2.5 flex items-center gap-3">
                               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{g.title}</p>
-                              <button
-                                type="button"
-                                onClick={() => setMany(items.map((m) => m.key), !allOn)}
-                                className="text-[11px] text-orange-400 hover:underline"
-                              >
-                                {allOn ? 'Turn all off' : 'Turn all on'}
-                              </button>
+                              {mine.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setMany(items.map((m) => m.key), !allOn)}
+                                  className="text-[11px] text-orange-400 hover:underline"
+                                >
+                                  {allOn ? 'Turn all off' : 'Turn all on'}
+                                </button>
+                              )}
                             </div>
                             {g.note && (
                               <p className="mb-3 rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-2 text-[11px] leading-relaxed text-gray-400">
@@ -1101,7 +1212,15 @@ export default function StaffManager() {
                   <div className="mt-4 flex items-center gap-3 text-xs">
                     <span className="text-gray-500">Orange dot means it differs from the {ROLE_LABEL[form.role] ?? form.role} default.</span>
                     {Object.keys(permDraft).length > 0 && (
-                      <button type="button" onClick={() => setPermDraft({})} className="ml-auto text-orange-400 hover:underline">
+                      <button
+                        type="button"
+                        // HR resets only what HR may change; anything else the
+                        // Super Admin set stays exactly as it is.
+                        onClick={() => setPermDraft((d) => callerRole === 'super_admin'
+                          ? {}
+                          : Object.fromEntries(Object.entries(d).filter(([k]) => !iHold(k))))}
+                        className="ml-auto text-orange-400 hover:underline"
+                      >
                         Reset to role default
                       </button>
                     )}

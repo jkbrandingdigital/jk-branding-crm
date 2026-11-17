@@ -173,7 +173,9 @@ export default function NotificationBell({
   }, [ensureAudio])
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUid(data.user?.id ?? null))
+    // getSession, not getUser: the id is already in the browser, and
+    // getUser asks the auth server for it on every mount.
+    supabase.auth.getSession().then(({ data }) => setUid(data.session?.user?.id ?? null))
   }, [])
 
   /*
@@ -246,7 +248,16 @@ export default function NotificationBell({
         },
       )
       .subscribe()
-    const poll = setInterval(loadCount, 60000) // backup if live connection drops
+    /*
+      Backup in case the live connection drops. Realtime is what
+      actually brings new ones in, so this only has to catch the odd
+      miss: every five minutes, and never for a hidden tab. It was every
+      minute, in every open tab, all day — a CRM left open overnight
+      asked the server 600 times for a number nobody was looking at.
+    */
+    const poll = setInterval(() => {
+      if (!document.hidden) void loadCount()
+    }, 300000)
     return () => {
       supabase.removeChannel(channel)
       clearInterval(poll)

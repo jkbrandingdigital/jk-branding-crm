@@ -2,15 +2,20 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Wallet, Package, FileText, CalendarOff, CalendarCheck, QrCode,
-  BookOpen, X, type LucideIcon,
+  BookOpen, X, IndianRupee, Inbox, Receipt, TrendingUp, Tag, Award, LayoutDashboard, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { usePermissions } from '../lib/permissions'
 import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
+import { supabase } from '../lib/supabase'
 
 /*
   The accounts side of the CRM.
+
+  Two sides now. Money coming in: what each project was sold for, what
+  the client has paid, and the payments sales has written down that
+  Accounts still has to find in the bank. Money going out: the vendors.
 
   What the printers are owed, and what has been paid. The register is
   the same one dispatch works from — a job work is a bill waiting to
@@ -22,15 +27,39 @@ import { getCurrentUser, getUserProfile } from '../lib/auth'
   reference, so the open figure is right.
 */
 
-type NavItem = { label: string; path?: string; icon: LucideIcon; perm?: string }
+type NavItem = { label: string; path?: string; icon: LucideIcon; perm?: string; badge?: 'waiting' | 'prices' }
 
 const NAV: { title: string; items: NavItem[] }[] = [
   {
-    title: 'Accounts',
+    title: 'Overview',
     items: [
-      { label: 'Vendor Payments', path: '/accounts', icon: Wallet, perm: 'job_work_payment' },
+      { label: 'Dashboard', path: '/accounts', icon: LayoutDashboard },
+    ],
+  },
+  {
+    title: 'Money in',
+    items: [
+      // No perm: being Accounts is the permission, and the database
+      // checks the role itself (fin_is_accounts).
+      { label: 'Sales & payments', path: '/accounts/sales', icon: IndianRupee },
+      { label: 'Payments to confirm', path: '/accounts/payments', icon: Inbox, badge: 'waiting' },
+      { label: 'Price changes', path: '/accounts/approvals', icon: Tag, badge: 'prices' },
+    ],
+  },
+  {
+    title: 'Money out',
+    items: [
+      { label: 'Purchases & expenses', path: '/accounts/costs', icon: Receipt },
+      { label: 'Vendor Payments', path: '/accounts/vendor-payments', icon: Wallet, perm: 'job_work_payment' },
       { label: 'Job Work Orders', path: '/accounts/job-works', icon: Package, perm: 'mod_job_works' },
       { label: 'Quotations', path: '/accounts/quotations', icon: FileText, perm: 'mod_quotations' },
+    ],
+  },
+  {
+    title: 'Result',
+    items: [
+      { label: 'Profit', path: '/accounts/profit', icon: TrendingUp },
+      { label: 'Sales incentive', path: '/accounts/incentive', icon: Award },
     ],
   },
   {
@@ -52,6 +81,8 @@ export default function AccountsLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useCollapsedSidebar()
   const [name, setName] = useState('')
   const [designation, setDesignation] = useState('')
+  const [waiting, setWaiting] = useState(0)
+  const [prices, setPrices] = useState(0)
 
   useEffect(() => {
     ;(async () => {
@@ -69,6 +100,21 @@ export default function AccountsLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => setOpen(false), [pathname])
 
+  // How many payments are waiting. Read again on each page change —
+  // which is when someone has just confirmed some — rather than on a
+  // timer, so an open tab costs nothing.
+  useEffect(() => {
+    let dead = false
+    void (async () => {
+      const [w, p] = await Promise.all([
+        supabase.rpc('fin_waiting_count'),
+        supabase.rpc('fin_price_waiting_count'),
+      ])
+      if (!dead) { setWaiting(Number(w.data ?? 0)); setPrices(Number(p.data ?? 0)) }
+    })()
+    return () => { dead = true }
+  }, [pathname])
+
   const sections = NAV.map((s) => ({
     ...s,
     items: s.items.filter((i) => !i.perm || (ready && can(i.perm))),
@@ -78,15 +124,15 @@ export default function AccountsLayout({ children }: { children: ReactNode }) {
     path === '/accounts' ? pathname === '/accounts' : pathname.startsWith(path)
 
   /*
-    The four along the bottom of a phone. Accounts is a three-screen
-    job, so all three fit, and Scan is the fourth — everybody scans.
+    The four along the bottom of a phone: the two money-in screens, the
+    vendors, and Scan — everybody scans. The rest is under More.
   */
   const bottom: BottomItem[] = [
-    ...[
-      { label: 'Payments', icon: Wallet, to: '/accounts', active: isActive('/accounts'), show: !ready || can('job_work_payment') },
-      { label: 'Orders', icon: Package, to: '/accounts/job-works', active: isActive('/accounts/job-works'), show: !ready || can('mod_job_works') },
-      { label: 'Quotes', icon: FileText, to: '/accounts/quotations', active: isActive('/accounts/quotations'), show: !ready || can('mod_quotations') },
-    ].filter((x) => x.show).slice(0, 3).map(({ show: _show, ...x }) => x),
+    { label: 'Home', icon: LayoutDashboard, to: '/accounts', active: isActive('/accounts') },
+    { label: waiting > 0 ? `Confirm (${waiting})` : 'Confirm', icon: Inbox, to: '/accounts/payments', active: isActive('/accounts/payments') },
+    ...(!ready || can('job_work_payment')
+      ? [{ label: 'Vendors', icon: Wallet, to: '/accounts/vendor-payments', active: isActive('/accounts/vendor-payments') }]
+      : []),
     { label: 'Scan', icon: QrCode, to: '/scan', active: false },
   ]
 
@@ -135,7 +181,12 @@ export default function AccountsLayout({ children }: { children: ReactNode }) {
                       }`}
                     >
                       <NavIcon icon={Icon} narrow={narrow} active={isActive(item.path)} />
-                      {!narrow && item.label}
+                      {!narrow && <span className="flex-1">{item.label}</span>}
+                      {!narrow && item.badge && (item.badge === 'waiting' ? waiting : prices) > 0 && (
+                        <span className="rounded-full bg-amber-500/20 px-1.5 text-[11px] font-medium text-amber-300">
+                          {item.badge === 'waiting' ? waiting : prices}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 )

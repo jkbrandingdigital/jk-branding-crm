@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
 import { DateField } from '../DateField'
 import { loadStaff, type Staff } from '../leads/leadUtils'
+import { authUser } from '../../lib/auth'
 
 type Priority = 'high' | 'medium' | 'low'
 type Repeat = 'none' | 'daily' | 'weekly' | 'monthly'
@@ -96,7 +97,7 @@ export default function TodoBoard({ mineOnly = false }: { mineOnly?: boolean }) 
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [{ data: u }, sf] = await Promise.all([supabase.auth.getUser(), loadStaff()])
+    const [{ data: u }, sf] = await Promise.all([authUser(), loadStaff()])
     const me = u.user?.id ?? null
     setMyId(me)
     setStaff(sf)

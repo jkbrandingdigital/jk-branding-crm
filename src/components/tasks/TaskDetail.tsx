@@ -26,7 +26,10 @@ type TimeRow = { user_id: string; full_name: string | null; secs: number; sessio
   would make that option look bad for no reason.
 */
 type Part = {
-  part_kind: 'option' | 'change' | null
+  // A mockup is its own piece of work too — Mockup 1, Mockup 2 — with its
+  // own clock and its own allowance. It takes no changes; those are for
+  // the design only.
+  part_kind: 'option' | 'mockup' | 'change' | null
   // Which piece: banner 1 of 5. A change round has none.
   piece_no: number | null
   part_no: number | null
@@ -202,7 +205,7 @@ export default function TaskDetail({
     const { error: e } = await supabase.rpc('task_add_part', { p_parent: task.id, p_work_type: wtId, p_qty: Math.max(1, qty || 1) })
     setAdding(false)
     if (e) return setError(e.message)
-    await Promise.all([loadTime(), loadParts()])
+    await Promise.all([loadTime(), loadParts(), loadMockOk()])
   }
   // A part's own option / change / removal — the same RPCs any task uses,
   // pointed at the part.
@@ -230,6 +233,45 @@ export default function TaskDetail({
     if (e) return setError(e.message)
     await loadTime()
   }
+  /*
+    A mockup — the logo on a card, the box in 3D. Added like an option:
+    Mockup 1, Mockup 2, each with its own Start and its own time (set per
+    kind of work in Settings, 30m unless changed). The last one can be
+    taken back off while nothing has been worked on it.
+  */
+  /*
+    Which of these tasks (this one and its parts) may have mockups at all.
+    Banners, posts, video and logo have none, so they get no "+ mockup".
+    Mockups already added still show — this only hides the button.
+  */
+  const [mockOk, setMockOk] = useState<Record<string, boolean>>({})
+  const loadMockOk = useCallback(async () => {
+    const { data: rows } = await supabase
+      .from('tasks')
+      .select('id, work_type_id')
+      .or(`id.eq.${task.id},parent_task_id.eq.${task.id}`)
+      .is('deleted_at', null)
+    const list = (rows ?? []) as { id: string; work_type_id: string | null }[]
+    const ids = [...new Set(list.map((r) => r.work_type_id).filter((x): x is string => !!x))]
+    if (ids.length === 0) return setMockOk({})
+    const { data: wts } = await supabase.from('work_types').select('id, allows_mockup').in('id', ids)
+    const ok = new Map(((wts ?? []) as { id: string; allows_mockup: boolean | null }[]).map((w) => [w.id, w.allows_mockup !== false]))
+    const out: Record<string, boolean> = {}
+    for (const r of list) out[r.id] = r.work_type_id ? (ok.get(r.work_type_id) ?? true) : false
+    setMockOk(out)
+  }, [task.id])
+
+  useEffect(() => { void loadMockOk() }, [loadMockOk])
+
+  async function mockupOn(taskId: string, add: boolean) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc(add ? 'task_add_mockup' : 'task_remove_mockup', { p_task: taskId })
+    setAdding(false)
+    if (e) return setError(e.message)
+    await loadTime()
+    onChanged()
+  }
+
   // Change a part's page count — the allowance moves with it. Only while
   // nothing has been worked, so no one's spent time is quietly re-judged.
   async function saveUnits(childId: string) {
@@ -690,7 +732,7 @@ export default function TaskDetail({
                   <div className="border-b border-[#242424] bg-[#171717] px-4 py-2">
                     <p className="text-xs font-medium text-gray-300">{status?.work_type ?? 'Parts'}</p>
                     <p className="mt-0.5 text-[11px] text-gray-500">
-                      Each part has its own timer, options and changes. The brochure adds them up.
+                      Each part has its own timer, options and changes. The job adds them up.
                     </p>
                   </div>
 
@@ -701,7 +743,10 @@ export default function TaskDetail({
                         const kps = kidParts[k.id] ?? []
                         const opts = kps.filter((x) => x.part_kind === 'option')
                         // Pages can be re-set only before any time lands on the part.
-                        const canEditUnits = canEdit && !locked && k.per_unit && k.spent_secs === 0
+                        // Pages can be re-set at any time, even after work has
+                        // started — the client adds pages half way through.
+                        // Each change is written to History with who made it.
+                        const canEditUnits = canEdit && !locked && k.per_unit
                         return (
                           <li key={k.id} className="border-b border-[#1f1f1f] px-4 py-2.5 last:border-0">
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -725,7 +770,7 @@ export default function TaskDetail({
                               </span>
                               {!locked && (
                                 <>
-                                  {/* Change the page count — only while untouched. */}
+                                  {/* Change the page count — any time while the task is open. */}
                                   {canEditUnits && (
                                     <button
                                       onClick={() => { setEditUnitsFor(editUnitsFor === k.id ? null : k.id); setEditUnitsVal(k.unit_qty) }}
@@ -743,6 +788,15 @@ export default function TaskDetail({
                                   >
                                     + option
                                   </button>
+                                  {mockOk[k.id] && (
+                                    <button
+                                      onClick={() => mockupOn(k.id, true)}
+                                      disabled={adding}
+                                      className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-sky-500/60 hover:text-sky-300 disabled:opacity-50"
+                                    >
+                                      + mockup
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => setChangeFor(changeFor === k.id ? null : k.id)}
                                     className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-amber-500/60 hover:text-amber-300"
@@ -789,6 +843,12 @@ export default function TaskDetail({
                                 >
                                   Cancel
                                 </button>
+                                {k.spent_secs > 0 && (
+                                  <span className="basis-full text-[11px] text-gray-500">
+                                    Work has already started here. The allowed time moves to the new count, and
+                                    the change goes into History with your name.
+                                  </span>
+                                )}
                               </div>
                             )}
 
@@ -853,6 +913,20 @@ export default function TaskDetail({
                                           disabled={adding}
                                           aria-label={`Remove ${pt.label}`}
                                           title="Remove this option — nothing has been worked on it"
+                                          className="rounded-md p-1 text-gray-600 hover:bg-[#222] hover:text-red-400 disabled:opacity-50"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      )}
+                                      {/* Last mockup, untouched — ✕ takes it back off. */}
+                                      {canEdit && !locked && pt.part_kind === 'mockup'
+                                        && pt.part_no === kps.filter((x) => x.part_kind === 'mockup').length
+                                        && pt.spent_secs === 0 && (
+                                        <button
+                                          onClick={() => mockupOn(k.id, false)}
+                                          disabled={adding}
+                                          aria-label={`Remove ${pt.label}`}
+                                          title="Remove this mockup — nothing has been worked on it"
                                           className="rounded-md p-1 text-gray-600 hover:bg-[#222] hover:text-red-400 disabled:opacity-50"
                                         >
                                           <X size={14} />
@@ -1089,6 +1163,21 @@ export default function TaskDetail({
                               <X size={14} />
                             </button>
                           )}
+                          {/* Last mockup, untouched — ✕ takes it back off. */}
+                          {canEdit && !locked && pt.part_kind === 'mockup'
+                            && (status?.child_count ?? 0) === 0
+                            && pt.part_no === parts.filter((x) => x.part_kind === 'mockup').length
+                            && pt.spent_secs === 0 && (
+                            <button
+                              onClick={() => mockupOn(task.id, false)}
+                              disabled={adding}
+                              aria-label={`Remove ${pt.label}`}
+                              title="Remove this mockup — nothing has been worked on it"
+                              className="shrink-0 rounded-md p-1 text-gray-600 hover:bg-[#222] hover:text-red-400 disabled:opacity-50"
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
                         </li>
                       )
                     })}
@@ -1106,7 +1195,7 @@ export default function TaskDetail({
                   {canEdit && !locked && status?.work_type && (status?.child_count ?? 0) === 0 && (
                     <div className="border-t border-[#242424] bg-[#141414] px-4 py-2.5">
                       <p className="mb-2 text-[11px] text-gray-500">
-                        A new option adds its own time to this job.
+                        A new option or mockup adds its own time to this job.
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {Array.from({ length: Math.max(status?.work_qty ?? 1, 1) }, (_, i) => i + 1).map((pc) => {
@@ -1125,6 +1214,18 @@ export default function TaskDetail({
                             </button>
                           )
                         })}
+                        {/* One mockup at a time, for the whole job — only for
+                            work that has mockups at all. */}
+                        {mockOk[task.id] && (
+                          <button
+                            onClick={() => mockupOn(task.id, true)}
+                            disabled={adding}
+                            className="flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-sky-500/60 hover:text-sky-300 disabled:opacity-50"
+                          >
+                            {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                            Add mockup {parts.filter((x) => x.part_kind === 'mockup').length + 1}
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}

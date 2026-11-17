@@ -31,7 +31,7 @@ import { useChartTheme } from '../../lib/chartTheme'
   null means an older sitting, from before the parts existed. Those stay
   unassigned rather than being guessed into option 1.
 */
-export type TaskPartRef = { kind: 'option' | 'change'; no: number; piece?: number }
+export type TaskPartRef = { kind: 'option' | 'mockup' | 'change'; no: number; piece?: number }
 
 /*
   The work has two dimensions, not one.
@@ -43,8 +43,8 @@ export type TaskPartRef = { kind: 'option' | 'change'; no: number; piece?: numbe
 export const samePart = (a: TaskPartRef | null | undefined, b: TaskPartRef | null | undefined) =>
   (a?.kind ?? null) === (b?.kind ?? null) &&
   (a?.no ?? null) === (b?.no ?? null) &&
-  // A change round has no piece, so it compares equal whatever is passed
-  ((a?.kind ?? b?.kind) === 'change' || (a?.piece ?? 1) === (b?.piece ?? 1))
+  // A change round or a mockup has no piece, so it compares equal whatever is passed
+  ((a?.kind ?? b?.kind) === 'change' || (a?.kind ?? b?.kind) === 'mockup' || (a?.piece ?? 1) === (b?.piece ?? 1))
 
 export type RunningTask = {
   session_id: string
@@ -53,7 +53,7 @@ export type RunningTask = {
   subject: string
   started_at: string
   today_secs: number
-  part_kind: 'option' | 'change' | null
+  part_kind: 'option' | 'mockup' | 'change' | null
   part_no: number | null
   piece_no: number | null
   unit_name: string | null
@@ -71,37 +71,106 @@ export const PAUSE_REASONS: { key: string; label: string }[] = [
 ]
 
 // ---------- everyone watching the timer ----------
-const watchers = new Set<() => void>()
-const tellEveryone = () => watchers.forEach((w) => w())
+/*
+  One answer, read once, shared by every button.
 
-export function useRunningTask() {
-  const [running, setRunning] = useState<RunningTask | null>(null)
-  const [readAt, setReadAt] = useState(Date.now())
-  const [ready, setReady] = useState(false)
+  Each card's ▶ used to run its own copy of this: its own my_timer on
+  mount, its own poll every two minutes, and its own read whenever any
+  timer started or stopped. A board of twenty cards was twenty requests
+  on opening, twenty more every two minutes, and twenty more on every
+  press of ▶ — all for the same single row, because one person can only
+  ever have one timer running.
 
-  const read = useCallback(async () => {
+  Now there is one copy here. Every hook reads it and is told when it
+  changes; one request serves the whole screen. The poll is one
+  interval for the whole app, and it does not run while the tab is
+  hidden — a CRM left open in a background tab all night was polling
+  all night.
+*/
+type TimerSnap = { running: RunningTask | null; readAt: number; ready: boolean }
+
+let snap: TimerSnap = { running: null, readAt: 0, ready: false }
+const subscribers = new Set<(s: TimerSnap) => void>()
+let inflightTimer: Promise<void> | null = null
+let rereadAfter = false
+let pollId: ReturnType<typeof setInterval> | null = null
+
+const STALE_MS = 60000
+const POLL_MS = 120000
+
+function readTimer(force = false): Promise<void> {
+  /*
+    A read already on its way is shared. But after ▶ or ⏸ the answer
+    must reflect the change, and a read that set off a moment BEFORE
+    the change would bring back the old state — so a forced read waits
+    for it and then goes again.
+  */
+  if (inflightTimer) {
+    if (force) rereadAfter = true
+    return inflightTimer
+  }
+  inflightTimer = (async () => {
     const { data } = await supabase.rpc('my_timer')
     const row = (data ?? [])[0] as RunningTask | undefined
-    setRunning(row ?? null)
-    setReadAt(Date.now())
-    setReady(true)
-  }, [])
+    snap = { running: row ?? null, readAt: Date.now(), ready: true }
+    subscribers.forEach((s) => s(snap))
+  })().finally(() => {
+    inflightTimer = null
+    if (rereadAfter) {
+      rereadAfter = false
+      void readTimer()
+    }
+  })
+  return inflightTimer
+}
+
+const tellEveryone = () => { void readTimer(true) }
+
+function startPolling() {
+  if (pollId !== null) return
+  pollId = setInterval(() => {
+    // In case someone else changed things — but not for a hidden tab.
+    if (typeof document !== 'undefined' && document.hidden) return
+    void readTimer()
+  }, POLL_MS)
+  // Coming back to a tab that sat in the background: catch up once.
+  document.addEventListener('visibilitychange', onVisible)
+}
+
+function stopPollingIfIdle() {
+  if (subscribers.size > 0 || pollId === null) return
+  clearInterval(pollId)
+  pollId = null
+  document.removeEventListener('visibilitychange', onVisible)
+}
+
+function onVisible() {
+  if (!document.hidden && Date.now() - snap.readAt > STALE_MS) void readTimer()
+}
+
+export function useRunningTask() {
+  const [state, setState] = useState<TimerSnap>(snap)
+  const [, setTick] = useState(0)
 
   useEffect(() => {
-    void read()
-    watchers.add(read)
-    // The minutes on screen have to keep moving on their own
-    const tick = setInterval(() => setRunning((r) => (r ? { ...r } : r)), 30000)
-    // In case the tab sat in the background while someone else changed things
-    const poll = setInterval(read, 120000)
+    subscribers.add(setState)
+    // A copy read in the last minute is good enough; older, ask again.
+    if (!snap.ready || Date.now() - snap.readAt > STALE_MS) void readTimer()
+    else setState(snap)
+    startPolling()
+    // The minutes on screen have to keep moving on their own. This only
+    // redraws; it asks the server nothing.
+    const tick = setInterval(() => setTick((n) => n + 1), 30000)
     return () => {
-      watchers.delete(read)
+      subscribers.delete(setState)
       clearInterval(tick)
-      clearInterval(poll)
+      stopPollingIfIdle()
     }
-  }, [read])
+  }, [])
 
-  return { running, readAt, ready, refresh: read }
+  const refresh = useCallback(() => readTimer(true), [])
+
+  return { running: state.running, readAt: state.readAt || Date.now(), ready: state.ready, refresh }
 }
 
 export const since = (iso: string) => {
@@ -307,6 +376,9 @@ export function WorkTimerBar() {
               )}
               Option {running.part_no}
             </span>
+          )}
+          {running.part_kind === 'mockup' && (
+            <span className="ml-2 font-normal text-orange-300">Mockup {running.part_no}</span>
           )}
           {running.part_kind === 'change' && (
             <span className="ml-2 font-normal text-orange-300">Changes · round {running.part_no}</span>

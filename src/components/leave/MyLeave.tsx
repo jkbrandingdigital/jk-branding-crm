@@ -42,6 +42,7 @@ type Quote = {
   days?: number; paid_days?: number; unpaid_days?: number; pay_cut?: number
   balance_before?: number; balance_after?: number
   hours?: number; month_used?: number; month_cap?: number; month_left?: number
+  bank?: number
 }
 
 type Warn = { ok: boolean; days?: number; times?: number; charged?: number; cut?: number }
@@ -223,17 +224,39 @@ export default function MyLeave() {
                   {Number(b.month_used ?? 0)} of {Number(b.month_cap ?? 0)} used this month
                 </p>
               </>
+            ) : b.is_paid ? (
+              // Paid leave is one day a MONTH, so "12 given, 3 taken" is
+              // the wrong story — what matters is whether this month's
+              // day is still there. Anything HR handed out on top is
+              // named separately, because it behaves differently: it
+              // does not come back next month.
+              (() => {
+                const cap = Number(b.month_cap ?? 0)
+                const used = Number(b.month_used ?? 0)
+                const monthLeft = Math.max(cap - used, 0)
+                const bank = Math.max(Number(b.left_over) - monthLeft, 0)
+                return (
+                  <>
+                    <p className="mt-2 text-2xl font-semibold tabular-nums">
+                      {Number(b.left_over)}
+                      <span className="ml-1 text-sm font-normal text-gray-500">
+                        {Number(b.left_over) === 1 ? 'day left' : 'days left'}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      {used} of {cap} used this month
+                      {bank > 0 && <span className="text-gray-500"> · {bank} extra from HR</span>}
+                    </p>
+                  </>
+                )
+              })()
             ) : (
               <>
                 <p className="mt-2 text-2xl font-semibold tabular-nums">
-                  {Number(b.left_over)}
-                  <span className="ml-1 text-sm font-normal text-gray-500">
-                    {b.is_paid ? 'days left' : 'days taken'}
-                  </span>
+                  {Number(b.taken)}
+                  <span className="ml-1 text-sm font-normal text-gray-500">days taken</span>
                 </p>
-                <p className="mt-1 text-xs text-gray-600">
-                  {Number(b.credited)} given · {Number(b.taken)} taken
-                </p>
+                <p className="mt-1 text-xs text-gray-600">Every one of them comes off the salary</p>
               </>
             )}
           </div>
@@ -346,17 +369,44 @@ export default function MyLeave() {
         )}
 
         {/* ── the warning that matters while it can still change
-               anything: going without the yes is not leave. ───── */}
-        {warn?.ok && Number(warn.days) > 0 && (
-          <div className="flex items-start gap-2.5 border-t border-amber-900/40 bg-amber-950/15 px-5 py-3.5">
-            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-400" />
-            <p className="text-xs leading-relaxed text-amber-200/90">
-              Wait for HR to approve before you stay away. If you go without it,
-              those {warn.days} {Number(warn.days) === 1 ? 'day' : 'days'} count as
-              absent at <span className="font-semibold">{warn.times}× pay</span> —{' '}
-              <span className="font-semibold">{rupees(Number(warn.cut))}</span> off the salary,
-              and no paid day is used up.
+               anything: going without the yes is not leave.
+
+               Shown as the two prices side by side, because the one
+               number on its own was being read as the cost of the
+               leave. It is not — it is the cost of not waiting, and
+               the gap between the two columns is the whole point. ── */}
+        {warn?.ok && Number(warn.days) > 0 && !byHour && (
+          <div className="border-t border-amber-900/40 bg-amber-950/15 px-5 py-3.5">
+            <p className="flex items-center gap-2 text-xs font-medium text-amber-200">
+              <AlertTriangle size={14} className="shrink-0 text-amber-400" />
+              Wait for HR to say yes before you stay away
             </p>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <div className="rounded-lg border border-green-900/40 bg-green-950/20 px-3 py-2.5">
+                <p className="text-[11px] text-green-300/70">If HR approves</p>
+                <p className="mt-0.5 text-sm font-semibold text-green-300">
+                  {Number(quote?.pay_cut) > 0
+                    ? `${rupees(Number(quote?.pay_cut))} off`
+                    : 'nothing off your salary'}
+                </p>
+                <p className="mt-0.5 text-[11px] text-green-300/60">
+                  {Number(quote?.pay_cut) > 0
+                    ? 'one day of pay for each unpaid day'
+                    : 'paid leave covers it'}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-red-900/40 bg-red-950/20 px-3 py-2.5">
+                <p className="text-[11px] text-red-300/70">If you go without the yes</p>
+                <p className="mt-0.5 text-sm font-semibold text-red-300">
+                  {rupees(Number(warn.cut))} off
+                </p>
+                <p className="mt-0.5 text-[11px] text-red-300/60">
+                  counted as absent at {warn.times}× pay, and no paid day is used up
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

@@ -136,6 +136,29 @@ import AccountsAttendance from './pages/accounts/Attendance'
 import AccountsMyLeave from './pages/accounts/MyLeave'
 import AccountsMyPayslips from './pages/accounts/MyPayslips'
 import AccountsPolicies from './pages/accounts/Policies'
+// Finance: what was sold, what the clients paid, and the payments
+// Accounts still has to find in the bank.
+import AccountsFinance from './pages/accounts/Finance'
+import AccountsPayments from './pages/accounts/Payments'
+import AdminFinance from './pages/admin/Finance'
+import AdminFinancePayments from './pages/admin/FinancePayments'
+import AccountsCosts from './pages/accounts/Costs'
+import AccountsProfit from './pages/accounts/Profit'
+import AdminFinanceCosts from './pages/admin/FinanceCosts'
+import AdminFinanceProfit from './pages/admin/FinanceProfit'
+import AccountsApprovals from './pages/accounts/Approvals'
+import AccountsIncentive from './pages/accounts/Incentive'
+import AdminFinanceApprovals from './pages/admin/FinanceApprovals'
+import AdminFinanceIncentive from './pages/admin/FinanceIncentive'
+// A branch manager approves price changes and sees their branch's
+// incentive. Same screens, in their own layout.
+import PriceRequests from './components/finance/PriceRequests'
+import IncentiveBoard from './components/finance/IncentiveBoard'
+import AccountsQuotations from './pages/accounts/Quotations'
+import AccountsDashboard from './pages/accounts/Dashboard'
+import AdminFinanceDashboard from './pages/admin/FinanceDashboard'
+import AccountsQuotationView from './pages/accounts/QuotationView'
+import AccountsQuotationEdit from './pages/accounts/QuotationEdit'
 import AdminMyLeave from './pages/admin/MyLeave'
 import ManagerMyLeave from './pages/manager/MyLeave'
 import ManagerAttendancePage from './pages/manager/Attendance'
@@ -290,6 +313,30 @@ function AppRoutes() {
           <Route path="/admin/policies-manage" element={<Guard ok={may('policy_edit')}><AdminPoliciesManage /></Guard>} />
           <Route path="/admin/reception" element={<Guard ok={may('mod_reception')}><AdminReception /></Guard>} />
           <Route path="/admin/reception-report" element={<Guard ok={may('mod_reception')}><AdminReceptionReport /></Guard>} />
+          {/* Super admin only, on purpose: the database shows these
+              figures to the super admin and Accounts and nobody else,
+              so a sub admin let in here would only see empty tables. */}
+          <Route path="/admin/finance" element={<Guard ok={isSuper}><AdminFinanceDashboard /></Guard>} />
+          <Route path="/admin/finance/sales" element={<Guard ok={isSuper}><AdminFinance /></Guard>} />
+          <Route path="/admin/finance/payments" element={<Guard ok={isSuper}><AdminFinancePayments /></Guard>} />
+          <Route path="/admin/finance/costs" element={<Guard ok={isSuper}><AdminFinanceCosts /></Guard>} />
+          <Route path="/admin/finance/profit" element={<Guard ok={isSuper}><AdminFinanceProfit /></Guard>} />
+          <Route path="/admin/finance/approvals" element={<Guard ok={isSuper}><AdminFinanceApprovals /></Guard>} />
+          <Route path="/admin/finance/incentive" element={<Guard ok={isSuper}><AdminFinanceIncentive /></Guard>} />
+          {/* A finance notice is copied to the super admin with the link
+              of the person it was for (/accounts/…, /manager/…). The
+              super admin has no such area, so those links land on the
+              same screen in the admin area instead of on the home page. */}
+          {isSuper && (
+            <>
+              <Route path="/accounts" element={<Navigate to="/admin/finance" replace />} />
+              <Route path="/accounts/payments" element={<Navigate to="/admin/finance/payments" replace />} />
+              <Route path="/accounts/approvals" element={<Navigate to="/admin/finance/approvals" replace />} />
+              <Route path="/manager/price-changes" element={<Navigate to="/admin/finance/approvals" replace />} />
+              <Route path="/manager/projects" element={<Navigate to="/admin/projects" replace />} />
+              <Route path="/sales/projects" element={<Navigate to="/admin/projects" replace />} />
+            </>
+          )}
           <Route
             path="/admin/*"
             element={isSuper ? <AdminDashboard /> : subHome ? <Navigate to={subHome} replace /> : <NoAdminAccess />}
@@ -303,6 +350,8 @@ function AppRoutes() {
           <Route path="/manager/targets" element={<ManagerTargets />} />
           <Route path="/manager/reports" element={<ManagerReports />} />
           <Route path="/manager/daily-report" element={<ManagerLayout><DailyReport /></ManagerLayout>} />
+          <Route path="/manager/price-changes" element={<ManagerLayout><PriceRequests /></ManagerLayout>} />
+          <Route path="/manager/incentive" element={<ManagerLayout><IncentiveBoard /></ManagerLayout>} />
           <Route path="/manager/employee/:id" element={<ManagerEmployeeReport />} />
           <Route path="/manager/my-attendance" element={<ManagerAttendance />} />
           <Route path="/manager/attendance" element={<ManagerAttendancePage />} />
@@ -409,7 +458,20 @@ function AppRoutes() {
           <Route path="/accounts/my-payslips" element={<AccountsMyPayslips />} />
           <Route path="/accounts/policies" element={<AccountsPolicies />} />
           <Route path="/accounts/job-works" element={<AccountsJobWorks />} />
-          <Route path="/accounts/*" element={<AccountsJobWorks />} />
+          <Route path="/accounts/vendor-payments" element={<AccountsJobWorks />} />
+          <Route path="/accounts/sales" element={<AccountsFinance />} />
+          <Route path="/accounts/payments" element={<AccountsPayments />} />
+          <Route path="/accounts/costs" element={<AccountsCosts />} />
+          <Route path="/accounts/profit" element={<AccountsProfit />} />
+          <Route path="/accounts/approvals" element={<AccountsApprovals />} />
+          <Route path="/accounts/incentive" element={<AccountsIncentive />} />
+          <Route path="/accounts/quotations" element={<Guard ok={may('mod_quotations')}><AccountsQuotations /></Guard>} />
+          <Route path="/accounts/quotations/new" element={<Guard ok={may('quote_create')}><AccountsQuotationEdit /></Guard>} />
+          <Route path="/accounts/quotations/:id/preview" element={<Guard ok={may('mod_quotations')}><AccountsQuotationView /></Guard>} />
+          <Route path="/accounts/quotations/:id" element={<Guard ok={may('quote_edit')}><AccountsQuotationEdit /></Guard>} />
+          {/* Home is the Finance dashboard. Sales & payments is at
+              /accounts/sales; vendor payments at /accounts/vendor-payments. */}
+          <Route path="/accounts/*" element={<AccountsDashboard />} />
         </>
       )}
       {role === 'reception' && (

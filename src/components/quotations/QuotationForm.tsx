@@ -38,6 +38,9 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
   const [gstType, setGstType] = useState<GstType>('non_gst')
   const [gstPercent, setGstPercent] = useState(18)
   const [status, setStatus] = useState<QuoteStatus>('draft')
+  // A confirmed sale is locked in the database (Fin_F3). The form says so
+  // up front instead of letting someone retype it and fail at Save.
+  const [locked, setLocked] = useState(false)
   const [brochureId, setBrochureId] = useState('')
   const [terms, setTerms] = useState('')
   const [notes, setNotes] = useState('')
@@ -94,6 +97,7 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
           setGstType(q.gst_type)
           setGstPercent(Number(q.gst_percent) || 0)
           setStatus(q.status)
+          setLocked((q.status as string) === 'confirmed')
           setBrochureId(q.brochure_id ?? '')
           setTerms(q.terms ?? '')
           setNotes(q.notes ?? '')
@@ -247,12 +251,23 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
           <ArrowLeft size={18} />
         </button>
         <h1 className="mr-auto text-xl font-semibold text-white">{editing ? 'Edit quotation' : 'Create quotation'}</h1>
-        <select value={status} onChange={(e) => setStatus(e.target.value as QuoteStatus)} className={`${input} w-auto`} aria-label="Status">
-          {STATUSES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-        </select>
+        {locked ? (
+          <span className="rounded-lg bg-green-950/60 px-3 py-2 text-sm text-green-300">Confirmed</span>
+        ) : (
+          <select value={status} onChange={(e) => setStatus(e.target.value as QuoteStatus)} className={`${input} w-auto`} aria-label="Status">
+            {STATUSES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        )}
       </div>
 
       {error && <p className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm text-red-400">{error}</p>}
+
+      {locked && (
+        <p className="rounded-lg border border-green-600/30 bg-green-500/10 px-4 py-2.5 text-sm text-green-300">
+          This quotation is a confirmed sale, so it is locked. To change it, the confirmation is undone first (with a reason) by someone
+          with quotation rights.
+        </p>
+      )}
 
       {/* Company header, the way it will print */}
       <section className="rounded-xl border border-[#242424] bg-[#151515] p-5">
@@ -564,14 +579,14 @@ export default function QuotationForm({ basePath }: { basePath: string }) {
           <div className="mt-5 space-y-2">
             <button
               onClick={() => save('generate')}
-              disabled={busy}
+              disabled={busy || locked}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-orange-500 py-2.5 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
             >
               {busy ? <Loader2 size={16} className="animate-spin" /> : <FileCheck2 size={16} />} Generate
             </button>
             <button
               onClick={() => save('download')}
-              disabled={busy}
+              disabled={busy || locked}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#2a2a2a] py-2.5 text-sm text-gray-300 hover:text-white disabled:opacity-50"
             >
               <Download size={16} /> Download

@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Loader2, Users, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { DateField } from '../DateField'
 import { CLIENT_FIELDS, missingOf, NEED_LABEL, type Branch, type Customer } from './customerUtils'
+import { authUser } from '../../lib/auth'
 
 /*
   The client master form — STEP 02 on paper.
@@ -115,7 +116,7 @@ export default function ClientMasterForm({
 
     // A client added by hand belongs to whoever added them, the same way
     // a won lead's client belongs to the person who won it.
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await authUser()
     const { error } = await supabase
       .from('customers')
       .insert({ ...patch, owner_id: user?.id ?? null })

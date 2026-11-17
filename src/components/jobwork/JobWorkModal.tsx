@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Loader2, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import PickList from '../print/PickList'
+import ProjectPicker, { type PickedProject } from '../projects/ProjectPicker'
 import {
   inr, toDateInput, type JobWork, type PrintName,
 } from './jobWorkUtils'
@@ -14,6 +15,12 @@ import {
   list. A job work carries a quantity, a rate, two dates and the
   instructions the vendor will actually work from — that does not fit
   on one line, and getting the rate wrong is expensive.
+
+  The project is PICKED, not typed. A job work is the vendor's bill for
+  a client's order, and Finance adds up what each project cost from
+  these. A project typed as text is tied to nothing, so its cost could
+  never reach the project. Picking one fills the client in as well.
+  Office work for nobody's project can still go in with just a name.
 
   Vendor and product come from the Printing Media lists. Someone with
   print_lists_edit can add a name here without leaving the window;
@@ -33,6 +40,16 @@ export default function JobWorkModal({
 }) {
   const [client, setClient] = useState(job?.client_name ?? '')
   const [project, setProject] = useState(job?.project_name ?? '')
+  const [picked, setPicked] = useState<PickedProject | null>(
+    job?.project_id
+      ? { id: job.project_id, code: '', title: job.project_name ?? 'Project', customer_id: job.customer_id ?? '', customer_name: job.client_name }
+      : null,
+  )
+
+  function pickProject(p: PickedProject | null) {
+    setPicked(p)
+    if (p) { setClient(p.customer_name); setProject(p.title) }
+  }
   const [service, setService] = useState<string | null>(job?.service_id ?? null)
   const [offsetId, setOffsetId] = useState<string | null>(job?.offset_id ?? null)
   const [note, setNote] = useState(job?.product_note ?? '')
@@ -70,10 +87,10 @@ export default function JobWorkModal({
     // too. The function steps over that, and it is the one place the
     // rules live.
     const args = {
-      p_customer: job?.customer_id ?? null,
+      p_customer: picked ? (picked.customer_id || null) : null,
       p_client_name: client.trim(),
-      p_project: job?.project_id ?? null,
-      p_project_name: project.trim() || null,
+      p_project: picked?.id ?? null,
+      p_project_name: (picked ? picked.title : project.trim()) || null,
       p_service: service,
       p_offset: offsetId,
       p_product_note: note.trim() || null,
@@ -124,20 +141,25 @@ export default function JobWorkModal({
         <div className="space-y-4 p-5">
           {err && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">{err}</p>}
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className={label}>Client name</label>
-              <input value={client} onChange={(e) => setClient(e.target.value)} className={input} autoFocus />
-            </div>
-            <div>
-              <label className={label}>Project</label>
-              <input
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-                placeholder="Which project this belongs to"
-                className={input}
-              />
-            </div>
+          <div>
+            <label className={label}>Project</label>
+            <ProjectPicker value={picked} onPick={pickProject} placeholder="Which client order this is for" />
+            {!picked && (
+              <p className="mt-1.5 text-xs text-amber-400">
+                Not tied to a project, so its cost will not show on any project's profit. Pick one if it is a client's order.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className={label}>Client name</label>
+            <input
+              value={client}
+              onChange={(e) => setClient(e.target.value)}
+              disabled={!!picked}
+              placeholder={picked ? '' : 'Only when it is not a project — office work, samples'}
+              className={`${input} disabled:opacity-60`}
+            />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

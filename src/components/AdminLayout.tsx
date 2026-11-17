@@ -3,8 +3,8 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
-  Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,
-  Activity, Cake, FolderKanban, Timer, ChevronDown, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Package, ShieldCheck, QrCode, BookOpen, type LucideIcon,
+  Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,IndianRupee, Inbox,
+  Activity, Receipt, Cake, FolderKanban, Tag, Award, Timer, ChevronDown, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Package, ShieldCheck, QrCode, BookOpen, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -120,6 +120,14 @@ const GROUPS: NavGroup[] = [
       // What is still owed to the printers. The register is the same one
       // dispatch uses; this line is for whoever pays the bills.
       { label: 'Vendor Payments', path: '/admin/job-works', icon: Wallet, ready: true, perm: 'job_work_payment' },
+      { label: 'Dashboard', path: '/admin/finance', icon: LayoutDashboard, ready: true, perm: 'fin_view' },
+      { label: 'Sales & payments', path: '/admin/finance/sales', icon: IndianRupee, ready: true, perm: 'fin_view' },
+      { label: 'Payments to confirm', path: '/admin/finance/payments', icon: Inbox, ready: true, perm: 'fin_view' },
+      { label: 'Purchases & expenses', path: '/admin/finance/costs', icon: Receipt, ready: true, perm: 'fin_view' },
+      { label: 'Profit', path: '/admin/finance/profit', icon: TrendingUp, ready: true, perm: 'fin_view' },
+      { label: 'Price changes', path: '/admin/finance/approvals', icon: Tag, ready: true, perm: 'fin_view' },
+      { label: 'Sales incentive', path: '/admin/finance/incentive', icon: Award, ready: true, perm: 'fin_view' },
+      
     ],
   },
   {

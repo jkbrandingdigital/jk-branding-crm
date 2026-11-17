@@ -5,7 +5,7 @@ import {
   TrendingUp, ArrowRight, Sun, Sunrise, Moon,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { getCurrentUser, getUserProfile } from '../../lib/auth'
+import { authUser, getUserProfile } from '../../lib/auth'
 import { istDate, prettyDate, inr } from '../../lib/format'
 import SopWidget from '../../components/policies/SopWidget'
 
@@ -64,7 +64,6 @@ export default function SalesHome() {
   const { text: hello, icon: HelloIcon } = greet()
 
   const [name, setName] = useState('')
-  const [branchName, setBranchName] = useState('')
 
   const [evoDone, setEvoDone] = useState(false)
   const [reportDone, setReportDone] = useState(false)
@@ -78,23 +77,20 @@ export default function SalesHome() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const user = await getCurrentUser()
+      // authUser() reads the session from local storage — no call to the
+      // auth server. getUser() went over the network every time, and
+      // with every component doing it that is what ran the Supabase
+      // usage over its limit.
+      const { data: { user } } = await authUser()
       if (!user) return
 
-      let branchId: string | null = null
-      try {
-        const p = await getUserProfile(user.id)
-        branchId = p?.branch_id ?? null
-        if (!cancelled) setName((p?.full_name || user.email || '').split(' ')[0])
-        if (branchId) {
-          const { data } = await supabase.from('branches').select('name').eq('id', branchId).single()
-          if (!cancelled) setBranchName(data?.name ?? '')
-        }
-      } catch {
-        if (!cancelled) setName(user.email ?? '')
-      }
-
-      const [evo, rep, tp, ap] = await Promise.all([
+      // All at once rather than one after another. The profile comes
+      // from the shared memo in lib/auth (SalesLayout has already read
+      // it), so it costs nothing here. The branch name is NOT fetched:
+      // the sidebar already shows it, and a second query for the same
+      // word is exactly the kind of duplicate the usage fix removed.
+      const [prof, evo, rep, tp, ap] = await Promise.all([
+        getUserProfile(user.id).catch(() => null),
         supabase.from('daily_evolution').select('id').eq('user_id', user.id).eq('evolution_date', today).limit(1),
         supabase.from('daily_reports').select('id').eq('user_id', user.id).eq('work_date', today).limit(1),
         supabase.rpc('sales_target_performance'),
@@ -102,6 +98,7 @@ export default function SalesHome() {
       ])
 
       if (cancelled) return
+      setName(((prof?.full_name as string | undefined) || user.email || '').split(' ')[0])
       if (tp.error) setError(tp.error.message)
       if (ap.error) setError(ap.error.message)
 
@@ -139,7 +136,7 @@ export default function SalesHome() {
             {hello}{name ? `, ${name}` : ''}
           </h1>
           <p className="mt-1 text-sm text-gray-400">
-            {prettyDate(today)}{branchName ? ` · ${branchName}` : ''}
+            {prettyDate(today)}
           </p>
         </div>
         <Link

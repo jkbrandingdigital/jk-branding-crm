@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Camera, Loader2, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { authUser } from '../lib/auth'
 
 type Profile = {
   id: string
@@ -37,7 +38,7 @@ export default function ProfileModal({ onClose, onSaved }: { onClose: () => void
 
   useEffect(() => {
     ;(async () => {
-      const { data: u } = await supabase.auth.getUser()
+      const { data: u } = await authUser()
       const id = u.user?.id
       if (!id) return setLoading(false)
       setEmail(u.user?.email ?? '')

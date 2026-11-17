@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Copy, Eye, Loader2, MessageCircle,
-  Pencil, Plus, Search, SlidersHorizontal, Trash2, X,
+  Lock, Pencil, Plus, Search, SlidersHorizontal, Trash2, X,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { usePermissions } from '../../lib/permissions'
@@ -246,7 +246,7 @@ export default function QuotationList({ basePath }: { basePath: string }) {
                         <button onClick={() => navigate(`${basePath}/${r.id}/preview`)} aria-label="View" title="View" className={iconBtn}>
                           <Eye size={15} />
                         </button>
-                        {canEdit && (
+                        {canEdit && (r.status as string) !== 'confirmed' && (
                           <button onClick={() => navigate(`${basePath}/${r.id}`)} aria-label="Edit" title="Edit" className={iconBtn}>
                             <Pencil size={15} />
                           </button>
@@ -261,7 +261,7 @@ export default function QuotationList({ basePath }: { basePath: string }) {
                             <MessageCircle size={15} />
                           </a>
                         )}
-                        {canDelete && (
+                        {canDelete && (r.status as string) !== 'confirmed' && (
                           <button onClick={() => remove(r)} aria-label="Delete" title="Delete" className={`${iconBtn} hover:text-red-400`}>
                             <Trash2 size={15} />
                           </button>
@@ -282,7 +282,14 @@ export default function QuotationList({ basePath }: { basePath: string }) {
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{money(Number(r.total), r.currency)}</td>
                     <td className="px-3 py-2.5">
-                      {canEdit ? (
+                      {/* A confirmed sale is locked in the database; offering
+                          a status menu would only offer an error. It is
+                          undone with a reason, not by picking "Sent". */}
+                      {(r.status as string) === 'confirmed' ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-green-950/60 px-1.5 py-0.5 text-xs text-green-300" title="Confirmed sale — locked">
+                          <Lock size={11} /> Confirmed
+                        </span>
+                      ) : canEdit ? (
                         <select
                           value={r.status}
                           onChange={(e) => setStatusOf(r, e.target.value as QuoteStatus)}

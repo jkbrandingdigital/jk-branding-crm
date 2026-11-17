@@ -5,6 +5,8 @@ import { supabase } from '../../lib/supabase'
 import CustomerPicker, { type PickedCustomer } from './CustomerPicker'
 import { DateField } from '../DateField'
 import type { ProjectRow, ProjectStage } from '../customers/customerUtils'
+import ProjectPayments from '../finance/ProjectPayments'
+import { GST_SLABS, inr, revisePrice as askPriceChange } from '../finance/financeUtils'
 
 /*
   One project — a logo, a brochure, a website.
@@ -15,7 +17,12 @@ import type { ProjectRow, ProjectStage } from '../customers/customerUtils'
   that it had happened. If it really is the wrong client, the project is
   closed and a new one opened, which leaves a trail.
 
-  PRICE, ONCE THE PROJECT EXISTS, IS NOT EDITED IN PLACE — it is revised.
+  PRICE, ONCE THE PROJECT EXISTS, IS NOT EDITED IN PLACE — it is revised,
+  and a revision by sales or a branch manager now WAITS for a yes from
+  Accounts, the branch manager or a Super Admin (never the person who
+  asked). Until then the old price stands. Accounts and the Super Admin
+  change it straight away. See Fin_F3_Approvals_And_Locks.sql.
+
   A sales person settles ₹18,000, the client later talks it down to
   ₹17,500, and that change has to reach the sales figures and the
   incentive. So an existing project's value is read-only here and carries
@@ -44,6 +51,9 @@ export default function ProjectModal({
   const [title, setTitle] = useState(project?.title ?? '')
   const [stageId, setStageId] = useState(project?.stage_id ?? stages[0]?.id ?? '')
   const [value, setValue] = useState(String(project?.value_amount ?? 0))
+  // New projects only. On an existing one GST is changed from the
+  // Payment panel, which checks who and logs it.
+  const [gst, setGst] = useState(0)
   /*
     When the work was booked, not when it was typed in.
 
@@ -70,6 +80,8 @@ export default function ProjectModal({
   const [reviseNote, setReviseNote] = useState('')
   const [reviseBusy, setReviseBusy] = useState(false)
   const [reviseErr, setReviseErr] = useState('')
+  const [reviseSent, setReviseSent] = useState('')
+  const [moneyKey, setMoneyKey] = useState(0)
 
   // A designer gets value_amount back as null and should not see a price
   // or a way to change one.
@@ -156,7 +168,9 @@ export default function ProjectModal({
 
     const { error } = project
       ? await supabase.from('projects').update(patch).eq('id', project.id)
-      : await supabase.from('projects').insert({ ...patch, value_amount: Number(value) || 0, customer_id: customer.id })
+      : await supabase.from('projects').insert({
+          ...patch, value_amount: Number(value) || 0, gst_percent: gst, customer_id: customer.id,
+        })
 
     setBusy(false)
     if (error) return setErr(error.message)
@@ -171,15 +185,18 @@ export default function ProjectModal({
     }
     setReviseBusy(true)
     setReviseErr('')
-    const { error } = await supabase.rpc('project_revise_price', {
-      p_project: project.id,
-      p_amount: amt,
-      p_note: reviseNote.trim() || null,
-    })
+    const r = await askPriceChange(project.id, amt, reviseNote)
     setReviseBusy(false)
-    if (error) return setReviseErr(error.message)
-    setValue(String(amt))
+    if (!r.ok) return setReviseErr(r.reason)
     setRevising(false)
+    if (r.pending) {
+      // Asked, not done. The window stays open and says so; the payment
+      // panel below shows the waiting request.
+      setReviseSent(`Sent for approval. The price stays ${inr(Number(value))} until Accounts, the branch manager or a Super Admin approves.`)
+      setMoneyKey((k) => k + 1)
+      return
+    }
+    setValue(String(amt))
     // Reload the board so the new value, badges and totals all follow.
     onSaved()
   }
@@ -277,10 +294,31 @@ export default function ProjectModal({
               </select>
             </div>
             <div>
-              <label className={label}>Value (₹)</label>
+              <label className={label}>Price without GST (₹)</label>
               {!project ? (
-                // New project: the opening price.
-                <input type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} className={input} />
+                // New project: the opening price, and whether GST goes on top.
+                <>
+                  <input type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} className={input} />
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {GST_SLABS.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setGst(s)}
+                        className={`rounded-md px-2 py-1 text-xs ${
+                          gst === s ? 'bg-orange-500/15 text-orange-300' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        {s === 0 ? 'No GST' : `GST ${s}%`}
+                      </button>
+                    ))}
+                  </div>
+                  {gst > 0 && Number(value) > 0 && (
+                    <p className="mt-1.5 text-xs text-gray-500">
+                      Client pays {inr(Math.round(Number(value) * (100 + gst)) / 100, true)} with GST.
+                    </p>
+                  )}
+                </>
               ) : (
                 // Existing project: read-only, revised through the RPC.
                 <div className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2">
@@ -298,6 +336,10 @@ export default function ProjectModal({
                       </button>
                     )}
                   </div>
+
+                  {reviseSent && !revising && (
+                    <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-300">{reviseSent}</p>
+                  )}
 
                   {revising && (
                     <div className="mt-3 space-y-2 border-t border-[#242424] pt-3">
@@ -336,7 +378,7 @@ export default function ProjectModal({
                         </button>
                       </div>
                       <p className="text-[11px] text-gray-600">
-                        The change is logged, and the sales performance and incentive update to match.
+                        Logged. If Accounts or a manager has to approve it, the old price stays until they do.
                       </p>
                     </div>
                   )}
@@ -376,6 +418,11 @@ export default function ProjectModal({
             <label className={label}>Notes</label>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={`${input} resize-y`} />
           </div>
+
+          {/* What the client owes and has paid. The panel asks the
+              database whether this person may see it, and draws nothing
+              if not — a designer opening the card sees no money. */}
+          {project && canSeeMoney && <ProjectPayments projectId={project.id} reloadKey={moneyKey} />}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-[#242424] px-5 py-4">

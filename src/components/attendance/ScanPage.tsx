@@ -19,6 +19,7 @@ import jsQR from 'jsqr'
 import { supabase } from '../../lib/supabase'
 import { says, BUTTON_WORDS } from './words'
 import { istDate } from '../../lib/format'
+import { authUser } from '../../lib/auth'
 
 // ── the device key ───────────────────────────────────────────────────────
 
@@ -204,7 +205,7 @@ export default function ScanPage() {
   // ── who am I, and what has today been so far ───────────────────────────
 
   const loadDay = useCallback(async () => {
-    const { data: u } = await supabase.auth.getUser()
+    const { data: u } = await authUser()
     const uid = u?.user?.id
     if (!uid) return
 

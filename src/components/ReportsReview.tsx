@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, ChevronDown, MessageSquare, CheckCircle2, AlertCircle, UserX } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { istDate, addDays, prettyDate, inr } from '../lib/format'
+import { authUser } from '../lib/auth'
 
 type Tab = 'reports' | 'evolution'
 type Row = Record<string, unknown> & { id: string; user_id: string; branch_id: string | null }
@@ -62,7 +63,7 @@ export default function ReportsReview({ initialTab = 'reports', lockedBranchId }
     ;(async () => {
       const {
         data: { user },
-      } = await supabase.auth.getUser()
+      } = await authUser()
       if (!user) return
       const { data: roleRow } = await supabase.from('user_roles').select('role').eq('user_id', user.id).maybeSingle()
       if (roleRow?.role !== 'branch_manager') return

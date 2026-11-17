@@ -21,10 +21,10 @@
 // so what HR reads is what approving would actually do today, not what
 // it would have done the week it was asked for.
 
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import {
   Inbox, Check, X, Loader2, Wallet, AlertTriangle, CalendarOff, Gift,
-  ChevronLeft, ChevronRight, Clock,
+  ChevronLeft, ChevronRight, Clock, RotateCcw,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { CARD_TABLE } from '../CardTable'
@@ -116,6 +116,14 @@ export default function LeaveBoard() {
   const [why, setWhy] = useState('')
   const [err, setErr] = useState<string | null>(null)
 
+  // Taking back a leave that was already allowed. Kept apart from
+  // `refusing` on purpose: refusing answers a question nobody has
+  // acted on yet, this undoes something people have already planned
+  // around, so it asks for its own reason and says so out loud.
+  const [undoing, setUndoing] = useState<string | null>(null)
+  const [undoWhy, setUndoWhy] = useState('')
+  const [undoErr, setUndoErr] = useState<string | null>(null)
+
   const [giveTo, setGiveTo] = useState('')
   const [giveType, setGiveType] = useState('PAID')
   const [giveQty, setGiveQty] = useState('1')
@@ -152,6 +160,23 @@ export default function LeaveBoard() {
     if (error || !r?.ok) return setErr(error?.message ?? r?.reason ?? 'Not saved.')
     setRefusing(null)
     setWhy('')
+    load()
+  }
+
+  // leave_undo credits the days back on the dates they were spent, puts
+  // the register back to what the scans say, and marks the request
+  // Cancelled. Nothing is deleted, so the history still reads correctly.
+  async function undo(id: string) {
+    setBusy(id)
+    setUndoErr(null)
+    const { data, error } = await supabase.rpc('leave_undo', {
+      p_id: id, p_reason: undoWhy.trim(),
+    })
+    setBusy(null)
+    const r = data as { ok: boolean; reason?: string } | null
+    if (error || !r?.ok) return setUndoErr(error?.message ?? r?.reason ?? 'Not cancelled.')
+    setUndoing(null)
+    setUndoWhy('')
     load()
   }
 
@@ -380,7 +405,8 @@ export default function LeaveBoard() {
               </thead>
               <tbody className="divide-y divide-[#1a1a1a]">
                 {rows.map((r) => (
-                  <tr key={r.id} className="transition-colors hover:bg-[#181818]">
+                  <Fragment key={r.id}>
+                  <tr className="transition-colors hover:bg-[#181818]">
                     {/* No label: on a card the name is the heading. */}
                     <td data-label="" className="px-5 py-3">
                       <p className="font-medium">{r.full_name}</p>
@@ -401,8 +427,60 @@ export default function LeaveBoard() {
                       Number(r.pay_cut) > 0 ? 'text-red-300' : 'text-gray-600'}`}>
                       {Number(r.pay_cut) > 0 ? rupees(r.pay_cut) : '—'}
                     </td>
-                    <td data-label="State" className="px-5 py-3"><Chip state={r.state} /></td>
+                    <td data-label="State" className="px-5 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Chip state={r.state} />
+                        {/* Only an approved one can be taken back. A
+                            refused or cancelled row has nothing to undo,
+                            and a waiting one is answered above. */}
+                        {r.state === 'Approved' && undoing !== r.id && (
+                          <button
+                            onClick={() => { setUndoing(r.id); setUndoWhy(''); setUndoErr(null) }}
+                            className="flex items-center gap-1 rounded-lg border border-[#2a2a2a] px-2 py-1 text-[11px] text-gray-400 transition-colors hover:border-red-900/60 hover:text-red-300"
+                          >
+                            <RotateCcw size={11} /> Cancel
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
+
+                  {undoing === r.id && (
+                    <tr className="bg-[#161616]">
+                      <td colSpan={6} className="px-5 py-3">
+                        <p className="mb-2 text-xs text-gray-400">
+                          Cancelling gives {r.full_name.split(' ')[0]} the {r.type_name.toLowerCase()} days
+                          back and puts {r.from_date === r.to_date ? 'that day' : 'those days'} back to
+                          whatever the scans say. They will see the reason.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <input
+                            value={undoWhy}
+                            onChange={(e) => setUndoWhy(e.target.value)}
+                            autoFocus
+                            placeholder="Why is this being cancelled?"
+                            className="min-w-[16rem] flex-1 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
+                          />
+                          <button
+                            onClick={() => undo(r.id)}
+                            disabled={busy === r.id || undoWhy.trim().length < 3}
+                            className="flex items-center gap-1.5 rounded-lg bg-red-600/90 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+                          >
+                            {busy === r.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                            Cancel the leave
+                          </button>
+                          <button
+                            onClick={() => { setUndoing(null); setUndoWhy(''); setUndoErr(null) }}
+                            className="rounded-lg px-3 py-2 text-xs text-gray-400 hover:text-white"
+                          >
+                            Keep it
+                          </button>
+                        </div>
+                        {undoErr && <p className="mt-2 text-xs text-red-300">{undoErr}</p>}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

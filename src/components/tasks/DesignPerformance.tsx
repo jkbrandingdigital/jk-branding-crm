@@ -1574,7 +1574,9 @@ function TaskTimeHistory({ taskNo, subject, onClose }: { taskNo: number; subject
   const piece = (r: Sit) =>
     r.part_kind === 'change'
       ? `Changes · round ${r.part_no ?? 1}`
-      : `Option ${r.part_no ?? 1}${(r.piece_no ?? 1) > 1 ? ` · piece ${r.piece_no}` : ''}`
+      : r.part_kind === 'mockup'
+        ? `Mockup ${r.part_no ?? 1}`
+        : `Option ${r.part_no ?? 1}${(r.piece_no ?? 1) > 1 ? ` · piece ${r.piece_no}` : ''}`
 
   return createPortal(
     <div

@@ -7,6 +7,7 @@ import { usePermissions, ownHome } from '../lib/permissions'
 import ProfileModal from './ProfileModal'
 import NotificationBell from './NotificationBell'
 import AppearanceMenu from './AppearanceMenu'
+import { authUser } from '../lib/auth'
 
 const ROLE_LABEL: Record<string, string> = {
   super_admin: 'Super Admin',
@@ -87,7 +88,7 @@ export default function Header() {
   const boxRef = useRef<HTMLDivElement>(null)
 
   const loadMe = useCallback(async () => {
-    const { data } = await supabase.auth.getUser()
+    const { data } = await authUser()
     const id = data.user?.id
     setEmail(data.user?.email ?? '')
     if (!id) return

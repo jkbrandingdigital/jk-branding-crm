@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Trophy, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { GST_SLABS, inr } from '../finance/financeUtils'
 
 /*
   What to call the first project.
@@ -51,11 +52,22 @@ export function projectNameFrom(requirement?: string | null): string {
   has to be typed by the person who knows it.
 */
 
-export async function convertLead(leadId: string, projectTitle: string, value: number): Promise<string> {
+/*
+  GST is asked here, once, because this is when the deal is fresh and
+  the sales person knows whether the client wants a GST bill. The value
+  typed is ALWAYS the price without GST; the GST is worked out on top
+  and kept apart, so profit and incentive never count the tax as
+  earnings. The GSTIN goes onto the client's file.
+*/
+export async function convertLead(
+  leadId: string, projectTitle: string, value: number, gstPercent = 0, gstin = '',
+): Promise<string> {
   const { data, error } = await supabase.rpc('lead_to_customer', {
     p_lead_id: leadId,
     p_project_title: projectTitle.trim() || null,
     p_value: value,
+    p_gst_percent: gstPercent,
+    p_gstin: gstin.trim() || null,
   })
   if (error) throw new Error(error.message)
   return data as string
@@ -75,6 +87,8 @@ export default function ConvertLead({
 }) {
   const [title, setTitle] = useState(projectNameFrom(requirement))
   const [value, setValue] = useState(estimated && estimated > 0 ? String(estimated) : '')
+  const [gst, setGst] = useState(0)
+  const [gstin, setGstin] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -101,12 +115,17 @@ export default function ConvertLead({
   const amount = Number(value)
   const ok = value.trim() !== '' && amount > 0
 
+  // A GSTIN is 15 characters. Not checked beyond that: a wrong-looking
+  // one is still better saved and corrected than lost.
+  const gstinBad = gstin.trim() !== '' && gstin.trim().length !== 15
+
   async function go() {
     if (!ok) return setErr('Enter what the deal is worth.')
+    if (gstinBad) return setErr('A GSTIN is 15 characters. Leave it empty if you do not have it yet.')
     setBusy(true)
     setErr('')
     try {
-      onDone(await convertLead(leadId, title, amount))
+      onDone(await convertLead(leadId, title, amount, gst, gst > 0 ? gstin : ''))
     } catch (e) {
       setErr((e as Error).message)
       setBusy(false)
@@ -157,7 +176,7 @@ export default function ConvertLead({
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-gray-500">Deal value (₹)</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Deal value, without GST (₹)</label>
             <input
               type="number"
               min={1}
@@ -170,6 +189,41 @@ export default function ConvertLead({
             <p className="mt-1.5 text-xs text-gray-600">
               This is what counts towards the month’s target. It can be changed later on the project.
             </p>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs text-gray-500">GST bill?</label>
+            <div className="flex flex-wrap gap-1">
+              {GST_SLABS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setGst(s)}
+                  className={`rounded-md px-2.5 py-1 text-xs ${
+                    gst === s ? 'bg-orange-500/15 text-orange-300' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {s === 0 ? 'No GST' : `${s}%`}
+                </button>
+              ))}
+            </div>
+            {gst > 0 && (
+              <>
+                {amount > 0 && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    Client pays {inr(Math.round(amount * (100 + gst)) / 100, true)} with GST.
+                  </p>
+                )}
+                <input
+                  value={gstin}
+                  onChange={(e) => setGstin(e.target.value.toUpperCase())}
+                  placeholder="Client GSTIN (optional now)"
+                  maxLength={15}
+                  className={`${input} mt-2 font-mono`}
+                />
+                {gstinBad && <p className="mt-1 text-xs text-amber-400">{gstin.trim().length} of 15 characters</p>}
+              </>
+            )}
           </div>
 
           <p className="text-xs text-gray-500">

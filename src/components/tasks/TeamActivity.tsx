@@ -155,12 +155,27 @@ export default function TeamActivity({ tasksPath }: { tasksPath: string }) {
 
   useEffect(() => {
     if (!ready || !mayView || tab !== 'now') return
-    const poll = setInterval(load, 60000)
+    /*
+      A minute stays: this tab's whole purpose is "who is working right
+      now", and somebody is looking at it while it is open.
+
+      What was wrong was that it kept asking with the tab hidden — a
+      coordinator who opened this in the morning and moved on left it
+      polling all day for a screen nobody could see. It now skips those
+      rounds and fetches once on coming back, so what is on screen when
+      you return is still current.
+    */
+    const poll = setInterval(() => {
+      if (!document.hidden) void load()
+    }, 60000)
+    const onShow = () => { if (!document.hidden) void load() }
+    document.addEventListener('visibilitychange', onShow)
     // Keeps the "since" column honest between fetches
     const tick = setInterval(() => setLive((r) => [...r]), 30000)
     return () => {
       clearInterval(poll)
       clearInterval(tick)
+      document.removeEventListener('visibilitychange', onShow)
     }
   }, [ready, mayView, tab, load])
 

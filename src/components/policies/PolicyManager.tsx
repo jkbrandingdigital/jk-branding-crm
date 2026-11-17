@@ -40,11 +40,25 @@ type Row = {
   id: string; code: string; title: string; version: number
   is_published: boolean; must_read: boolean
   effective_from: string | null; updated_at: string; published_at: string | null
-  summary: string | null; department_id: string | null; department: string | null
+  summary: string | null
+  // Hr_HR37: who it is for, in the company's own departments and branches.
+  dept_id: string | null; branch_id: string | null
+  department: string | null; branch: string | null
+  // Still on the old list with no role and no real department: reaching
+  // only its named people until somebody picks.
+  needs_department: boolean
+  // Hr_HR38: for the people named on it and nobody else.
+  named_only: boolean; named_count: number
   due_now: number; read_now: number; read_ever: number
 }
 
-type Dept = { id: string; name: string; for_role: string | null; sort_no: number }
+// A real department (the Employees screen's) or a branch.
+type Dept = { id: string; name: string }
+
+// The department select's value for "leave it as it was" — an item still
+// on the old role-based list. Choosing it saves with p_keep_old, so it
+// keeps reaching who it reached instead of quietly becoming Everybody.
+const KEEP_OLD = '__old__'
 type Person = { id: string; full_name: string; emp_code: string | null }
 type Reader = {
   user_id: string; full_name: string; emp_code: string | null
@@ -54,7 +68,11 @@ type Reader = {
 type Draft = {
   id: string | null
   title: string
-  department_id: string
+  dept_id: string          // '' = every department, KEEP_OLD = as before
+  branch_id: string        // '' = every branch
+  old_department: string   // what it was for on the old list, if anything
+  old_by_role: boolean     // …and whether that reached people by role
+  named_only: boolean      // only the people named below, nobody else
   summary: string
   body: string
   doc_type: 'policy' | 'sop'
@@ -69,7 +87,8 @@ type Draft = {
 }
 
 const EMPTY: Draft = {
-  id: null, title: '', department_id: '', summary: '', body: '',
+  id: null, title: '', dept_id: '', branch_id: '', old_department: '', old_by_role: false, named_only: false,
+  summary: '', body: '',
   doc_type: 'policy', file_path: '', file_name: '', file: null,
   effective_from: '', must_read: true, is_published: false, version: 1, audience: [],
 }
@@ -82,6 +101,7 @@ const day = (s: string | null) =>
 export default function PolicyManager() {
   const [rows, setRows] = useState<Row[]>([])
   const [depts, setDepts] = useState<Dept[]>([])
+  const [branches, setBranches] = useState<Dept[]>([])
   const [staff, setStaff] = useState<Person[]>([])
   const [allowed, setAllowed] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
@@ -100,14 +120,17 @@ export default function PolicyManager() {
     setLoading(true)
     const [a, b, c, d] = await Promise.all([
       supabase.from('policy_read_counts')
-        .select('id, code, title, version, is_published, must_read, effective_from, updated_at, published_at, summary, department_id, department, due_now, read_now, read_ever'),
-      supabase.rpc('policy_departments_list'),
+        .select('id, code, title, version, is_published, must_read, effective_from, updated_at, published_at, summary, dept_id, branch_id, department, branch, needs_department, named_only, named_count, due_now, read_now, read_ever'),
+      // Departments and branches in one request, not two.
+      supabase.rpc('policy_audience_options'),
       supabase.from('profiles').select('id, full_name, emp_code').eq('is_active', true).order('full_name'),
       supabase.rpc('can_edit_policy'),
     ])
     if (a.error) setErr(a.error.message)
     else setRows((a.data ?? []) as Row[])
-    setDepts((b.data ?? []) as Dept[])
+    const opts = (b.data ?? {}) as { departments?: Dept[]; branches?: Dept[] }
+    setDepts(opts.departments ?? [])
+    setBranches(opts.branches ?? [])
     setStaff((c.data ?? []) as Person[])
     setAllowed(d.data === true)
     setLoading(false)
@@ -137,7 +160,8 @@ export default function PolicyManager() {
       .filter((r) => !needle
         || r.title.toLowerCase().includes(needle)
         || r.code.toLowerCase().includes(needle)
-        || (r.department ?? '').toLowerCase().includes(needle))
+        || (r.department ?? '').toLowerCase().includes(needle)
+        || (r.branch ?? '').toLowerCase().includes(needle))
       .sort((x, y) =>
         Number(y.is_published) - Number(x.is_published) ||
         (y.updated_at ?? '').localeCompare(x.updated_at ?? ''))
@@ -152,13 +176,24 @@ export default function PolicyManager() {
     const r = data as {
       ok: boolean; reason?: string
       policy?: Record<string, unknown>; audience?: string[]
+      old_department?: string | null; old_by_role?: boolean | null
     }
     if (!r.ok) { setErr(r.reason ?? 'Could not open it.'); return }
     const p = r.policy ?? {}
+    // An item still on the old list, with no real department chosen.
+    // A role-based one opens on "as before", so saving it without
+    // touching the select changes nothing about who it reaches.
+    const oldName = r.old_department && r.old_department.toLowerCase() !== 'all staff'
+      ? r.old_department : ''
+    const byRole = Boolean(oldName && r.old_by_role)
     setDraft({
       id: String(p.id ?? ''),
       title: String(p.title ?? ''),
-      department_id: p.department_id ? String(p.department_id) : '',
+      dept_id: p.dept_id ? String(p.dept_id) : byRole ? KEEP_OLD : '',
+      branch_id: p.branch_id ? String(p.branch_id) : '',
+      old_department: p.dept_id ? '' : oldName,
+      old_by_role: byRole,
+      named_only: p.named_only === true,
       summary: p.summary ? String(p.summary) : '',
       body: String(p.body ?? ''),
       doc_type: p.doc_type === 'sop' ? 'sop' : 'policy',
@@ -197,7 +232,10 @@ export default function PolicyManager() {
     const { data, error } = await supabase.rpc('policy_save', {
       p_id: draft.id,
       p_title: draft.title,
-      p_dept: draft.department_id || null,
+      p_dept: draft.dept_id && draft.dept_id !== KEEP_OLD ? draft.dept_id : null,
+      p_branch: draft.branch_id || null,
+      p_keep_old: draft.dept_id === KEEP_OLD,
+      p_named_only: draft.named_only,
       p_body: draft.doc_type === 'sop' ? null : draft.body,
       p_summary: draft.summary || null,
       p_from: draft.effective_from || null,
@@ -236,15 +274,23 @@ export default function PolicyManager() {
     if (draft?.id === id) await openPolicy(id)
   }
 
+  // The editor's "Yes, delete" is the yes — it already says how many
+  // acknowledgements go with it — so p_confirm is sent with it. The
+  // database refuses a delete of a read item without one.
   async function drop(id: string) {
     setBusy(true); setErr(null); setNote(null)
-    const { data, error } = await supabase.rpc('policy_drop', { p_id: id })
+    const { data, error } = await supabase.rpc('policy_drop', { p_id: id, p_confirm: true })
+    if (error) { setBusy(false); setErr(error.message); return }
+    const r = data as { ok: boolean; reason?: string; file_path?: string | null; reads_removed?: number }
+    if (!r.ok) { setBusy(false); setErr(r.reason ?? 'Not deleted.'); return }
+    // The SOP's PDF, so it is not left in storage with nothing pointing at
+    // it. If this fails the item is still gone; the file is only clutter.
+    if (r.file_path) await supabase.storage.from('sops').remove([r.file_path])
     setBusy(false)
-    if (error) { setErr(error.message); return }
-    const r = data as { ok: boolean; reason?: string }
-    if (!r.ok) { setErr(r.reason ?? 'Not deleted.'); return }
     setDraft(null)
-    setNote('Deleted.')
+    setNote(Number(r.reads_removed) > 0
+      ? `Deleted, with ${r.reads_removed} acknowledgement${Number(r.reads_removed) === 1 ? '' : 's'}.`
+      : 'Deleted.')
     await load()
   }
 
@@ -383,7 +429,27 @@ export default function PolicyManager() {
                       {r.effective_from ? ` · from ${day(r.effective_from)}` : ''}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-300">{r.department ?? 'Everybody'}</td>
+                  <td className="px-4 py-3 text-gray-300">
+                    {/* Department and branch together — both have to fit.
+                        A named-only item is for its people, not a place. */}
+                    {r.named_only ? (
+                      <span className="text-sky-300">
+                        Only {r.named_count} named {Number(r.named_count) === 1 ? 'person' : 'people'}
+                      </span>
+                    ) : (
+                      <>
+                        {r.department ?? 'Everybody'}
+                        {r.branch && <span className="text-gray-500"> · {r.branch}</span>}
+                      </>
+                    )}
+                    {/* Still on the old list with nothing real chosen: it
+                        reaches only the people named on it until picked. */}
+                    {r.needs_department && (
+                      <span className="mt-1 block w-fit rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-300 ring-1 ring-red-500/20">
+                        Pick a department
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     {r.is_published ? (
                       <span className="rounded-full bg-green-950/60 px-2 py-0.5 text-[11px] text-green-300">
@@ -448,7 +514,9 @@ export default function PolicyManager() {
       {draft && (
         <Editor
           draft={draft}
+          readEver={Number(rows.find((r) => r.id === draft.id)?.read_ever ?? 0)}
           depts={depts}
+          branches={branches}
           staff={staff}
           busy={busy}
           onChange={setDraft}
@@ -475,10 +543,12 @@ export default function PolicyManager() {
    ══════════════════════════════════════════════════════════════ */
 
 function Editor({
-  draft, depts, staff, busy, onChange, onClose, onSave, onPublish, onDrop,
+  draft, readEver, depts, branches, staff, busy, onChange, onClose, onSave, onPublish, onDrop,
 }: {
   draft: Draft
+  readEver: number
   depts: Dept[]
+  branches: Dept[]
   staff: Person[]
   busy: boolean
   onChange: (d: Draft) => void
@@ -559,20 +629,87 @@ function Editor({
             />
           </Field>
 
+          {/* Two ways to say who it is for. A department (and branch),
+              or a list of people and nobody else — three people in one
+              department, each with an SOP the other two must not read,
+              cannot be said with a department at all. */}
+          <Field label="Who it is for">
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                [false, 'A department or branch', 'Everybody in it'],
+                [true, 'Only specific people', 'Nobody else sees it'],
+              ] as const).map(([only, title, sub]) => (
+                <button
+                  key={String(only)}
+                  type="button"
+                  onClick={() => set({ named_only: only })}
+                  className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                    draft.named_only === only
+                      ? 'border-orange-500/60 bg-orange-500/10'
+                      : 'border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#3a3a3a]'}`}
+                >
+                  <span className={`block text-sm ${draft.named_only === only ? 'text-orange-300' : 'text-gray-300'}`}>{title}</span>
+                  <span className="block text-[11px] text-gray-500">{sub}</span>
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          {!draft.named_only && (<>
+          {/* Who it is for: the department HR sets on the Employees
+              screen, and the branch. Both have to fit — "Sales" and
+              "Rajkot" is the Rajkot sales team. Either left on "All"
+              means what it says. */}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Who it is for">
+            <Field label="Department">
               <select
-                value={draft.department_id}
-                onChange={(e) => set({ department_id: e.target.value })}
+                value={draft.dept_id}
+                onChange={(e) => set({ dept_id: e.target.value })}
                 className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-orange-500"
               >
-                <option value="">Everybody</option>
+                <option value="">All departments</option>
+                {draft.old_by_role && (
+                  <option value={KEEP_OLD}>As before — {draft.old_department} (by role)</option>
+                )}
                 {depts.map((d) => (
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>
             </Field>
 
+            <Field label="Branch">
+              <select
+                value={draft.branch_id}
+                onChange={(e) => set({ branch_id: e.target.value })}
+                className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white outline-none focus:border-orange-500"
+              >
+                <option value="">All branches</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+
+          {/* An item from before departments were real. Said plainly, so
+              nobody saves "All departments" thinking nothing changed. */}
+          {draft.old_department && draft.dept_id === '' && (
+            <p className="-mt-1 rounded-lg border border-red-900/40 bg-red-950/20 px-3 py-2 text-xs leading-relaxed text-red-200/90">
+              This was for <b>{draft.old_department}</b> on the old list
+              {draft.old_by_role
+                ? '. Saving as "All departments" will show it to everybody — pick the department it is for.'
+                : ', which matched no real department, so right now only the people named below see it. Pick the department it is for.'}
+            </p>
+          )}
+          {draft.dept_id === KEEP_OLD && (
+            <p className="-mt-1 rounded-lg border border-amber-900/40 bg-amber-950/15 px-3 py-2 text-xs leading-relaxed text-amber-200/90">
+              Still reaching everybody with the <b>{draft.old_department}</b> role, as before.
+              Pick its department when you can.
+            </p>
+          )}
+          </>)}
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="In force from">
               <DateField
                 value={draft.effective_from}
@@ -650,15 +787,25 @@ function Editor({
             </span>
           </label>
 
-          {/* Named people, on top of the department */}
-          <div className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] p-3">
+          {/* Named people. On top of the department — or, for a
+              named-only item, the whole of who sees it. */}
+          <div className={`rounded-lg border p-3 ${
+            draft.named_only && draft.audience.length === 0
+              ? 'border-amber-900/60 bg-amber-950/15'
+              : 'border-[#2a2a2a] bg-[#1a1a1a]'}`}>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm text-white">Also send it to specific people</div>
-                <div className="text-xs text-gray-500">
-                  {draft.audience.length
-                    ? `${draft.audience.length} named, on top of the department above`
-                    : 'For what a department does not describe'}
+                <div className="text-sm text-white">
+                  {draft.named_only ? 'Who sees it' : 'Also send it to specific people'}
+                </div>
+                <div className={`text-xs ${draft.named_only && draft.audience.length === 0 ? 'text-amber-300' : 'text-gray-500'}`}>
+                  {draft.named_only
+                    ? draft.audience.length
+                      ? `Only these ${draft.audience.length} — nobody else, not even their department`
+                      : 'Nobody yet — pick at least one person, or it cannot be published'
+                    : draft.audience.length
+                      ? `${draft.audience.length} named, on top of the department above`
+                      : 'For what a department does not describe'}
                 </div>
               </div>
               <button
@@ -705,7 +852,13 @@ function Editor({
             {draft.id && (
               confirmDrop ? (
                 <>
-                  <span className="text-xs text-gray-400">Delete it for good?</span>
+                  {/* Said before the yes, not after: the acknowledgements
+                      go with it and cannot be brought back. */}
+                  <span className={`text-xs ${readEver > 0 ? 'text-red-300' : 'text-gray-400'}`}>
+                    {readEver > 0
+                      ? `${readEver} ${readEver === 1 ? 'person has' : 'people have'} acknowledged it — their record goes too. Delete it for good?`
+                      : 'Delete it for good?'}
+                  </span>
                   <button
                     onClick={onDrop}
                     className="rounded-lg bg-red-500/15 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/20"

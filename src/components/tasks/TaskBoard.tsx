@@ -126,6 +126,10 @@ export default function TaskBoard() {
   const [openTab, setOpenTab] = useState<'details' | 'comments' | 'files'>('details')
   const [dragId, setDragId] = useState<string | null>(null)
   const [timeOf, setTimeOf] = useState<Record<string, TimeStatus>>({})
+  // Work groups (Brochure) and their parts. A part lives inside its
+  // group's task, never as a card of its own.
+  const [groupIds, setGroupIds] = useState<Set<string>>(new Set())
+  const [partIds, setPartIds] = useState<Set<string>>(new Set())
 
   /*
     Who has a timer running, by task.
@@ -154,11 +158,26 @@ export default function TaskBoard() {
 
   useEffect(() => {
     void loadLive()
-    // Somebody starting or stopping elsewhere should show up here
-    // without a reload, but a board is read, not watched — a minute is
-    // soon enough and costs one small query.
-    const t = setInterval(loadLive, 60000)
-    return () => clearInterval(t)
+    /*
+      Somebody starting or stopping elsewhere should show up here
+      without a reload, but a board is read, not watched.
+
+      Three minutes, not one, and nothing at all while the tab is
+      hidden. A minute meant a CRM left open in a background tab asked
+      for this 480 times a day, for a badge nobody was looking at —
+      across the team that was a real share of the project's log quota.
+      Coming back to the tab fetches once, so what you see on returning
+      is current either way.
+    */
+    const t = setInterval(() => {
+      if (!document.hidden) void loadLive()
+    }, 180000)
+    const onShow = () => { if (!document.hidden) void loadLive() }
+    document.addEventListener('visibilitychange', onShow)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onShow)
+    }
   }, [loadLive])
   const { dark } = useChartTheme()   // the colours below have to follow the Light/Dark switch
   const [menu, setMenu] = useState<{ id: string; kind: 'label' | 'stage' | 'assign' } | null>(null)
@@ -171,9 +190,14 @@ export default function TaskBoard() {
   const load = useCallback(async () => {
     setError('')
     try {
-      const [t, s, l, st, c, ts] = await Promise.all([
+      const [t, s, l, st, c, ts, wt] = await Promise.all([
         loadTasks(), loadTaskStages(), loadTaskLabels(), loadStaff(), loadTaskCounts(), loadTimeStatus(),
+        // Inactive ones too: a part switched off later still has tasks.
+        supabase.from('work_types').select('id, is_group, parent_id'),
       ])
+      const types = (wt.data ?? []) as { id: string; is_group: boolean | null; parent_id: string | null }[]
+      setGroupIds(new Set(types.filter((w) => w.is_group).map((w) => w.id)))
+      setPartIds(new Set(types.filter((w) => w.parent_id).map((w) => w.id)))
       setTasks(t)
       setStages(s)
       setLabels(l)
@@ -260,6 +284,14 @@ export default function TaskBoard() {
         it; the big task already says "4 of 4 given out". So a piece is
         shown to the people it is assigned to, and to nobody else.
       */
+      /*
+        A part of a work group (Brochure → Front-Back Concept, Inner
+        Pages) is not a job of its own. It is timed, optioned and
+        changed inside the brochure's task, so it never gets a card —
+        not even for its own designer, who would otherwise see one
+        brochure as three tasks.
+      */
+      if (t.parent_task_id && t.work_type_id && partIds.has(t.work_type_id)) return false
       if (t.parent_task_id && !currentAssignees(t).includes(me)) return false
       if (projectId && t.project_id !== projectId) return false
       const to = currentAssignees(t)
@@ -281,7 +313,7 @@ export default function TaskBoard() {
         .toLowerCase()
         .includes(term)
     })
-  }, [tasks, q, scope, priority, labelF, creator, assignee, from, till, me, nameOf, projectId])
+  }, [tasks, q, scope, priority, labelF, creator, assignee, from, till, me, nameOf, projectId, partIds])
 
   const sorted = useMemo(() => {
     const far = Number.MAX_SAFE_INTEGER
@@ -503,7 +535,16 @@ export default function TaskBoard() {
           {/* Split into pieces: how many are handed out, how many are
               not. The one left unassigned is the whole reason this is
               on the card — it is the piece nobody is doing. */}
-          {split && (
+          {/* A brochure's parts are not pieces handed out — "2 of 1 given
+              out" read as nonsense. It shows its parts and their time. */}
+          {split && t.work_type_id && groupIds.has(t.work_type_id) && (
+            <span className="rounded bg-[#232323] px-1.5 py-0.5 text-[11px] text-gray-300">
+              {ts?.child_count} {(ts?.child_count ?? 0) === 1 ? 'part' : 'parts'}
+              {' · '}{mins(Math.round((ts?.rolled_spent_secs ?? 0) / 60))} / {mins(ts?.rolled_allowed_mins ?? 0)}
+            </span>
+          )}
+
+          {split && !(t.work_type_id && groupIds.has(t.work_type_id)) && (
             <span className="rounded bg-[#232323] px-1.5 py-0.5 text-[11px] text-gray-300">
               {ts?.assigned_qty} of {ts?.work_qty} given out
               {(ts?.work_qty ?? 0) > (ts?.assigned_qty ?? 0) && (

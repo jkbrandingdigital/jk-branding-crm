@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
-  Activity, Cake, FolderKanban, Users2, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, QrCode, Wallet, BookOpen, type LucideIcon,
+  Activity, Cake, FolderKanban, Users2, Tag, Award, LayoutDashboard, TrendingUp, Target, FileBarChart, CalendarCheck, CalendarOff, X, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, ChevronDown, QrCode, Wallet, BookOpen, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -24,6 +24,8 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
       { label: 'Sales Performance', path: '/manager/performance', icon: TrendingUp, ready: true, perm: 'mod_performance' },
       { label: 'Team Targets', path: '/manager/targets', icon: Target, ready: true, perm: 'mod_targets' },
       { label: 'Daily Reports', path: '/manager/reports', icon: FileBarChart, ready: true, perm: 'mod_reports' },
+      { label: 'Price changes', path: '/manager/price-changes', icon: Tag, ready: true },
+      { label: 'Sales incentive', path: '/manager/incentive', icon: Award, ready: true },
     ],
   },
   {

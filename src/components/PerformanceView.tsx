@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { istDate, addDays, weekStart, addMonths, shortDate, monthLabel, inr, inrCompact } from '../lib/format'
 import IncentiveCard from './sales/IncentiveCard'
+import { authUser } from '../lib/auth'
 
 type View = 'daily' | 'weekly' | 'monthly' | 'yearly'
 type Row = {
@@ -127,7 +128,7 @@ export default function PerformanceView({
       if (!onePerson) return setNorm(null)
       let id = userId ?? null
       if (!id) {
-        const { data } = await supabase.auth.getUser()
+        const { data } = await authUser()
         id = data.user?.id ?? null
       }
       if (!id) return setNorm(null)
