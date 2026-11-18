@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Trophy, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { GST_SLABS, inr } from '../finance/financeUtils'
+import GstChoice, { NO_GST, pickNongst, pickProblem, type GstPick } from '../finance/GstChoice'
 
 /*
   What to call the first project.
@@ -60,7 +60,7 @@ export function projectNameFrom(requirement?: string | null): string {
   earnings. The GSTIN goes onto the client's file.
 */
 export async function convertLead(
-  leadId: string, projectTitle: string, value: number, gstPercent = 0, gstin = '',
+  leadId: string, projectTitle: string, value: number, gstPercent = 0, gstin = '', nongst = 0,
 ): Promise<string> {
   const { data, error } = await supabase.rpc('lead_to_customer', {
     p_lead_id: leadId,
@@ -68,6 +68,7 @@ export async function convertLead(
     p_value: value,
     p_gst_percent: gstPercent,
     p_gstin: gstin.trim() || null,
+    p_nongst: nongst,
   })
   if (error) throw new Error(error.message)
   return data as string
@@ -87,7 +88,7 @@ export default function ConvertLead({
 }) {
   const [title, setTitle] = useState(projectNameFrom(requirement))
   const [value, setValue] = useState(estimated && estimated > 0 ? String(estimated) : '')
-  const [gst, setGst] = useState(0)
+  const [gst, setGst] = useState<GstPick>(NO_GST)
   const [gstin, setGstin] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -122,10 +123,12 @@ export default function ConvertLead({
   async function go() {
     if (!ok) return setErr('Enter what the deal is worth.')
     if (gstinBad) return setErr('A GSTIN is 15 characters. Leave it empty if you do not have it yet.')
+    const problem = pickProblem(gst, amount)
+    if (problem) return setErr(problem)
     setBusy(true)
     setErr('')
     try {
-      onDone(await convertLead(leadId, title, amount, gst, gst > 0 ? gstin : ''))
+      onDone(await convertLead(leadId, title, amount, gst.gst, gst.gst > 0 ? gstin : '', pickNongst(gst)))
     } catch (e) {
       setErr((e as Error).message)
       setBusy(false)
@@ -193,27 +196,9 @@ export default function ConvertLead({
 
           <div>
             <label className="mb-1.5 block text-xs text-gray-500">GST bill?</label>
-            <div className="flex flex-wrap gap-1">
-              {GST_SLABS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setGst(s)}
-                  className={`rounded-md px-2.5 py-1 text-xs ${
-                    gst === s ? 'bg-orange-500/15 text-orange-300' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'
-                  }`}
-                >
-                  {s === 0 ? 'No GST' : `${s}%`}
-                </button>
-              ))}
-            </div>
-            {gst > 0 && (
+            <GstChoice base={amount > 0 ? amount : 0} pick={gst} onChange={setGst} />
+            {gst.gst > 0 && (
               <>
-                {amount > 0 && (
-                  <p className="mt-1.5 text-xs text-gray-500">
-                    Client pays {inr(Math.round(amount * (100 + gst)) / 100, true)} with GST.
-                  </p>
-                )}
                 <input
                   value={gstin}
                   onChange={(e) => setGstin(e.target.value.toUpperCase())}

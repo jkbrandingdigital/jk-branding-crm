@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { DateField } from '../DateField'
 import { downloadXlsx } from '../../lib/xlsx'
 import {
-  decidePayment, fmtDate, inr, modeLabel, monthRange, openProof, PAYMENT_STATE, reopenPayment,
+  BILL_LABEL, decidePayment, fmtDate, inr, modeLabel, monthRange, openProof, PAYMENT_STATE, reopenPayment,
   type InboxRow, type PaymentState,
 } from './financeUtils'
 
@@ -86,13 +86,15 @@ export default function PaymentsInbox() {
         { header: 'Mode', width: 13 }, { header: 'Reference', width: 22 }, { header: 'Client', width: 28 },
         { header: 'Project', width: 10 }, { header: 'Branch', width: 8 }, { header: 'Recorded by', width: 18 },
         { header: 'Status', width: 20 }, { header: 'Decided by', width: 18 }, { header: 'Note', width: 30 },
+        { header: 'Bill', width: 12 },
       ],
       rows: rows.map((r) => [
         r.paid_on, Number(r.amount), modeLabel(r.mode), r.reference ?? '', r.customer_name, r.project_code,
         r.branch_code ?? r.branch_name ?? '', r.recorded_name ?? '', PAYMENT_STATE[r.status].label,
         r.decided_name ?? '', [r.note, r.decide_note].filter(Boolean).join(' · '),
+        r.bill ? BILL_LABEL[r.bill] : r.project_split ? 'Not marked' : '',
       ]),
-      total: ['Total', rows.reduce((n, r) => n + Number(r.amount), 0), null, null, `${rows.length} payments`, null, null, null, null, null, null],
+      total: ['Total', rows.reduce((n, r) => n + Number(r.amount), 0), null, null, `${rows.length} payments`, null, null, null, null, null, null, null],
     }])
   }
 
@@ -170,6 +172,12 @@ export default function PaymentsInbox() {
                     <span className="text-lg font-semibold tabular-nums text-white">{inr(r.amount, true)}</span>
                     <span className="text-sm text-gray-300">{modeLabel(r.mode)}</span>
                     {r.reference && <span className="font-mono text-sm text-orange-300">{r.reference}</span>}
+                    {r.bill && (
+                      <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${r.bill === 'gst' ? 'bg-sky-500/15 text-sky-300' : 'bg-violet-500/15 text-violet-300'}`}>
+                        {BILL_LABEL[r.bill]}
+                      </span>
+                    )}
+                    {!r.bill && r.project_split && <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[11px] text-gray-400">Bill not marked</span>}
                     <span className="text-xs text-gray-500">paid {fmtDate(r.paid_on)}</span>
                   </p>
                   <p className="mt-1 text-sm text-white">

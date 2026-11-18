@@ -13,8 +13,8 @@ import {
 } from '../../lib/reception'
 
 const EMPTY = {
-  full_name: '', mobile: '', email: '', company_name: '', city: '', visitor_type: '',
-  meeting_employee_id: '', department: '', purpose: '', visit_description: '', reception_remark: '',
+  full_name: '', mobile: '', email: '', company_name: '', city: '', visitor_type: '', visitor_type_other: '',
+  meeting_employee_id: '', department: '', purpose: '', purpose_other: '', visit_description: '', reception_remark: '',
 }
 
 export default function AddVisitorForm({ onSuccess }: { onSuccess?: () => void }) {
@@ -46,13 +46,18 @@ export default function AddVisitorForm({ onSuccess }: { onSuccess?: () => void }
         if (cancelled) return
         setLookup(res)
         if (res) {
+          // A type typed in via "Other" last time is not in the list, so
+          // it comes back as Other + the typed text.
+          const saved = res.visitor.visitor_type
+          const known = (VISITOR_TYPES as readonly string[]).includes(saved)
           setForm((f) => ({
             ...f,
             full_name: f.full_name || res.visitor.full_name,
             email: f.email || res.visitor.email || '',
             company_name: f.company_name || res.visitor.company_name || '',
             city: f.city || res.visitor.city || '',
-            visitor_type: f.visitor_type || res.visitor.visitor_type,
+            visitor_type: f.visitor_type || (known ? saved : 'Other'),
+            visitor_type_other: f.visitor_type ? f.visitor_type_other : (known ? '' : saved),
           }))
         }
       } catch {
@@ -68,9 +73,13 @@ export default function AddVisitorForm({ onSuccess }: { onSuccess?: () => void }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.mobile])
 
+  // "Other" means: use what was typed in the box underneath.
+  const visitorType = form.visitor_type === 'Other' ? form.visitor_type_other.trim() : form.visitor_type
+  const purpose = form.purpose === 'Other' ? form.purpose_other.trim() : form.purpose
+
   const canSubmit = useMemo(
-    () => !!(form.full_name.trim() && isValidMobile(form.mobile) && form.visitor_type && form.meeting_employee_id && form.purpose),
-    [form],
+    () => !!(form.full_name.trim() && isValidMobile(form.mobile) && visitorType && form.meeting_employee_id && purpose),
+    [form, visitorType, purpose],
   )
 
   async function submit(e: FormEvent) {
@@ -83,7 +92,7 @@ export default function AddVisitorForm({ onSuccess }: { onSuccess?: () => void }
     }
     setSaving(true)
     try {
-      await createVisit(form)
+      await createVisit({ ...form, visitor_type: visitorType, purpose })
       setSuccess(`${form.full_name.trim()} checked in successfully.`)
       setForm({ ...EMPTY })
       setLookup(null)
@@ -140,6 +149,15 @@ export default function AddVisitorForm({ onSuccess }: { onSuccess?: () => void }
             <option value="">Select type</option>
             {VISITOR_TYPES.map((t) => (<option key={t} value={t}>{t}</option>))}
           </select>
+          {form.visitor_type === 'Other' && (
+            <input
+              autoFocus
+              className={`${input} mt-2`}
+              value={form.visitor_type_other}
+              onChange={(e) => set('visitor_type_other', e.target.value)}
+              placeholder="Type the visitor type"
+            />
+          )}
         </div>
       </div>
 
@@ -166,6 +184,15 @@ export default function AddVisitorForm({ onSuccess }: { onSuccess?: () => void }
             <option value="">Select purpose</option>
             {VISIT_PURPOSES.map((p) => (<option key={p} value={p}>{p}</option>))}
           </select>
+          {form.purpose === 'Other' && (
+            <input
+              autoFocus
+              className={`${input} mt-2`}
+              value={form.purpose_other}
+              onChange={(e) => set('purpose_other', e.target.value)}
+              placeholder="Type the purpose of visit"
+            />
+          )}
         </div>
         <div className="sm:col-span-2">
           <label className={label}>Visit Description</label>

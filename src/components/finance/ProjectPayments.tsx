@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Eye, Loader2, Paperclip, Plus, RotateCcw, Trash2, X } from 'lucide-react'
+import { ArrowRightLeft, Check, Eye, Loader2, Paperclip, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { authUser } from '../../lib/auth'
 import { DateField } from '../DateField'
 import {
-  addPayment, decidePayment, decidePrice, deletePayment, fmtDate, GST_SLABS, inr, loadProjectMoney, MODES, withdrawPrice,
-  modeLabel, openProof, PAY_STATUS, PAYMENT_STATE, reopenPayment, setProjectGst, todayIST, uploadProof,
-  type PayMode, type ProjectMoney, type ProjectPayment,
+  addPayment, BILL_LABEL, decidePayment, decidePrice, deletePayment, fmtDate, inr, loadProjectMoney, MODES, withdrawPrice,
+  modeLabel, openProof, PAY_STATUS, PAYMENT_STATE, reopenPayment, setPaymentBill, setProjectGst, setProjectSplit, todayIST, uploadProof,
+  type Bill, type PayMode, type ProjectMoney, type ProjectPayment,
 } from './financeUtils'
 
 /*
@@ -41,9 +41,13 @@ export default function ProjectPayments({
   const [ref, setRef] = useState('')
   const [note, setNote] = useState('')
   const [proof, setProof] = useState<File | null>(null)
+  const [bill, setBill] = useState<Bill>('gst')
 
   const [gstOpen, setGstOpen] = useState(false)
   const [gst, setGst] = useState('0')
+  // The part billed without GST, typed in when splitting (Fin_F8).
+  const [splitOpen, setSplitOpen] = useState(false)
+  const [splitAmt, setSplitAmt] = useState('')
 
   // Reject and reopen both need a reason, asked for in place.
   const [asking, setAsking] = useState<{ id: string; kind: 'reject' | 'reopen' | 'price' } | null>(null)
@@ -71,10 +75,26 @@ export default function ProjectPayments({
   const st = PAY_STATUS[f.status]
   const modeInfo = MODES.find((x) => x.key === mode)!
 
+  // Two bills on one project: 18% on part of the price, the rest without GST.
+  const bills = f.split && f.bills ? f.bills : null
+  const billLeft = (b: Bill) =>
+    bills ? Math.max(Number(bills[b].due) - Number(bills[b].waiting), 0) : left
+  const unmarked = bills ? Number(bills.unmarked.confirmed) + Number(bills.unmarked.waiting) : 0
+  const round2 = (n: number) => String(Math.round(n * 100) / 100)
+
   function openAdd() {
-    setAmount(left > 0 ? String(Math.round(left * 100) / 100) : '')
+    const b: Bill = bills && billLeft('gst') <= 0 && billLeft('nongst') > 0 ? 'nongst' : 'gst'
+    setBill(b)
+    const l = billLeft(b)
+    setAmount(l > 0 ? round2(l) : '')
     setPaidOn(todayIST()); setMode('upi'); setRef(''); setNote(''); setProof(null); setErr('')
     setAdding(true)
+  }
+
+  function pickBill(b: Bill) {
+    setBill(b)
+    const l = billLeft(b)
+    setAmount(l > 0 ? round2(l) : '')
   }
 
   async function save() {
@@ -92,7 +112,7 @@ export default function ProjectPayments({
       proofPath = up.path
     }
 
-    const r = await addPayment({ project: projectId, amount: amt, paidOn, mode, reference: ref, note, proofPath })
+    const r = await addPayment({ project: projectId, amount: amt, paidOn, mode, reference: ref, note, proofPath, bill: bills ? bill : null })
     setBusy('')
     if (!r.ok) return setErr(r.reason)
     setAdding(false)
@@ -122,14 +142,47 @@ export default function ProjectPayments({
     void after()
   }
 
-  async function saveGst() {
-    const n = Number(gst)
-    if (Number.isNaN(n) || n < 0 || n > 28) return setErr('GST is between 0 and 28 percent.')
-    setBusy('gst'); setErr('')
-    const r = await setProjectGst(projectId, n)
+  // One click saves: No GST, or 18% on the whole price. Split asks how
+  // much goes without GST. Clicking what it already is just closes.
+  const gstNow: 'none' | 'full' | 'split' = Number(f.gst_percent) === 0 ? 'none' : bills ? 'split' : 'full'
+
+  async function pickGst(k: 'none' | 'full' | 'split') {
+    if (k === 'split') {
+      setSplitAmt(bills ? round2(Number(f.nongst)) : '')
+      return setSplitOpen(true)
+    }
+    if (k === gstNow) { setGstOpen(false); setSplitOpen(false); return }
+    setGst(k); setBusy('gst'); setErr('')
+    const r = k === 'none'
+      ? await setProjectGst(projectId, 0)
+      : gstNow === 'split' ? await setProjectSplit(projectId, 0) : await setProjectGst(projectId, 18)
     setBusy('')
     if (!r.ok) return setErr(r.reason)
-    setGstOpen(false)
+    setGstOpen(false); setSplitOpen(false)
+    void after()
+  }
+
+  async function saveSplit() {
+    const n = Number(splitAmt)
+    if (!(n > 0)) return setErr('How much is W?')
+    if (n >= Number(f.base)) return setErr('That is the whole price. Choose No GST instead.')
+    setBusy('split'); setErr('')
+    if (Number(f.gst_percent) === 0) {
+      const g = await setProjectGst(projectId, 18)
+      if (!g.ok) { setBusy(''); return setErr(g.reason) }
+    }
+    const r = await setProjectSplit(projectId, n)
+    setBusy('')
+    if (!r.ok) { void after(); return setErr(r.reason) }
+    setGstOpen(false); setSplitOpen(false)
+    void after()
+  }
+
+  async function moveBill(p: ProjectPayment, to: Bill) {
+    setBusy(p.id); setErr('')
+    const r = await setPaymentBill(p.id, to)
+    setBusy('')
+    if (!r.ok) return setErr(r.reason)
     void after()
   }
 
@@ -207,6 +260,7 @@ export default function ProjectPayments({
         <div className="flex items-center justify-between gap-2">
           <dt className="flex items-center gap-2 text-gray-400">
             GST {Number(f.gst_percent) > 0 ? `${Number(f.gst_percent)}%` : '— none'}
+            {bills && <span className="text-xs text-gray-500">on {inr(bills.gst.base)}</span>}
             {!m.gst_locked && !gstOpen && (
               <button onClick={() => { setGst(String(Number(f.gst_percent))); setGstOpen(true) }} className="text-xs text-orange-400 hover:underline">
                 Change
@@ -217,27 +271,45 @@ export default function ProjectPayments({
         </div>
 
         {gstOpen && (
-          <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-[#1a1a1a] p-2">
-            {GST_SLABS.map((s) => (
-              <button
-                key={s}
-                onClick={() => setGst(String(s))}
-                className={`rounded-md px-2 py-1 text-xs ${Number(gst) === s ? 'bg-orange-500/15 text-orange-300' : 'text-gray-400 hover:text-white'}`}
-              >
-                {s === 0 ? 'No GST' : `${s}%`}
-              </button>
-            ))}
-            <input
-              type="number" min={0} max={28} step="0.01" value={gst}
-              onChange={(e) => setGst(e.target.value)}
-              onWheel={(e) => e.currentTarget.blur()}
-              aria-label="GST percent"
-              className="w-20 rounded-md border border-[#2a2a2a] bg-[#151515] px-2 py-1 text-xs tabular-nums text-white"
-            />
-            <button onClick={saveGst} disabled={busy === 'gst'} className="rounded-md bg-orange-500 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50">
-              {busy === 'gst' ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
-            </button>
-            <button onClick={() => setGstOpen(false)} className="text-xs text-gray-500 hover:text-white">Cancel</button>
+          <div className="space-y-2 rounded-lg bg-[#1a1a1a] p-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {([['none', 'No GST'], ['full', '18%'], ...(m.master ? [['split', 'Split']] : [])] as ['none' | 'full' | 'split', string][]).map(([k, text]) => {
+                const on = splitOpen ? k === 'split' : gstNow === k
+                return (
+                  <button
+                    key={k}
+                    onClick={() => void pickGst(k)}
+                    disabled={busy === 'gst' || busy === 'split'}
+                    aria-pressed={on}
+                    className={`flex items-center gap-1 rounded-md px-3 py-1 text-xs disabled:opacity-50 ${
+                      on ? 'bg-orange-500/15 text-orange-300' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'}`}
+                  >
+                    {busy === 'gst' && gst === k && <Loader2 size={11} className="animate-spin" />}
+                    {text}
+                  </button>
+                )
+              })}
+              <button onClick={() => { setGstOpen(false); setSplitOpen(false) }} className="ml-auto text-xs text-gray-500 hover:text-white">Cancel</button>
+            </div>
+            {splitOpen && (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs text-gray-400" htmlFor="nongst">W ₹</label>
+                <input
+                  id="nongst" type="number" min={0} step="0.01" value={splitAmt} autoFocus
+                  onChange={(e) => setSplitAmt(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  className="w-28 rounded-md border border-[#2a2a2a] bg-[#151515] px-2 py-1 text-xs tabular-nums text-white"
+                />
+                {Number(splitAmt) > 0 && Number(splitAmt) < Number(f.base) && (
+                  <span className="text-[11px] text-gray-500">
+                    18% on {inr(Number(f.base) - Number(splitAmt))} → client pays {inr(Number(f.base) + Math.round((Number(f.base) - Number(splitAmt)) * 18) / 100, true)}
+                  </span>
+                )}
+                <button onClick={saveSplit} disabled={busy === 'split'} className="flex items-center gap-1 rounded-md bg-orange-500 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50">
+                  {busy === 'split' && <Loader2 size={11} className="animate-spin" />} Save
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -249,12 +321,44 @@ export default function ProjectPayments({
         <Line k="Still due" v={inr(Math.max(Number(f.due), 0), true)} tone={Number(f.due) > 1 ? 'text-red-400' : 'text-gray-300'} />
       </dl>
 
+      {bills && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(['gst', 'nongst'] as const).map((k) => {
+            const b = bills[k]
+            const st = PAY_STATUS[b.status]
+            return (
+              <div key={k} className="rounded-lg border border-[#242424] bg-[#171717] p-2.5 text-xs">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className={`font-medium ${k === 'gst' ? 'text-sky-300' : 'text-violet-300'}`}>{BILL_LABEL[k]}</span>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] ${st.tone}`}>{st.label}</span>
+                </div>
+                <dl className="space-y-1">
+                  {k === 'gst' ? (
+                    <Line k={`${inr(b.base)} + 18%`} v={inr(b.total, true)} tone="text-white" />
+                  ) : (
+                    <Line k="No GST" v={inr(b.total, true)} tone="text-white" />
+                  )}
+                  <Line k="Received" v={inr(b.confirmed, true)} tone="text-green-400" />
+                  {Number(b.waiting) > 0 && <Line k="Waiting" v={inr(b.waiting, true)} tone="text-amber-300" />}
+                  <Line k="Due" v={inr(Math.max(Number(b.due), 0), true)} tone={Number(b.due) > 1 ? 'text-red-400' : 'text-gray-300'} />
+                </dl>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {bills && unmarked > 0 && (
+        <p className="rounded-md bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">
+          {inr(unmarked, true)} paid before the split is not marked to a bill. Mark it below so each bill's due is right.
+        </p>
+      )}
+
       <div className="h-1.5 overflow-hidden rounded-full bg-[#2a2a2a]">
         <span className="block h-full rounded-full bg-green-500" style={{ width: `${pct}%` }} />
       </div>
 
       {m.gst_locked && (
-        <p className="text-[11px] text-gray-600">A payment is confirmed, so GST is changed by Accounts now.</p>
+        <p className="text-[11px] text-gray-600">A payment is confirmed, so GST and the split are changed by Accounts now.</p>
       )}
 
       {/* ---------- the payments ---------- */}
@@ -263,6 +367,7 @@ export default function ProjectPayments({
           {m.payments.map((p) => {
             const s = PAYMENT_STATE[p.status]
             const canDelete = p.status !== 'confirmed' && (m.is_accounts || (p.mine && p.status === 'pending'))
+            const canMove = !!bills && p.status !== 'rejected' && (m.is_accounts || (p.mine && p.status === 'pending'))
             return (
               <li key={p.id} className="rounded-lg border border-[#242424] bg-[#171717] px-3 py-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -270,6 +375,9 @@ export default function ProjectPayments({
                   <span className="text-xs text-gray-500">
                     {fmtDate(p.paid_on)} · {modeLabel(p.mode)}{p.reference && <> · <span className="font-mono">{p.reference}</span></>}
                   </span>
+                  {bills && (p.bill
+                    ? <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${p.bill === 'gst' ? 'bg-sky-500/15 text-sky-300' : 'bg-violet-500/15 text-violet-300'}`}>{BILL_LABEL[p.bill]}</span>
+                    : <span className="rounded bg-[#1f1f1f] px-1.5 py-0.5 text-[10px] text-gray-400">Bill not marked</span>)}
                   <span className={`ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium ${s.tone}`}>{s.label}</span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-gray-600">
@@ -302,6 +410,16 @@ export default function ProjectPayments({
                       <RotateCcw size={12} className="mr-1 inline" />Reopen
                     </button>
                   )}
+                  {canMove && (p.bill
+                    ? (
+                      <button onClick={() => moveBill(p, p.bill === 'gst' ? 'nongst' : 'gst')} disabled={busy === p.id} className={small}>
+                        <ArrowRightLeft size={12} className="mr-1 inline" />Move to {BILL_LABEL[p.bill === 'gst' ? 'nongst' : 'gst']}
+                      </button>
+                    ) : (['gst', 'nongst'] as const).map((k) => (
+                      <button key={k} onClick={() => moveBill(p, k)} disabled={busy === p.id} className={small}>
+                        Mark: {BILL_LABEL[k]}
+                      </button>
+                    )))}
                   {canDelete && (
                     <button onClick={() => act(p, 'delete')} disabled={busy === p.id} aria-label="Remove payment" className={`${small} hover:text-red-400`}>
                       <Trash2 size={12} />
@@ -340,6 +458,21 @@ export default function ProjectPayments({
         )
       ) : (
         <div className="space-y-3 rounded-lg border border-[#2a2a2a] bg-[#171717] p-3">
+          {bills && (
+            <div>
+              <label className={label}>Which bill</label>
+              <div className="flex gap-1.5">
+                {(['gst', 'nongst'] as const).map((k) => (
+                  <button
+                    key={k} type="button" onClick={() => pickBill(k)} aria-pressed={bill === k}
+                    className={`rounded-md px-3 py-1.5 text-xs ${bill === k ? 'bg-orange-500/15 text-orange-300' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'}`}
+                  >
+                    {BILL_LABEL[k]} · {inr(billLeft(k), true)} left
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className={label}>Amount (₹)</label>
@@ -349,7 +482,9 @@ export default function ProjectPayments({
                 onWheel={(e) => e.currentTarget.blur()}
                 className={`${input} tabular-nums`} autoFocus
               />
-              <p className="mt-1 text-[11px] text-gray-600">{inr(left, true)} left to collect</p>
+              <p className="mt-1 text-[11px] text-gray-600">
+                {bills ? <>{inr(billLeft(bill), true)} left on the {bill === 'gst' ? 'GST bill' : 'W bill'}</> : <>{inr(left, true)} left to collect</>}
+              </p>
             </div>
             <div>
               <label className={label}>Paid on</label>

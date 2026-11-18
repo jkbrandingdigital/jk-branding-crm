@@ -158,6 +158,7 @@ export default function FinanceBoard() {
           { header: 'Still due', kind: 'money', width: 14 }, { header: 'Status', width: 12 },
           { header: 'Last paid', kind: 'date', width: 12 },
           { header: 'Cost (job work + purchases)', kind: 'money', width: 16 }, { header: 'Margin', kind: 'money', width: 14 },
+          { header: 'W', kind: 'money', width: 13 },
         ],
         rows: shown.map((r) => [
           r.project_code, r.booked_on, r.customer_name, r.customer_code, r.gstin ?? '',
@@ -165,10 +166,12 @@ export default function FinanceBoard() {
           Number(r.base), Number(r.gst_percent), Number(r.gst_amount), Number(r.total),
           Number(r.confirmed), Number(r.waiting), Math.max(Number(r.due), 0),
           PAY_STATUS[r.status].label, r.last_paid_on ?? '', Number(r.cost), Number(r.margin),
+          Number(r.nongst ?? 0),
         ]),
         total: ['Total', null, `${totals.deals} projects`, null, null, null, null, null,
           totals.base, null, totals.gst, totals.total, totals.confirmed, totals.waiting, totals.due, null, null,
-          shown.reduce((n, r) => n + Number(r.cost), 0), shown.reduce((n, r) => n + Number(r.margin), 0)],
+          shown.reduce((n, r) => n + Number(r.cost), 0), shown.reduce((n, r) => n + Number(r.margin), 0),
+          shown.reduce((n, r) => n + Number(r.nongst ?? 0), 0)],
       },
       {
         name: 'By branch',
@@ -419,7 +422,7 @@ export default function FinanceBoard() {
                     <td className={`${td} text-xs text-gray-400`}>{r.seller_name ?? '—'}</td>
                     <td className={`${num} text-white`}>{inr(r.base)}</td>
                     <td className={`${num} text-gray-400`}>
-                      {Number(r.gst_percent) > 0 ? <>{inr(r.gst_amount)}<span className="block text-[11px] text-gray-600">{Number(r.gst_percent)}%</span></> : '—'}
+                      {Number(r.gst_percent) > 0 ? <>{inr(r.gst_amount)}<span className="block text-[11px] text-gray-600">{Number(r.gst_percent)}%{Number(r.nongst ?? 0) > 0 && <> · W {inr(r.nongst)}</>}</span></> : '—'}
                     </td>
                     <td className={`${num} text-gray-200`}>{inr(r.total)}</td>
                     <td className={`${num} text-green-400`}>

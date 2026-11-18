@@ -26,7 +26,24 @@ export type Figures = {
   waiting: number
   due: number
   status: PayStatus
+  nongst?: number                  // W: only shown to an unlocked master (Fin_F10)
+  split?: boolean                  // 18% GST and a part without GST: two bills
+  bills?: { gst: BillFigures; nongst: BillFigures; unmarked: { confirmed: number; waiting: number } } | null
 }
+
+// One of the two bills of a split project.
+export type BillFigures = {
+  base: number
+  gst: number
+  total: number
+  confirmed: number
+  waiting: number
+  due: number
+  status: PayStatus
+}
+
+export type Bill = 'gst' | 'nongst'
+export const BILL_LABEL: Record<Bill, string> = { gst: 'GST bill', nongst: 'W' }
 
 export type ProjectPayment = {
   id: string
@@ -43,6 +60,7 @@ export type ProjectPayment = {
   decided_name: string | null
   decided_at: string | null
   mine: boolean
+  bill?: Bill | null               // null = not marked (no split, or from before it)
 }
 
 export type ProjectMoney = {
@@ -50,6 +68,7 @@ export type ProjectMoney = {
   reason?: string
   figures: Figures
   is_accounts: boolean
+  master?: boolean                 // private view open (Fin_F10): may split and see W
   gst_locked: boolean
   month_closed?: boolean
   price_request?: PendingPrice | null
@@ -94,6 +113,7 @@ export type BoardRow = {
   payments: number
   cost: number          // job works + purchases tied to this project, ever
   margin: number        // base − cost
+  nongst?: number       // part of base billed without GST (0 = no split)
 }
 
 export type InboxRow = {
@@ -119,6 +139,8 @@ export type InboxRow = {
   decided_at: string | null
   project_total: number
   project_confirmed: number
+  bill?: Bill | null
+  project_split?: boolean
 }
 
 // ---------------------------------------------------------------- labels
@@ -149,9 +171,9 @@ export const MODES: { key: PayMode; label: string; needsRef: boolean; refLabel: 
 ]
 export const modeLabel = (m: string) => MODES.find((x) => x.key === m)?.label ?? m
 
-// The usual GST slabs. Any value from 0 to 28 is accepted by the
-// database; these are only the quick picks.
-export const GST_SLABS = [0, 5, 12, 18, 28]
+// JK bills either without GST or with 18% — nothing else. The database
+// holds the same rule for new values (Fin_F7).
+export const GST_SLABS = [0, 18]
 
 // ---------------------------------------------------------------- money and dates
 
@@ -216,6 +238,7 @@ export async function loadProjectMoney(projectId: string): Promise<ProjectMoney 
 export const addPayment = (a: {
   project: string; amount: number; paidOn: string; mode: PayMode
   reference?: string; note?: string; proofPath?: string | null
+  bill?: Bill | null
 }) => call('payment_add', {
   p_project: a.project,
   p_amount: a.amount,
@@ -224,6 +247,7 @@ export const addPayment = (a: {
   p_reference: a.reference?.trim() || null,
   p_note: a.note?.trim() || null,
   p_proof_path: a.proofPath ?? null,
+  p_bill: a.bill ?? null,
 })
 
 export const decidePayment = (id: string, confirm: boolean, note?: string) =>
@@ -242,6 +266,14 @@ export async function deletePayment(id: string): Promise<RpcResult> {
 
 export const setProjectGst = (project: string, percent: number) =>
   call('project_set_gst', { p_project: project, p_percent: percent })
+
+// The part of the price billed without GST. 0 removes the split.
+export const setProjectSplit = (project: string, nongst: number) =>
+  call('project_set_split', { p_project: project, p_nongst: nongst })
+
+// Mark or move a payment to one of the two bills.
+export const setPaymentBill = (id: string, bill: Bill | null) =>
+  call('payment_set_bill', { p_id: id, p_bill: bill })
 
 // ---------------------------------------------------------------- proof screenshots
 

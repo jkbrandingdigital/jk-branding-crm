@@ -23,6 +23,7 @@ import { istDate } from '../../lib/format'
 import DayDrawer, { type DayPerson } from './DayDrawer'
 import RequestsCard from './RequestsCard'
 import { CARD_TABLE } from '../CardTable'
+import AttendanceMonth, { PeriodTabs, type Period } from './AttendanceMonth'
 
 
 // ── The colours ─────────────────────────────────────────────────
@@ -105,6 +106,10 @@ const shift = (d: string, by: number) => {
 
 export default function AttendanceBoard() {
   const [date, setDate] = useState(istDate())
+  // Day: who is in today. Month: how many times each person was late
+  // this month, and which days (Hr_HR41).
+  const [view, setView] = useState<'day' | 'month'>('day')
+  const [monthMode, setMonthMode] = useState<Exclude<Period, 'daily'>>('this')
   const [branch, setBranch] = useState('')          // '' = all
   const [branches, setBranches] = useState<Branch[]>([])
   const [rows, setRows] = useState<Row[]>([])
@@ -200,6 +205,10 @@ export default function AttendanceBoard() {
     URL.revokeObjectURL(url)
   }
 
+  if (view === 'month') {
+    return <AttendanceMonth branches={branches} initial={monthMode} onDay={() => setView('day')} />
+  }
+
   return (
     <div className="mx-auto max-w-6xl">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -209,6 +218,7 @@ export default function AttendanceBoard() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <PeriodTabs active="daily" onPick={(k) => { if (k !== 'daily') { setMonthMode(k); setView('month') } }} />
           <button onClick={() => setDate(shift(date, -1))} className="rounded-lg border border-[#2a2a2a] p-2 text-gray-400 hover:text-white" aria-label="Previous day">
             <ChevronLeft size={16} />
           </button>

@@ -6,7 +6,8 @@ import CustomerPicker, { type PickedCustomer } from './CustomerPicker'
 import { DateField } from '../DateField'
 import type { ProjectRow, ProjectStage } from '../customers/customerUtils'
 import ProjectPayments from '../finance/ProjectPayments'
-import { GST_SLABS, inr, revisePrice as askPriceChange } from '../finance/financeUtils'
+import { inr, revisePrice as askPriceChange, setProjectSplit } from '../finance/financeUtils'
+import GstChoice, { NO_GST, pickNongst, pickProblem, type GstPick } from '../finance/GstChoice'
 
 /*
   One project — a logo, a brochure, a website.
@@ -53,7 +54,7 @@ export default function ProjectModal({
   const [value, setValue] = useState(String(project?.value_amount ?? 0))
   // New projects only. On an existing one GST is changed from the
   // Payment panel, which checks who and logs it.
-  const [gst, setGst] = useState(0)
+  const [gst, setGst] = useState<GstPick>(NO_GST)
   /*
     When the work was booked, not when it was typed in.
 
@@ -144,6 +145,10 @@ export default function ProjectModal({
     // Still reading the real row — saving now would write a guessed
     // booking date over the real one.
     if (hydrating) return setErr('Still loading this project. Try again in a moment.')
+    if (!project) {
+      const p = pickProblem(gst, Number(value) || 0)
+      if (p) return setErr(p)
+    }
 
     setBusy(true)
     setErr('')
@@ -166,14 +171,29 @@ export default function ProjectModal({
       service_keys: services,
     }
 
-    const { error } = project
-      ? await supabase.from('projects').update(patch).eq('id', project.id)
-      : await supabase.from('projects').insert({
-          ...patch, value_amount: Number(value) || 0, gst_percent: gst, customer_id: customer.id,
-        })
+    if (project) {
+      const { error } = await supabase.from('projects').update(patch).eq('id', project.id)
+      setBusy(false)
+      if (error) return setErr(error.message)
+      return onSaved()
+    }
 
+    // New project: saved at the full price. W, if any, is then taken off
+    // the price into its private place (Fin_F10).
+    const { data: made, error } = await supabase.from('projects').insert({
+      ...patch, value_amount: Number(value) || 0, gst_percent: gst.gst, customer_id: customer.id,
+    }).select('id').single()
+    if (error) { setBusy(false); return setErr(error.message) }
+
+    const w = pickNongst(gst)
+    if (w > 0 && made) {
+      const r = await setProjectSplit((made as { id: string }).id, w)
+      if (!r.ok) {
+        setBusy(false)
+        return setErr(`The project is saved, but the split did not go through: ${r.reason} Open it and split from its Payment box.`)
+      }
+    }
     setBusy(false)
-    if (error) return setErr(error.message)
     onSaved()
   }
 
@@ -299,25 +319,9 @@ export default function ProjectModal({
                 // New project: the opening price, and whether GST goes on top.
                 <>
                   <input type="number" min={0} value={value} onChange={(e) => setValue(e.target.value)} className={input} />
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {GST_SLABS.map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => setGst(s)}
-                        className={`rounded-md px-2 py-1 text-xs ${
-                          gst === s ? 'bg-orange-500/15 text-orange-300' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'
-                        }`}
-                      >
-                        {s === 0 ? 'No GST' : `GST ${s}%`}
-                      </button>
-                    ))}
+                  <div className="mt-2">
+                    <GstChoice base={Number(value) || 0} pick={gst} onChange={setGst} />
                   </div>
-                  {gst > 0 && Number(value) > 0 && (
-                    <p className="mt-1.5 text-xs text-gray-500">
-                      Client pays {inr(Math.round(Number(value) * (100 + gst)) / 100, true)} with GST.
-                    </p>
-                  )}
                 </>
               ) : (
                 // Existing project: read-only, revised through the RPC.

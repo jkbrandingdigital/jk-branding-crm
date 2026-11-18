@@ -7,6 +7,7 @@ import { usePermissions, ownHome } from '../lib/permissions'
 import ProfileModal from './ProfileModal'
 import NotificationBell from './NotificationBell'
 import AppearanceMenu from './AppearanceMenu'
+import MasterTap from './master/MasterTap'
 import { authUser } from '../lib/auth'
 
 const ROLE_LABEL: Record<string, string> = {
@@ -127,11 +128,13 @@ export default function Header() {
       {/* ── Brand ──
           On narrow screens, the icon alone. From sm up, icon + wordmark + tagline. */}
       <Link to="/" className="flex min-w-0 items-center gap-2 sm:gap-2.5">
-        <img
-          src="/jklogoicon.png"
-          alt="JK Branding"
-          className="h-9 w-auto shrink-0 sm:h-10"
-        />
+        <MasterTap>
+          <img
+            src="/jklogoicon.png"
+            alt="JK Branding"
+            className="h-9 w-auto shrink-0 sm:h-10"
+          />
+        </MasterTap>
         <div className="hidden min-w-0 sm:block">
           <img src="/logo.png" alt="" className="h-9 w-auto sm:h-10" />
           <p className="truncate text-xs font-medium text-orange-400">
