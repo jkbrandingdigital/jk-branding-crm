@@ -98,7 +98,12 @@ const GROUPS: NavGroup[] = [
       { label: 'Job Work Orders', path: '/admin/job-works', icon: Package, ready: true, perm: 'mod_job_works' },
       // The same register, filtered to what is waiting on a check. It is
       // the one question the two people in dispatch open the CRM to ask.
-      { label: 'Quality Check', path: '/admin/job-works?stage=production_done', icon: ShieldCheck, ready: true, perm: 'mod_dispatch' },
+      //
+      // `qc_waiting`, not `production_done`: a lot that was sent back is
+      // waiting on them just as much as one nobody has looked at yet.
+      // Filtering on the single stage hid every lot they had rejected,
+      // while the tile beside it went on counting them.
+      { label: 'Quality Check', path: '/admin/job-works?stage=qc_waiting', icon: ShieldCheck, ready: true, perm: 'mod_dispatch' },
     ],
   },
   {

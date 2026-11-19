@@ -17,6 +17,11 @@ export type GstPick = { gst: number; split: boolean; nongst: string }
 
 export const NO_GST: GstPick = { gst: 0, split: false, nongst: '' }
 
+// Nothing picked yet. A form starts here, so No GST is never chosen by
+// leaving the default alone — a No GST deal goes to the owner in Finance
+// (Fin_F13), so it has to be a deliberate click.
+export const UNPICKED: GstPick = { gst: -1, split: false, nongst: '' }
+
 // W to save: 0 unless split.
 export function pickNongst(p: GstPick): number {
   return p.gst > 0 && p.split ? Math.round((Number(p.nongst) || 0) * 100) / 100 : 0
@@ -24,6 +29,7 @@ export function pickNongst(p: GstPick): number {
 
 // What is wrong with the choice for this price, or null if it is fine.
 export function pickProblem(p: GstPick, base: number): string | null {
+  if (p.gst < 0) return 'Choose GST: No GST or 18%.'
   if (!(p.gst > 0 && p.split)) return null
   const n = Number(p.nongst)
   if (p.nongst.trim() === '' || !(n > 0)) return 'How much is W?'
@@ -37,14 +43,15 @@ export default function GstChoice({ base, pick, onChange }: {
   onChange: (p: GstPick) => void
 }) {
   const { open: master } = useMaster()
-  const now: 'none' | 'full' | 'split' = pick.gst === 0 ? 'none' : pick.split && master ? 'split' : 'full'
+  const now: 'unset' | 'none' | 'full' | 'split' =
+    pick.gst < 0 ? 'unset' : pick.gst === 0 ? 'none' : pick.split && master ? 'split' : 'full'
   const btn = (on: boolean) =>
     `rounded-md px-2.5 py-1 text-xs ${on ? 'bg-orange-500/15 text-orange-300' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'}`
 
   const nongst = pickNongst(pick)
   const gstBase = Math.max(base - nongst, 0)
   const gstAmt = Math.round(gstBase * pick.gst) / 100
-  const problem = base > 0 ? pickProblem(pick, base) : null
+  const problem = base > 0 && pick.gst >= 0 ? pickProblem(pick, base) : null
 
   return (
     <div>
@@ -79,6 +86,7 @@ export default function GstChoice({ base, pick, onChange }: {
             : <>Client pays {inr(base + gstAmt, true)} with GST.</>}
         </p>
       )}
+      {now === 'unset' && <p className="mt-1.5 text-xs text-gray-500">Pick one.</p>}
       {now === 'split' && problem && pick.nongst.trim() !== '' && (
         <p className="mt-1.5 text-xs text-amber-400">{problem}</p>
       )}

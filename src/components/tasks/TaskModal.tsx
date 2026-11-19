@@ -64,6 +64,8 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   const [workTypeId, setWorkTypeId] = useState(task?.work_type_id ?? '')
   // How many pieces — 5 banners. Separate from options, which the
   // designer adds on the task itself as the work goes.
+  // For one-timer work (festival greetings) the count lives in unit_qty
+  // and the task stays one piece, so take whichever is set.
   const [workQty, setWorkQty] = useState(task?.work_qty ?? 1)
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
@@ -164,6 +166,21 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   // A group (Brochure) has no time of its own — its parts are set on the
   // task later, so quantity and the allowed line do not apply here.
   const isGroup = Boolean(chosen?.is_group)
+  /*
+    One timer for the whole lot (festival greetings): "10 posts" is one
+    job with one clock, 15m × 10 allowed — not ten pieces each with its
+    own options. No options, no changes.
+  */
+  const oneTimer = Boolean(chosen?.one_timer)
+
+  // An existing festival task keeps its count in unit_qty — show that,
+  // once the kinds of work are loaded and we know which one it is.
+  const startType = task?.work_type_id ?? ''
+  useEffect(() => {
+    if (!task) return
+    const w = workTypes.find((x) => x.id === startType)
+    if (w?.one_timer) setWorkQty(Math.max(1, task.unit_qty ?? 1))
+  }, [workTypes, task, startType])
   const optionCount = task?.option_count ?? 1
   const allowed = allowedOf(chosen, workQty, optionCount)
 
@@ -188,7 +205,15 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
       repeat_every: repeat,
       project_id: projectId || null,
       work_type_id: workTypeId || null,
-      work_qty: Math.max(1, Math.min(99, workQty)),
+      // One-timer: the count is the number of posts (unit_qty), one piece.
+      work_qty: oneTimer ? 1 : Math.max(1, Math.min(99, workQty)),
+      ...(oneTimer
+        ? { unit_qty: Math.max(1, Math.min(999, workQty)) }
+        // Switched AWAY from festival to other work: the post count must
+        // not stay behind — it would multiply every piece (5 × 11h 15m).
+        : task && workTypeId !== startType && workTypes.find((x) => x.id === startType)?.one_timer
+          ? { unit_qty: 1 }
+          : {}),
     }
 
     setBusy(true)
@@ -347,20 +372,24 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                     anyone working it out. */}
                 {chosen && !isGroup && (
                   <div>
-                    <label className={label} htmlFor="task-work-qty">How many</label>
+                    <label className={label} htmlFor="task-work-qty">
+                      {oneTimer ? `How many ${(chosen?.unit ?? 'post').toLowerCase()}s` : 'How many'}
+                    </label>
                     <input
                       id="task-work-qty"
                       type="number"
                       min={1}
-                      max={99}
+                      max={oneTimer ? 999 : 99}
                       value={workQty}
-                      onChange={(e) => setWorkQty(Math.max(1, Math.min(99, Number(e.target.value) || 1)))}
+                      onChange={(e) => setWorkQty(Math.max(1, Math.min(oneTimer ? 999 : 99, Number(e.target.value) || 1)))}
                       className={input}
                     />
                     <p className="mt-1 text-xs text-gray-600">
-                      {workQty > 1
-                        ? `One task of ${workQty} — hand pieces to designers later`
-                        : 'More than one? Put the number here, not a task each'}
+                      {oneTimer
+                        ? 'One timer for all of them. The designer can change the count on the task.'
+                        : workQty > 1
+                          ? `One task of ${workQty} — hand pieces to designers later`
+                          : 'More than one? Put the number here, not a task each'}
                     </p>
                   </div>
                 )}
@@ -372,10 +401,12 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
                   {' · '}{workQty} × {mins(chosen.minutes)}
                   {optionCount > 1 && <> × {optionCount} options</>}
                   {chosen.note && <span className="text-gray-600"> · {chosen.note}</span>}
-                  <span className="mt-1 block text-xs text-gray-600">
-                    Option 1 comes with the task. The designer adds option 2 onwards from the
-                    task itself, and the allowed time goes up on its own.
-                  </span>
+                  {chosen.allows_options !== false && (
+                    <span className="mt-1 block text-xs text-gray-600">
+                      Option 1 comes with the task. The designer adds option 2 onwards from the
+                      task itself, and the allowed time goes up on its own.
+                    </span>
+                  )}
                 </div>
               )}
 

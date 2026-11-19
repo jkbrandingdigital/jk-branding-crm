@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Trophy, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import GstChoice, { NO_GST, pickNongst, pickProblem, type GstPick } from '../finance/GstChoice'
+import GstChoice, { UNPICKED, pickNongst, pickProblem, type GstPick } from '../finance/GstChoice'
 
 /*
   What to call the first project.
@@ -88,7 +88,7 @@ export default function ConvertLead({
 }) {
   const [title, setTitle] = useState(projectNameFrom(requirement))
   const [value, setValue] = useState(estimated && estimated > 0 ? String(estimated) : '')
-  const [gst, setGst] = useState<GstPick>(NO_GST)
+  const [gst, setGst] = useState<GstPick>(UNPICKED)
   const [gstin, setGstin] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')

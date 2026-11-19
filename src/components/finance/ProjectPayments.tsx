@@ -191,6 +191,35 @@ export default function ProjectPayments({
   const label = 'mb-1.5 block text-xs text-gray-500'
   const small = 'rounded-md border border-[#2a2a2a] px-2 py-1 text-xs text-gray-300 hover:text-white disabled:opacity-40'
 
+  // A No GST deal (Fin_F13): its money is kept by the owner. Everyone else
+  // sees the price, nothing about payments, and can still fix a GST that
+  // was picked by mistake.
+  if (m.private) {
+    return (
+      <section className="space-y-3 rounded-lg border border-[#242424] bg-[#141414] p-4">
+        <h4 className="text-sm font-medium text-white">Payment</h4>
+        {err && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">{err}</p>}
+        <dl className="space-y-1.5 text-sm">
+          <Line k="Price (without GST)" v={inr(f.base)} />
+          <Line k="GST — none" v={inr(0, true)} />
+        </dl>
+        <p className="rounded-lg bg-[#1f1f1f] px-3 py-2 text-xs text-gray-400">
+          No GST deal — payments on it are handled by the owner.
+        </p>
+        {!m.gst_locked && (
+          <button
+            onClick={() => void pickGst('full')}
+            disabled={busy === 'gst'}
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-white disabled:opacity-50"
+          >
+            {busy === 'gst' && <Loader2 size={11} className="animate-spin" />}
+            Picked by mistake? Change to 18% GST
+          </button>
+        )}
+      </section>
+    )
+  }
+
   return (
     <section className="space-y-3 rounded-lg border border-[#242424] bg-[#141414] p-4">
       <div className="flex items-center justify-between gap-2">

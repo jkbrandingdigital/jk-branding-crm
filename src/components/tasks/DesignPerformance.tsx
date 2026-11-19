@@ -18,6 +18,7 @@ import GaugeRing from '../GaugeRing'
 import { loadStaff, type Staff } from '../leads/leadUtils'
 import { pctOf, zoneOf } from '../../lib/targets'
 import ExtraTimeInbox from './ExtraTimeInbox'
+import CoordinatorPerformance from './CoordinatorPerformance'
 import { mins } from './taskUtils'
 
 /*
@@ -96,6 +97,9 @@ type Person = {
   designation: string | null
   emp_code: string | null
   date_of_joining: string | null
+  // A project coordinator is not measured as a designer — the page shows
+  // their own scorecard instead of points and a 160-a-day target.
+  is_coordinator: boolean | null
 }
 
 /*
@@ -387,7 +391,7 @@ export default function DesignPerformance() {
     if (!who) return setPerson(null)
     void supabase
       .from('profiles')
-      .select('full_name, designation, emp_code, date_of_joining')
+      .select('full_name, designation, emp_code, date_of_joining, is_coordinator')
       .eq('id', who)
       .maybeSingle()
       .then(({ data }) => setPerson((data ?? null) as Person | null))
@@ -702,6 +706,8 @@ export default function DesignPerformance() {
   const input =
     'rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none'
 
+  const coordView = !!who && !!person?.is_coordinator
+
   if (ready && !isSuper && !can('design_perf')) {
     return <div className="p-6 text-gray-400">You do not have access to design performance.</div>
   }
@@ -798,6 +804,28 @@ export default function DesignPerformance() {
         </div>
       </div>
 
+      {/* A coordinator — themself, or picked from the list — gets their own
+          scorecard, not the designer's points and 160-a-day target. */}
+      {coordView && (
+        <CoordinatorPerformance
+          from={from}
+          to={to}
+          card={card}
+          only={who}
+          profileLine={[person?.designation, person?.emp_code].filter(Boolean).join(' · ')}
+          picker={seeAll ? (
+            <label className="block">
+              <span className="mb-1.5 block text-xs text-gray-400">Designer</span>
+              <select value={who} onChange={(e) => setWho(e.target.value)} className={`${input} min-w-[170px]`}>
+                <option value="">Everyone</option>
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </label>
+          ) : undefined}
+        />
+      )}
+
+      {!coordView && (<>
       {/*
         The band at the top.
 
@@ -1365,6 +1393,9 @@ export default function DesignPerformance() {
         </section>
       </div>
 
+      {/* ---- The coordinator — measured on their own job, not the designers' ---- */}
+      {!who && <CoordinatorPerformance from={from} to={to} card={card} />}
+
       {/* ---- By kind of work, and the team ---- */}
       <div className="grid gap-4 lg:grid-cols-2">
         <section className={`${card} p-5`}>
@@ -1496,6 +1527,8 @@ export default function DesignPerformance() {
         A redo caused by our own mistake stays in the original work, because that is our own time to
         make up.
       </p>
+
+      </>)}
 
       {histFor && (
         <TaskTimeHistory

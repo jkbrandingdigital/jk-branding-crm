@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import {
   AlertCircle, CheckCircle2, Clock, Download, Loader2, Package,
   Plus, Search, ShieldCheck, Truck,
@@ -35,12 +36,52 @@ export default function JobWorkBoard() {
   const [loading, setLoading] = useState(true)
 
   const [period, setPeriod] = useState<Period>('month')
-  const [stage, setStage] = useState<string>('all')
   const [q, setQ] = useState('')
-
-  const [openId, setOpenId] = useState<string | null>(null)
   const [newOpen, setNewOpen] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  /*
+    The filter, and which job is open, live in the address — not in
+    state.
+
+    Both menus point straight at a slice of this register: "Quality
+    Check" is the register filtered to what is waiting on a check.
+    While that was state, pressing the menu line changed the address
+    and nothing else, so a person already reading one job kept reading
+    it and the line looked broken.
+
+    In the address, a menu line without `id` closes whatever is open,
+    the browser's Back goes where it looks like it should, and a
+    filtered list can be sent to somebody as a link.
+
+    Dispatch says it in the path (/dispatch/qc), the admin sidebar in a
+    query. An explicit ?stage= wins, so the dropdown still works on a
+    path that carries its own default.
+  */
+  const { pathname } = useLocation()
+  const [params, setParams] = useSearchParams()
+
+  const pathStage =
+    pathname.endsWith('/qc') ? 'qc_waiting'
+    : pathname.endsWith('/shipped') ? 'dispatched'
+    : null
+
+  const stage = params.get('stage') ?? pathStage ?? 'all'
+  const openId = params.get('id')
+
+  const setStage = (s: string) => {
+    const next = new URLSearchParams(params)
+    next.set('stage', s)   // always written out, so a path default can be overridden
+    next.delete('id')      // changing the filter means "show me the list"
+    setParams(next, { replace: true })
+  }
+
+  const setOpenId = (id: string | null) => {
+    const next = new URLSearchParams(params)
+    if (id) next.set('id', id)
+    else next.delete('id')
+    setParams(next)
+  }
 
   useEffect(() => {
     if (!msg) return
@@ -194,7 +235,7 @@ export default function JobWorkBoard() {
                 onClick={() => setStage('production')} on={stage === 'production'} />
           <Tile label="Waiting on QC" value={String(counts.qc_waiting)}
                 icon={<ShieldCheck size={15} />} tone="bg-sky-500/10 text-sky-400"
-                onClick={() => setStage('production_done')} on={stage === 'production_done'} />
+                onClick={() => setStage('qc_waiting')} on={stage === 'qc_waiting'} />
           <Tile label="Ready to ship" value={String(counts.ready)}
                 icon={<CheckCircle2 size={15} />} tone="bg-green-500/10 text-green-400"
                 onClick={() => setStage('qc_passed')} on={stage === 'qc_passed'} />
@@ -225,6 +266,12 @@ export default function JobWorkBoard() {
           className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
         >
           <option value="all">All stages</option>
+          {/* Two questions rather than stages. They are what the tiles
+              and the menu ask, so the dropdown has to be able to say
+              them too — otherwise arriving from a tile leaves it
+              showing the wrong thing. */}
+          <option value="qc_waiting">Waiting on QC — incl. sent back</option>
+          <option value="open">Still open</option>
           {STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
 

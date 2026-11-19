@@ -135,6 +135,9 @@ export default function TaskDetail({
   const [splitQty, setSplitQty] = useState(1)
   const [changeOpen, setChangeOpen] = useState(false)
   const [changeNote, setChangeNote] = useState('')
+  // A change on ONE piece — "Quantity 3 came back" — opens under that piece.
+  const [pieceChange, setPieceChange] = useState<number | null>(null)
+  const [pieceNote, setPieceNote] = useState('')
   const [dragging, setDragging] = useState(false)
   const [sending, setSending] = useState('')   // "2 of 5" while files go up
   const { dark } = useChartTheme()   // pale-on-cream cannot be read, so the tones swap
@@ -245,20 +248,42 @@ export default function TaskDetail({
     Mockups already added still show — this only hides the button.
   */
   const [mockOk, setMockOk] = useState<Record<string, boolean>>({})
+  /*
+    What each of these tasks (this one and its parts) allows, from its
+    kind of work. Festival greetings: one line, one timer — "10 posts",
+    15m each — with no options and no changes. Everything else keeps
+    options and changes as before.
+  */
+  type Flags = { options: boolean; changes: boolean; oneTimer: boolean; unit: string; unitQty: number }
+  const [flags, setFlags] = useState<Record<string, Flags>>({})
+  // ONE request: the task, its parts, and each one's work-type rules come
+  // back together (tasks.work_type_id → work_types is a foreign key).
   const loadMockOk = useCallback(async () => {
+    type W = {
+      allows_mockup: boolean | null; allows_options: boolean | null
+      allows_changes: boolean | null; one_timer: boolean | null; unit: string | null
+    }
     const { data: rows } = await supabase
       .from('tasks')
-      .select('id, work_type_id')
+      .select('id, unit_qty, work_types(allows_mockup, allows_options, allows_changes, one_timer, unit)')
       .or(`id.eq.${task.id},parent_task_id.eq.${task.id}`)
       .is('deleted_at', null)
-    const list = (rows ?? []) as { id: string; work_type_id: string | null }[]
-    const ids = [...new Set(list.map((r) => r.work_type_id).filter((x): x is string => !!x))]
-    if (ids.length === 0) return setMockOk({})
-    const { data: wts } = await supabase.from('work_types').select('id, allows_mockup').in('id', ids)
-    const ok = new Map(((wts ?? []) as { id: string; allows_mockup: boolean | null }[]).map((w) => [w.id, w.allows_mockup !== false]))
-    const out: Record<string, boolean> = {}
-    for (const r of list) out[r.id] = r.work_type_id ? (ok.get(r.work_type_id) ?? true) : false
-    setMockOk(out)
+    const list = (rows ?? []) as unknown as { id: string; unit_qty: number | null; work_types: W | W[] | null }[]
+    const ok: Record<string, boolean> = {}
+    const fl: Record<string, Flags> = {}
+    for (const r of list) {
+      const w = Array.isArray(r.work_types) ? r.work_types[0] : r.work_types
+      ok[r.id] = w ? w.allows_mockup !== false : false
+      fl[r.id] = {
+        options: w ? w.allows_options !== false : true,
+        changes: w ? w.allows_changes !== false : true,
+        oneTimer: !!w?.one_timer,
+        unit: (w?.unit ?? 'piece').trim() || 'piece',
+        unitQty: Math.max(1, r.unit_qty ?? 1),
+      }
+    }
+    setMockOk(ok)
+    setFlags(fl)
   }, [task.id])
 
   useEffect(() => { void loadMockOk() }, [loadMockOk])
@@ -280,7 +305,8 @@ export default function TaskDetail({
     setAdding(false)
     setEditUnitsFor(null)
     if (e) return setError(e.message)
-    await Promise.all([loadTime(), loadParts()])
+    await Promise.all([loadTime(), loadParts(), loadMockOk()])
+    onChanged()
   }
 
   async function removePart(childId: string) {
@@ -322,6 +348,24 @@ export default function TaskDetail({
     setAdding(false)
     setChangeOpen(false)
     setChangeNote('')
+    if (e) return setError(e.message)
+    await loadTime()
+    onChanged()
+  }
+
+  // A change on one piece only. Its own line appears under that piece,
+  // with its own Start, so the time is on the post that came back.
+  async function addPieceChange(piece: number, source: string) {
+    setAdding(true)
+    const { error: e } = await supabase.rpc('task_add_change', {
+      p_task: task.id,
+      p_source: source,
+      p_note: pieceNote.trim() || null,
+      p_piece: piece,
+    })
+    setAdding(false)
+    setPieceChange(null)
+    setPieceNote('')
     if (e) return setError(e.message)
     await loadTime()
     onChanged()
@@ -572,6 +616,9 @@ export default function TaskDetail({
     parts.filter((x) => x.part_kind === 'option' && (x.piece_no ?? 1) === piece).length
   // "Banner", "Page" — whatever one of them is called in Settings.
   const unitName = (status?.unit ?? 'piece').replace(/^./, (c) => c.toUpperCase())
+  // This task's own rules (festival greetings: one timer, no options, no changes).
+  const me1: Flags = flags[task.id] ?? { options: true, changes: true, oneTimer: false, unit: 'piece', unitQty: 1 }
+  const oneTimer = me1.oneTimer
 
   const isContainer = (status?.child_count ?? 0) > 0
   const shownAllowed = isContainer ? (status?.rolled_allowed_mins ?? 0) : (status?.allowed_mins ?? 0)
@@ -781,13 +828,15 @@ export default function TaskDetail({
                                       <Pencil size={13} />
                                     </button>
                                   )}
-                                  <button
-                                    onClick={() => childOption(k.id)}
-                                    disabled={adding}
-                                    className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-orange-500/60 hover:text-orange-300 disabled:opacity-50"
-                                  >
-                                    + option
-                                  </button>
+                                  {flags[k.id]?.options !== false && (
+                                    <button
+                                      onClick={() => childOption(k.id)}
+                                      disabled={adding}
+                                      className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-orange-500/60 hover:text-orange-300 disabled:opacity-50"
+                                    >
+                                      + option
+                                    </button>
+                                  )}
                                   {mockOk[k.id] && (
                                     <button
                                       onClick={() => mockupOn(k.id, true)}
@@ -797,12 +846,14 @@ export default function TaskDetail({
                                       + mockup
                                     </button>
                                   )}
-                                  <button
-                                    onClick={() => setChangeFor(changeFor === k.id ? null : k.id)}
-                                    className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-amber-500/60 hover:text-amber-300"
-                                  >
-                                    Changes
-                                  </button>
+                                  {flags[k.id]?.changes !== false && (
+                                    <button
+                                      onClick={() => setChangeFor(changeFor === k.id ? null : k.id)}
+                                      className="rounded-lg border border-[#2a2a2a] px-2.5 py-1 text-xs text-gray-300 hover:border-amber-500/60 hover:text-amber-300"
+                                    >
+                                      Changes
+                                    </button>
+                                  )}
                                   {k.spent_secs === 0 && (
                                     <button
                                       onClick={() => removePart(k.id)}
@@ -1089,7 +1140,9 @@ export default function TaskDetail({
                   <div className="border-b border-[#242424] bg-[#171717] px-4 py-2">
                     <p className="text-xs font-medium text-gray-300">Where the time went</p>
                     <p className="mt-0.5 text-[11px] text-gray-500">
-                      Start the option you are working on, so each one carries its own time.
+                      {oneTimer
+                        ? 'One timer for the whole lot. Change the count with the pencil — the time moves with it.'
+                        : 'Start the option you are working on, so each one carries its own time.'}
                     </p>
                   </div>
                   <ul>
@@ -1103,7 +1156,20 @@ export default function TaskDetail({
                         >
                           <span className="min-w-0 flex-1 leading-tight">
                             <span className="block truncate text-sm text-gray-200">
-                              {pt.label}
+                              {/* One line for the whole lot — "10 posts" — not "Option 1". */}
+                              {oneTimer && pt.part_kind === 'option'
+                                ? `${me1.unitQty} ${me1.unit.toLowerCase()}${me1.unitQty === 1 ? '' : 's'}`
+                                : pt.label}
+                              {oneTimer && pt.part_kind === 'option' && canEdit && !locked && (
+                                <button
+                                  onClick={() => { setEditUnitsFor(editUnitsFor === task.id ? null : task.id); setEditUnitsVal(me1.unitQty) }}
+                                  title="Change how many"
+                                  aria-label="Change how many"
+                                  className="ml-1.5 inline-flex rounded-md p-1 align-middle text-gray-500 hover:bg-[#222] hover:text-orange-300"
+                                >
+                                  <Pencil size={12} />
+                                </button>
+                              )}
                               {pt.running && (
                                 <span className="ml-2 text-xs text-orange-400">running</span>
                               )}
@@ -1178,6 +1244,77 @@ export default function TaskDetail({
                               <X size={14} />
                             </button>
                           )}
+                          {/* Changes for this one piece — on its last option row. */}
+                          {canEdit && !locked && me1.changes && pt.part_kind === 'option'
+                            && (status?.work_qty ?? 1) > 1
+                            && (status?.child_count ?? 0) === 0
+                            && pt.part_no === optionsOf(pt.piece_no ?? 1) && (
+                            <button
+                              onClick={() => { setPieceChange(pieceChange === (pt.piece_no ?? 1) ? null : (pt.piece_no ?? 1)); setPieceNote('') }}
+                              className={`shrink-0 rounded-lg border px-2.5 py-1 text-xs hover:border-amber-500/60 hover:text-amber-300 ${
+                                pieceChange === (pt.piece_no ?? 1) ? 'border-amber-500/60 text-amber-300' : 'border-[#2a2a2a] text-gray-300'
+                              }`}
+                            >
+                              Changes
+                            </button>
+                          )}
+                          {pt.part_kind === 'option' && pieceChange === (pt.piece_no ?? 1)
+                            && pt.part_no === optionsOf(pt.piece_no ?? 1) && !locked && (
+                            <div className="basis-full space-y-2 rounded-lg border border-[#2a2a2a] bg-[#171717] p-3">
+                              <p className="text-[11px] text-gray-500">
+                                {unitName} {pt.piece_no ?? 1} came back. Its change gets its own line and Start under it.
+                              </p>
+                              <input
+                                value={pieceNote}
+                                onChange={(e) => setPieceNote(e.target.value)}
+                                placeholder="What has to change? (optional)"
+                                className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
+                              />
+                              <div className="flex flex-wrap gap-2">
+                                {CHANGE_SOURCES.map((c) => (
+                                  <button
+                                    key={c.key}
+                                    onClick={() => addPieceChange(pt.piece_no ?? 1, c.key)}
+                                    disabled={adding}
+                                    className="flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white disabled:opacity-50"
+                                  >
+                                    {adding && <Loader2 className="h-3 w-3 animate-spin" />}
+                                    {c.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {/* How many posts — saved, and the allowance moves with it. */}
+                          {oneTimer && pt.part_kind === 'option' && editUnitsFor === task.id && !locked && (
+                            <div className="flex basis-full flex-wrap items-center gap-2 pt-1">
+                              <input
+                                type="number"
+                                min={1}
+                                max={999}
+                                value={editUnitsVal}
+                                onChange={(e) => setEditUnitsVal(Math.max(1, Number(e.target.value) || 1))}
+                                className="w-20 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-1.5 text-sm tabular-nums text-white focus:border-orange-500 focus:outline-none"
+                              />
+                              <span className="text-[11px] text-gray-500">
+                                {me1.unit.toLowerCase()}{editUnitsVal === 1 ? '' : 's'}
+                                {status?.work_type && ` · ${mins(editUnitsVal * Math.round((pt.allowed_mins || 0) / Math.max(me1.unitQty, 1)))} allowed`}
+                              </span>
+                              <button
+                                onClick={() => saveUnits(task.id)}
+                                disabled={adding}
+                                className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditUnitsFor(null)}
+                                className="rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
                         </li>
                       )
                     })}
@@ -1192,13 +1329,14 @@ export default function TaskDetail({
                       sitting in the allowance. The client wants three
                       of one and one of the other, and the screen has to
                       be able to say that. */}
-                  {canEdit && !locked && status?.work_type && (status?.child_count ?? 0) === 0 && (
+                  {canEdit && !locked && status?.work_type && (status?.child_count ?? 0) === 0
+                    && (me1.options || mockOk[task.id]) && (
                     <div className="border-t border-[#242424] bg-[#141414] px-4 py-2.5">
                       <p className="mb-2 text-[11px] text-gray-500">
                         A new option or mockup adds its own time to this job.
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {Array.from({ length: Math.max(status?.work_qty ?? 1, 1) }, (_, i) => i + 1).map((pc) => {
+                        {me1.options && Array.from({ length: Math.max(status?.work_qty ?? 1, 1) }, (_, i) => i + 1).map((pc) => {
                           const next = optionsOf(pc) + 1
                           return (
                             <button
@@ -1261,7 +1399,7 @@ export default function TaskDetail({
               {/* The job came back. Saying who asked for it is the whole
                   point — a client's change is not the designer's fault, and
                   our own mistake does not earn extra time. */}
-              {status?.work_type && !locked &&
+              {status?.work_type && !locked && me1.changes &&
                 row(
                   'Changes',
                   <div className="space-y-2">

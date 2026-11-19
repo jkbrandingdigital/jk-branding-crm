@@ -38,6 +38,11 @@ export type WorkType = {
   // Off for work that never has a mockup (banners, posts, video, logo…):
   // its tasks show no "+ mockup".
   allows_mockup?: boolean | null
+  // Festival greetings: no options, no change rounds, and "10 posts" is
+  // one job with one timer (count in tasks.unit_qty).
+  allows_options?: boolean | null
+  allows_changes?: boolean | null
+  one_timer?: boolean | null
 }
 
 export type TaskAssignee = { user_id: string; assigned_by: string | null; assigned_at: string; is_current: boolean }
@@ -71,6 +76,8 @@ export type Task = {
   option_count: number
   // Set when this task is a slice of a bigger one.
   parent_task_id: string | null
+  // A count inside one piece: inner pages, or posts for one-timer work.
+  unit_qty?: number | null
   in_changes: boolean
   project_id: string | null
   task_assignees: TaskAssignee[]

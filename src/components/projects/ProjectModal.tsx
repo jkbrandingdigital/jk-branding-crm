@@ -7,7 +7,7 @@ import { DateField } from '../DateField'
 import type { ProjectRow, ProjectStage } from '../customers/customerUtils'
 import ProjectPayments from '../finance/ProjectPayments'
 import { inr, revisePrice as askPriceChange, setProjectSplit } from '../finance/financeUtils'
-import GstChoice, { NO_GST, pickNongst, pickProblem, type GstPick } from '../finance/GstChoice'
+import GstChoice, { UNPICKED, pickNongst, pickProblem, type GstPick } from '../finance/GstChoice'
 
 /*
   One project — a logo, a brochure, a website.
@@ -54,7 +54,7 @@ export default function ProjectModal({
   const [value, setValue] = useState(String(project?.value_amount ?? 0))
   // New projects only. On an existing one GST is changed from the
   // Payment panel, which checks who and logs it.
-  const [gst, setGst] = useState<GstPick>(NO_GST)
+  const [gst, setGst] = useState<GstPick>(UNPICKED)
   /*
     When the work was booked, not when it was typed in.
 

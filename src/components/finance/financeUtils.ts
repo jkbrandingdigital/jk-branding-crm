@@ -69,6 +69,7 @@ export type ProjectMoney = {
   figures: Figures
   is_accounts: boolean
   master?: boolean                 // private view open (Fin_F10): may split and see W
+  private?: boolean                // a No GST deal and the viewer is not an unlocked master (Fin_F13)
   gst_locked: boolean
   month_closed?: boolean
   price_request?: PendingPrice | null
