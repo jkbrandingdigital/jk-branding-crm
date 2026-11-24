@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, FileBarChart, ClipboardCheck, ListChecks, Target,
   Users, CalendarCheck, CalendarOff, Megaphone, Building2, Settings,
   Briefcase, UserCog, MonitorSmartphone, Truck, Palette, Wallet, Landmark,IndianRupee, Inbox,
-  Activity, Receipt, Cake, FolderKanban, Tag, Award, Timer, ChevronDown, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Package, ShieldCheck, QrCode, BookOpen, type LucideIcon,
+  Activity, Receipt, Cake, FolderKanban, Tag, Award, Timer, ChevronDown, X, Filter, Shuffle, AlarmClock, ListTodo, ListChecks as TodoIcon, StickyNote, FileText, Plus, DatabaseBackup, Printer, Package, ShieldCheck, QrCode, BookOpen, Share2, type LucideIcon,
 } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
@@ -86,7 +86,17 @@ const GROUPS: NavGroup[] = [
       { label: 'Quotation Settings', path: '/admin/quotations/settings', icon: Settings, ready: true, perm: 'quote_settings' },
     ],
   },
-  { key: 'digital', label: 'Digital Department', icon: MonitorSmartphone, items: [] },
+  {
+    key: 'digital',
+    label: 'Digital Department',
+    icon: MonitorSmartphone,
+    items: [
+      // Clients' Facebook and Instagram. /digital, not /admin/digital: it is
+      // one page for every role, and DigitalShell puts this sidebar round it
+      // for the admin area.
+      { label: 'Social media', path: '/digital', icon: Share2, ready: true, perm: 'mod_digital' },
+    ],
+  },
   {
     key: 'dispatch',
     label: 'Dispatch Zone',

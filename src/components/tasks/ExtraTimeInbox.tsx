@@ -34,6 +34,9 @@ type Row = {
   extra_mins: number
   spent_mins: number
   created_at: string
+  // Which piece the time is for (null = the whole job)
+  piece_no: number | null
+  unit: string | null
 }
 
 export default function ExtraTimeInbox({ onDecided }: { onDecided?: () => void }) {
@@ -100,6 +103,11 @@ export default function ExtraTimeInbox({ onDecided }: { onDecided?: () => void }
                 <div className="min-w-0">
                   <p className="truncate font-medium text-white">
                     <span className="text-gray-500">#{r.task_no}</span> {r.subject}
+                    {r.piece_no && (
+                      <span className="ml-2 rounded bg-orange-500/15 px-1.5 py-0.5 text-xs font-normal text-orange-300">
+                        {r.unit ?? 'Quantity'} {r.piece_no}
+                      </span>
+                    )}
                   </p>
                   <p className="mt-0.5 text-xs text-gray-500">
                     {r.designer ?? '—'}

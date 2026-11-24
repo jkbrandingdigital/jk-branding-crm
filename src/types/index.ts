@@ -1,6 +1,6 @@
 export type UserRole =
   | 'super_admin' | 'branch_manager' | 'sales' | 'hr' | 'design_team'
-  | 'dispatch' | 'accounts' | 'reception'
+  | 'dispatch' | 'accounts' | 'reception' | 'digital'
 
 export interface Branch {
   id: string

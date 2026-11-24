@@ -17,7 +17,9 @@ type Notif = {
   link: string | null
 }
 
-const isLead = (n: Notif) => n.kind === 'lead'
+// A follow-up coming due (Leads_LF1) is about a lead too: same icon, and
+// it opens that lead.
+const isLead = (n: Notif) => n.kind === 'lead' || n.kind === 'followup'
 const isTask = (n: Notif) => n.kind === 'task'
 const isReport = (n: Notif) => n.kind === 'report'
 

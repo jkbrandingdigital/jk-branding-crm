@@ -73,7 +73,8 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   const fileRef = useRef<HTMLInputElement>(null)
 
   /*
-    Who the task can be handed to: the design team.
+    Who the task can be handed to: the design team, and the Digital team
+    (post creatives, reels, ad setup, a client's monthly report).
 
     Design work goes to designers. A list with every sales person and
     every HR person on it is a list you scroll past, and one stray tick
@@ -87,7 +88,7 @@ export default function TaskModal({ task, stages, labels, staff, lead: fromLead 
   const options = useMemo(
     () =>
       staff
-        .filter((s) => (s.role === 'design_team' || to.has(s.id)) && (s.is_active || to.has(s.id)))
+        .filter((s) => (s.role === 'design_team' || s.role === 'digital' || to.has(s.id)) && (s.is_active || to.has(s.id)))
         .sort((a, b) => (a.id === me ? -1 : b.id === me ? 1 : a.full_name.localeCompare(b.full_name))),
     [staff, me, to],
   )

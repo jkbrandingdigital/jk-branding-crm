@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck, Printer, Truck, Clock3 } from 'lucide-react'
+import { Plus, Search, X, Lock, CheckCircle2, AlertCircle, KeyRound, Wand2, UserCheck, UserX, Home, Building2, ShieldCheck, Printer, Truck, Clock3, Megaphone } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { DateField } from './DateField'
 import { authUser } from '../lib/auth'
@@ -42,10 +42,11 @@ const ROLE_LABEL: Record<string, string> = {
   dispatch: 'Dispatch',
   accounts: 'Accounts',
   reception: 'Reception',
+  digital: 'Digital',
 }
 // The order the count tiles appear in; any role in ROLE_LABEL left out of
 // this list still gets a tile, at the end.
-const ROLE_TILE_ORDER = ['reception','sales', 'design_team', 'dispatch', 'accounts', 'branch_manager', 'hr', 'super_admin']
+const ROLE_TILE_ORDER = ['reception','sales', 'design_team', 'digital', 'dispatch', 'accounts', 'branch_manager', 'hr', 'super_admin']
 const ROLE_TILES = [
   ...ROLE_TILE_ORDER.filter((r) => r in ROLE_LABEL),
   ...Object.keys(ROLE_LABEL).filter((r) => !ROLE_TILE_ORDER.includes(r)),
@@ -60,6 +61,7 @@ const ROLE_CHIP: Record<string, string> = {
   dispatch: 'bg-sky-950/60 text-sky-300',
   accounts: 'bg-emerald-950/60 text-emerald-300',
   reception: 'bg-amber-950/60 text-amber-300',
+  digital: 'bg-fuchsia-950/60 text-fuchsia-300',
 }
 // Which modules are offered for each role
 const ROLE_MODULES: Record<string, string[]> = {
@@ -102,6 +104,10 @@ const ROLE_MODULES: Record<string, string[]> = {
   // no courier — paying for a job and passing it are two different jobs,
   // and one person doing both is how a bad lot gets paid for.
   accounts: ['mod_job_works', 'job_work_view_all', 'job_work_payment'],
+
+  // The Digital team. Their Digital switches are in the Digital box above
+  // the grid; these are the everyday tools beside them.
+  digital: ['mod_tasks', 'mod_todos', 'mod_reminders', 'mod_notes', 'mod_project_board'],
 }
 
 // Everything the admin area holds, grouped the way its sidebar groups it.
@@ -145,6 +151,13 @@ const ADMIN_GROUPS: { title: string; keys: string[]; note?: string }[] = [
     ],
     note: 'Whoever passes the quality check should not also settle the vendor. '
         + 'Give one person both and the lot that was sent back is paid for anyway.',
+  },
+  // Written out, not DIGITAL_KEYS: that list is declared further down, and
+  // reading it here would run before it exists.
+  {
+    title: 'Digital Department',
+    keys: ['mod_digital', 'digital_view_all', 'digital_workspace_manage', 'digital_connect',
+           'digital_post_create', 'digital_post_edit', 'digital_publish'],
   },
   { title: 'Company', keys: ['mod_settings', 'mod_backup'] },
 ]
@@ -226,6 +239,22 @@ const DISPATCH_ACTION_LABEL: Record<string, string> = {
   dispatch_qc: 'Pass or reject a lot',
   dispatch_courier: 'Add courier & LR number',
 }
+
+// Digital — social media for clients. A switch, not a role: the Digital
+// team sits in whatever role fits them, and the box below appears for
+// anybody in the Digital department. These are handed out on top of
+// "Digital" itself.
+const DIGITAL_ACTION_LABEL: Record<string, string> = {
+  digital_view_all: 'See every client workspace',
+  digital_workspace_manage: 'Make workspaces & pick the team',
+  digital_connect: 'Connect pages & send client links',
+  digital_post_create: 'Write posts',
+  digital_post_edit: "Change anyone's post",
+  digital_publish: 'Schedule & publish',
+}
+// Offered to the Digital department. The department is picked from a list,
+// not typed, so matching its name is safe in a way a job title is not.
+const isDigitalDept = (name: string | undefined) => /digital/i.test(name ?? '')
 
 const WORK_MODE: Record<string, string> = {
   office: 'Work from office',
@@ -693,6 +722,11 @@ export default function StaffManager() {
                           <Truck size={11} /> Dispatch
                         </span>
                       )}
+                      {userPerms[p.id]?.mod_digital === true && (
+                        <span className="ml-2 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-fuchsia-950/60 px-2 py-0.5 text-[11px] text-fuchsia-300">
+                          <Megaphone size={11} /> Digital
+                        </span>
+                      )}
                       {Object.keys(userPerms[p.id] ?? {}).length > 0 && <span className="ml-2 text-[10px] text-orange-400">custom</span>}
                     </td>
                     <td className="py-3 pr-4 text-gray-400">{branchName.get(p.branch_id ?? '') ?? '—'}</td>
@@ -1042,6 +1076,59 @@ export default function StaffManager() {
                             their sidebar. Switch it on below.
                           </p>
                         )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/*
+                Digital.
+
+                Its own box, like Printing Media and Dispatch & QC: who runs
+                a client's social pages is a decision about someone's job.
+                Offered to anyone in the Digital department, whatever their
+                role — and to anyone who already has it, so a switch that is
+                on never disappears because a department was changed.
+              */}
+              {editingProfile && canGrant && !editingSelf
+                && (form.role === 'digital' || isDigitalDept(departments.find((d) => d.id === form.department_id)?.name) || effective('mod_digital')) && (
+                <div className="border-t border-[#222] pt-4">
+                  <div className="rounded-xl border border-[#242424] bg-[#151515] p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 text-sm font-medium text-white">
+                          <Megaphone size={15} className="text-orange-400" /> Digital
+                        </p>
+                        <p className="mt-1 text-xs text-gray-400">
+                          Runs clients&rsquo; Facebook and Instagram from the CRM — their workspaces, pages
+                          and posts. They see only the client workspaces they are put in.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={effective('mod_digital')}
+                        aria-label="Digital"
+                        disabled={!iHold('mod_digital')}
+                        title={!iHold('mod_digital') ? 'You do not have this yourself, so only the Super Admin can change it' : undefined}
+                        onClick={() => togglePerm('mod_digital')}
+                        className={`mt-0.5 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-500 ${
+                          effective('mod_digital') ? 'bg-orange-500' : 'bg-[#2a2a2a]'
+                        }`}
+                      >
+                        <span className={`h-5 w-5 rounded-full bg-white transition-transform ${effective('mod_digital') ? 'translate-x-5' : ''}`} />
+                      </button>
+                    </div>
+
+                    {effective('mod_digital') && (
+                      <div className="mt-4 border-t border-[#242424] pt-4">
+                        <p className="mb-3 text-xs text-gray-500">On top of that, they may also:</p>
+                        <div className="flex flex-wrap gap-x-5 gap-y-4">
+                          {Object.entries(DIGITAL_ACTION_LABEL).map(([k, label]) => (
+                            <PermToggle key={k} k={k} label={label} />
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

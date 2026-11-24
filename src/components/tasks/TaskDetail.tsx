@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock, Download, Loader2, Paperclip, Pencil, Plus, Send, Trash2, X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
+import { usePermissions } from '../../lib/permissions'
 import { useChartTheme } from '../../lib/chartTheme'
 import { fmtDT, type Staff } from '../leads/leadUtils'
 import { RichHtml } from '../RichText'
@@ -135,6 +136,20 @@ export default function TaskDetail({
   const [splitQty, setSplitQty] = useState(1)
   const [changeOpen, setChangeOpen] = useState(false)
   const [changeNote, setChangeNote] = useState('')
+  /*
+    How big the client's change is — the coordinator decides, because
+    they spoke to the client. 5 minutes for a phone number, an hour for a
+    new layout. That is the time the change is allowed; past it, the
+    extra counts against the designer like any other overrun.
+
+    Only the coordinator (or whoever may Complete / Reject, or an admin)
+    may record a CLIENT change at all. A designer records our own mistake
+    only — otherwise anybody could hand themselves extra time.
+  */
+  const { can: canDo, isSuper: amSuper } = usePermissions()
+  const canClient = amSuper || canDo('task_close')
+  const [chgMins, setChgMins] = useState(15)
+  const sources = CHANGE_SOURCES.filter((c) => c.key !== 'client' || canClient)
   // A change on ONE piece — "Quantity 3 came back" — opens under that piece.
   const [pieceChange, setPieceChange] = useState<number | null>(null)
   const [pieceNote, setPieceNote] = useState('')
@@ -221,7 +236,7 @@ export default function TaskDetail({
   }
   async function childChange(childId: string, source: string) {
     setAdding(true)
-    const { error: e } = await supabase.rpc('task_add_change', { p_task: childId, p_source: source, p_note: null })
+    const { error: e } = await supabase.rpc('task_add_change', { p_task: childId, p_source: source, p_note: null, p_mins: chgMins })
     setAdding(false)
     setChangeFor(null)
     if (e) return setError(e.message)
@@ -344,6 +359,7 @@ export default function TaskDetail({
       p_task: task.id,
       p_source: source,
       p_note: changeNote.trim() || null,
+      p_mins: chgMins,
     })
     setAdding(false)
     setChangeOpen(false)
@@ -362,6 +378,7 @@ export default function TaskDetail({
       p_source: source,
       p_note: pieceNote.trim() || null,
       p_piece: piece,
+      p_mins: chgMins,
     })
     setAdding(false)
     setPieceChange(null)
@@ -707,6 +724,8 @@ export default function TaskDetail({
               spentMins={spentMins}
               locked={locked}
               onChanged={loadTime}
+              pieces={(status?.child_count ?? 0) === 0 ? Math.max(status?.work_qty ?? 1, 1) : 1}
+              unitName={unitName}
             />
             {/* A split task has no clock of its own: the work is in its
                 pieces, and a timer here would count one banner twice. */}
@@ -905,14 +924,15 @@ export default function TaskDetail({
 
                             {changeFor === k.id && !locked && (
                               <div className="mt-2 flex flex-wrap gap-2">
-                                {CHANGE_SOURCES.map((c) => (
+                                {canClient && <ChangeSize value={chgMins} onChange={setChgMins} />}
+{sources.map((c) => (
                                   <button
                                     key={c.key}
                                     onClick={() => childChange(k.id, c.key)}
                                     disabled={adding}
                                     className="rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white disabled:opacity-50"
                                   >
-                                    {c.label}
+                                    {c.key === 'client' ? `${c.label} · ${mins(chgMins)}` : c.label}
                                   </button>
                                 ))}
                               </div>
@@ -1271,7 +1291,8 @@ export default function TaskDetail({
                                 className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
                               />
                               <div className="flex flex-wrap gap-2">
-                                {CHANGE_SOURCES.map((c) => (
+                                {canClient && <ChangeSize value={chgMins} onChange={setChgMins} />}
+{sources.map((c) => (
                                   <button
                                     key={c.key}
                                     onClick={() => addPieceChange(pt.piece_no ?? 1, c.key)}
@@ -1279,7 +1300,7 @@ export default function TaskDetail({
                                     className="flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white disabled:opacity-50"
                                   >
                                     {adding && <Loader2 className="h-3 w-3 animate-spin" />}
-                                    {c.label}
+                                    {c.key === 'client' ? `${c.label} · ${mins(chgMins)}` : c.label}
                                   </button>
                                 ))}
                               </div>
@@ -1431,7 +1452,8 @@ export default function TaskDetail({
                           className="w-full rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-orange-500 focus:outline-none"
                         />
                         <div className="flex flex-wrap gap-2">
-                          {CHANGE_SOURCES.map((c) => (
+                          {canClient && <ChangeSize value={chgMins} onChange={setChgMins} />}
+{sources.map((c) => (
                             <button
                               key={c.key}
                               onClick={() => addChange(c.key)}
@@ -1439,14 +1461,14 @@ export default function TaskDetail({
                               className="flex items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-300 hover:text-white disabled:opacity-50"
                             >
                               {adding && <Loader2 className="h-3 w-3 animate-spin" />}
-                              {c.label}
+                              {c.key === 'client' ? `${c.label} · ${mins(chgMins)}` : c.label}
                             </button>
                           ))}
                         </div>
                         <p className="text-xs text-gray-600">
-                          A client's change adds time to what this job is allowed. Our own mistake
-                          adds none — redoing our own work is not new work. Either way your name goes
-                          on the record.
+                          {canClient
+                            ? "Pick how big the client's change is — that is the time it is allowed, and time past it counts as over. Our own mistake adds none. Your name goes on the record."
+                            : "Only the coordinator records a change the client asked for — tell them. Our own mistake adds no time. Your name goes on the record."}
                         </p>
                       </div>
                     )}
@@ -1647,6 +1669,40 @@ export default function TaskDetail({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/*
+  How much time a client's change is allowed. Quick picks, or type it.
+*/
+function ChangeSize({ value, onChange }: { value: number; onChange: (m: number) => void }) {
+  const picks = [5, 15, 30, 60]
+  return (
+    <div className="flex basis-full flex-wrap items-center gap-1.5">
+      <span className="text-[11px] text-gray-500">Client change size</span>
+      {picks.map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${
+            value === m ? 'bg-amber-500 font-medium text-black' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'
+          }`}
+        >
+          {m < 60 ? `${m}m` : `${m / 60}h`}
+        </button>
+      ))}
+      <input
+        type="number"
+        min={1}
+        max={480}
+        value={value}
+        onChange={(e) => onChange(Math.max(1, Math.min(480, Number(e.target.value) || 1)))}
+        aria-label="Minutes"
+        className="w-16 rounded-md border border-[#2a2a2a] bg-[#1a1a1a] px-2 py-0.5 text-[11px] text-white focus:border-orange-500 focus:outline-none"
+      />
+      <span className="text-[11px] text-gray-500">min</span>
     </div>
   )
 }

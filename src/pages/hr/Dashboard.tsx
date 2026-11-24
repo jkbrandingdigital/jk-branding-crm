@@ -46,6 +46,45 @@ type Person = {
 type Scan = { user_id: string; kind: string; scanned_at: string }
 type Named = { id: string; name: string }
 
+// ── The colours ──────────────────────────────────────────────
+// One family, the brand's orange, told apart by how light each step is
+// rather than by hue: orange for the people who came in on time (most of
+// the bar), peach for late, deep rust for nobody yet. A weekly off is
+// grey — nobody was meant to be in, so it is not a gap.
+//
+// A chart is drawn with colour VALUES, not class names, so theme.css
+// cannot repaint it the way it repaints the cards. Each theme therefore
+// has its own set here, and the page follows <html data-theme>. On cream
+// the gap between stacked pieces is the card's white, never black, and
+// peach is a shade deeper so it does not vanish into the paper.
+const PALETTE = {
+  dark: {
+    onTime: '#FF6A1A', late: '#FDBA74', notIn: '#C2410C', off: '#3F3F46',
+    gap: '#151515', grid: '#242424', axis: '#6b7280',
+    tipBg: '#121212', tipLine: '#2a2a2a', tipText: '#e5e7eb', tipLabel: '#a1a1aa',
+    lateText: 'text-orange-200', lateChip: 'bg-orange-200/10 text-orange-200',
+  },
+  light: {
+    onTime: '#F2600C', late: '#FBB47A', notIn: '#9A3412', off: '#D6D3D1',
+    gap: '#FFFFFF', grid: '#EDE9E4', axis: '#78716c',
+    tipBg: '#FFFFFF', tipLine: '#E7E5E4', tipText: '#292524', tipLabel: '#78716c',
+    lateText: 'text-orange-500', lateChip: 'bg-orange-100 text-orange-700',
+  },
+}
+
+// Which theme is on, kept in step if it is switched while the page is open.
+function useTheme(): 'dark' | 'light' {
+  const read = () =>
+    (typeof document !== 'undefined' && document.documentElement.dataset.theme === 'light' ? 'light' : 'dark') as 'dark' | 'light'
+  const [t, setT] = useState(read)
+  useEffect(() => {
+    const o = new MutationObserver(() => setT(read()))
+    o.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => o.disconnect()
+  }, [])
+  return t
+}
+
 const clock = (iso: string | null) =>
   iso
     ? new Date(iso).toLocaleTimeString('en-IN', {
@@ -78,6 +117,7 @@ const initials = (name: string) =>
   name.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '—'
 
 export default function HrDashboard() {
+  const COL = PALETTE[useTheme()]
   const [counts, setCounts] = useState<Counts | null>(null)
   const [board, setBoard] = useState<BoardRow[]>([])
   const [week, setWeek] = useState<WeekDay[]>([])
@@ -137,11 +177,21 @@ export default function HrDashboard() {
 
   const donut = counts
     ? [
-        { name: 'On time', value: counts.on_time, fill: '#22c55e' },
-        { name: 'Late', value: counts.late, fill: '#f59e0b' },
-        { name: 'Not in yet', value: counts.not_in, fill: '#ef4444' },
+        { name: 'On time', value: counts.on_time, fill: COL.onTime },
+        { name: 'Late', value: counts.late, fill: COL.late },
+        { name: 'Not in yet', value: counts.not_in, fill: COL.notIn },
       ].filter((x) => x.value > 0)
     : []
+
+  // On a weekly off the "not in" count is everybody, which is right and
+  // means nothing — so it is drawn as Off, in grey, not as absence.
+  const weekBars = week.map((d) => ({
+    day: d.day,
+    present: d.present,
+    late: d.late,
+    absent: d.week_off ? 0 : d.absent,
+    off: d.week_off ? d.absent : 0,
+  }))
 
   const perDept = depts
     .map((d) => ({ name: d.name, n: people.filter((p) => p.department_id === d.id).length }))
@@ -186,19 +236,19 @@ export default function HrDashboard() {
               label="Present today"
               value={counts?.present ?? 0}
               note={counts?.total ? `of ${counts.total} who scan` : undefined}
-              tone="text-green-400"
+              tone="text-orange-400"
             />
             <Tile
               icon={<Clock3 size={15} />}
               label="Late today"
               value={counts?.late ?? 0}
-              tone={counts?.late ? 'text-amber-400' : undefined}
+              tone={counts?.late ? COL.lateText : undefined}
             />
             <Tile
               icon={<UserX size={15} />}
               label="Not in yet"
               value={counts?.not_in ?? 0}
-              tone={counts?.not_in ? 'text-red-400' : undefined}
+              tone={counts?.not_in ? 'text-orange-600' : undefined}
             />
           </section>
 
@@ -214,27 +264,28 @@ export default function HrDashboard() {
                   <Empty text="Nothing recorded yet." />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={week} barCategoryGap="30%">
-                      <CartesianGrid strokeDasharray="3 3" stroke="#242424" vertical={false} />
-                      <XAxis dataKey="day" tickFormatter={shortDay} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} />
-                      <YAxis allowDecimals={false} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} width={24} />
+                    <BarChart data={weekBars} barCategoryGap="34%">
+                      <CartesianGrid strokeDasharray="3 3" stroke={COL.grid} vertical={false} />
+                      <XAxis dataKey="day" tickFormatter={shortDay} stroke={COL.axis} fontSize={11} tickLine={false} axisLine={false} />
+                      <YAxis allowDecimals={false} stroke={COL.axis} fontSize={11} tickLine={false} axisLine={false} width={24} />
                       <Tooltip
-                        contentStyle={{ background: '#121212', border: '1px solid #2a2a2a', borderRadius: 10, fontSize: 12 }}
+                        cursor={{ fill: '#ffffff08' }}
+                        contentStyle={{ background: COL.tipBg, border: `1px solid ${COL.tipLine}`, borderRadius: 10, fontSize: 12 }}
+                        labelStyle={{ color: COL.tipLabel, marginBottom: 4 }}
+                        itemStyle={{ color: COL.tipText }}
                         labelFormatter={(d) => longDay(String(d))}
                       />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="present" name="Present" stackId="a" fill="#22c55e" />
-                      <Bar dataKey="late" name="Late" stackId="a" fill="#f59e0b" />
-                      <Bar dataKey="absent" name="Not in" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                      <Legend wrapperStyle={{ fontSize: 11, color: '#9ca3af' }} iconType="circle" iconSize={8} />
+                      {/* A thin gap in the card's colour between the stacked
+                          pieces, so peach and orange never melt together. */}
+                      <Bar dataKey="present" name="On time" stackId="a" fill={COL.onTime} stroke={COL.gap} strokeWidth={2} radius={[0, 0, 4, 4]} />
+                      <Bar dataKey="late" name="Late" stackId="a" fill={COL.late} stroke={COL.gap} strokeWidth={2} />
+                      <Bar dataKey="absent" name="Not in" stackId="a" fill={COL.notIn} stroke={COL.gap} strokeWidth={2} />
+                      <Bar dataKey="off" name="Weekly off" stackId="a" fill={COL.off} stroke={COL.gap} strokeWidth={2} radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
               </div>
-              {week.some((d) => d.week_off) && (
-                <p className="mt-2 text-xs text-gray-500">
-                  Sundays read as nobody in — weekly offs and holidays are not in the system yet.
-                </p>
-              )}
             </section>
 
             {/* ── right rail ─────────────────────────────────────── */}
@@ -258,11 +309,14 @@ export default function HrDashboard() {
                     <>
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
-                          <Pie data={donut} dataKey="value" innerRadius={48} outerRadius={70} paddingAngle={2} stroke="none">
+                          <Pie data={donut} dataKey="value" innerRadius={48} outerRadius={70} paddingAngle={2} stroke={COL.gap} strokeWidth={2}>
                             {donut.map((x) => <Cell key={x.name} fill={x.fill} />)}
                           </Pie>
-                          <Tooltip contentStyle={{ background: '#121212', border: '1px solid #2a2a2a', borderRadius: 10, fontSize: 12 }} />
-                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Tooltip
+                            contentStyle={{ background: COL.tipBg, border: `1px solid ${COL.tipLine}`, borderRadius: 10, fontSize: 12 }}
+                            itemStyle={{ color: COL.tipText }}
+                          />
+                          <Legend wrapperStyle={{ fontSize: 11, color: '#9ca3af' }} iconType="circle" iconSize={8} />
                         </PieChart>
                       </ResponsiveContainer>
                       <div className="pointer-events-none absolute inset-x-0 top-[34%] -translate-y-1/2 text-center">
@@ -299,7 +353,7 @@ export default function HrDashboard() {
                           )}
                         </span>
                       </span>
-                      <Status s={x.status} late={x.is_late} />
+                      <Status s={x.status} late={x.is_late} lateCls={COL.lateChip} />
                     </li>
                   ))}
                 </ul>
@@ -319,9 +373,9 @@ export default function HrDashboard() {
                     <li key={`${s.user_id}-${s.scanned_at}-${i}`} className="flex gap-3">
                       <span
                         className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg ${
-                          s.kind === 'In' ? 'bg-green-950/60 text-green-400'
+                          s.kind === 'In' ? 'bg-orange-500/15 text-orange-400'
                           : s.kind === 'Out' ? 'bg-[#1f1f1f] text-gray-400'
-                          : 'bg-amber-950/50 text-amber-300'
+                          : COL.lateChip
                         }`}
                       >
                         {s.kind === 'In' ? <LogIn size={13} /> : s.kind === 'Out' ? <LogOut size={13} /> : <Coffee size={13} />}
@@ -434,12 +488,12 @@ function Avatar({ name }: { name: string }) {
   )
 }
 
-function Status({ s, late }: { s: string; late: boolean }) {
+function Status({ s, late, lateCls }: { s: string; late: boolean; lateCls: string }) {
   const cls =
-    s === 'Present' && !late ? 'bg-green-950/60 text-green-400'
-    : s === 'Present' ? 'bg-amber-950/50 text-amber-300'
+    s === 'Present' && !late ? 'bg-orange-500/15 text-orange-300'
+    : s === 'Present' ? lateCls
     : s === 'Not in yet' ? 'bg-[#1f1f1f] text-gray-400'
-    : 'bg-red-950/40 text-red-400'
+    : 'bg-orange-900/30 text-orange-500'
   return (
     <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs ${cls}`}>
       {s === 'Present' && late ? 'Late' : s}

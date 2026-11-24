@@ -11,8 +11,42 @@ export async function signIn(email: string, password: string) {
 
 export async function signOut() {
   clearAuthCache()
+  // Before the session goes: the server only lets you remove your own.
+  await forgetThisBrowserForPush()
   const { error } = await supabase.auth.signOut()
   if (error) throw error
+}
+
+/*
+  Logging out has to stop this browser being told.
+
+  Push is tied to the browser, not to the login: Chrome keeps the
+  subscription after the CRM signs out, and the server goes on sending
+  that person's notifications to it — a shared desktop showed somebody's
+  leads on Windows long after they had logged out there.
+
+  So the subscription is dropped on both sides: the row in
+  push_subscriptions (while we are still signed in — push_unsubscribe
+  only removes your own), and the browser's own subscription. Logging in
+  again sets it back up the way it always did.
+
+  Never allowed to stop the logout: a slow or failing push service must
+  not leave somebody unable to sign out, so it gives up after 3 seconds.
+*/
+async function forgetThisBrowserForPush() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+    const work = (async () => {
+      const reg = await navigator.serviceWorker.getRegistration()
+      const sub = await reg?.pushManager.getSubscription()
+      if (!sub) return
+      await supabase.rpc('push_unsubscribe', { p_endpoint: sub.endpoint })
+      await sub.unsubscribe()
+    })()
+    await Promise.race([work, new Promise((r) => setTimeout(r, 3000))])
+  } catch {
+    /* logging out matters more than tidying up */
+  }
 }
 
 /*

@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Package, X, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
+import { Activity, FolderKanban, TrendingUp, LayoutDashboard, ListTodo, ListChecks, AlarmClock, StickyNote, CalendarOff, Printer, Package, X, QrCode, CalendarCheck, Wallet, BookOpen, Megaphone, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
 import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
+import MyDay from './myday/MyDay'
 
 type NavItem = { label: string; path?: string; icon: LucideIcon; perm?: string }
 
@@ -31,6 +32,14 @@ const NAV: { title: string; items: NavItem[] }[] = [
       // the quantity and what the job is costing. The artwork they send
       // from the screen above is what this one is waiting for.
       { label: 'Job Work', path: '/design/job-works', icon: Package, perm: 'mod_job_works' },
+    ],
+  },
+  {
+    title: 'Digital',
+    items: [
+      // Clients' Facebook and Instagram. Only for the people it is
+      // switched on for in Employees.
+      { label: 'Social media', path: '/digital', icon: Megaphone, perm: 'mod_digital' },
     ],
   },
   {
@@ -203,7 +212,12 @@ export default function DesignLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>
+          {/* My day sits on top of the home page: the greeting, attendance,
+              leave, the task clock. */}
+          {pathname === '/design' && <MyDay />}
+          {children}
+        </main>
       </div>
 
       <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />

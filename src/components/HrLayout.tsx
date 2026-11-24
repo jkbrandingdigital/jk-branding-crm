@@ -1,10 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Filter, Users, CalendarCheck, CalendarOff, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, QrCode, SlidersHorizontal, Wallet, Package, BookOpen, FileBarChart, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Sun, Filter, Users, CalendarCheck, CalendarOff, X, AlarmClock, ListTodo, ListChecks, StickyNote, ChevronDown, QrCode, SlidersHorizontal, Wallet, Package, BookOpen, FileBarChart, Megaphone, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { usePermissions } from '../lib/permissions'
 import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
+import MyDay from './myday/MyDay'
 
 type Item = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
 type Group = { title: string; items: Item[] }
@@ -24,6 +25,12 @@ const GROUPS: Group[] = [
       { label: "Today's Visitors", path: '/hr/reception', icon: Users, ready: true, perm: 'mod_reception' },
       { label: 'Visitor Report', path: '/hr/reception-report', icon: FileBarChart, ready: true, perm: 'mod_reception' },
     ],
+  },
+  {
+    // HR sees every client workspace (view only, unless the Super Admin
+    // switches more on) — and can hand Digital to others from Employees.
+    title: 'Digital',
+    items: [{ label: 'Social media', path: '/digital', icon: Megaphone, ready: true, perm: 'mod_digital' }],
   },
   {
     title: 'Productivity',
@@ -46,7 +53,7 @@ const GROUPS: Group[] = [
       // Writing the rules. Reading them is in "Me" below, because that
       // is a thing this person owes rather than a thing they run.
       { label: 'Manage policies', path: '/hr/policies-manage', icon: BookOpen, ready: true, perm: 'policy_edit' },
-      { label: 'Setup', path: '/hr/setup', icon: SlidersHorizontal, ready: true, perm: 'attendance_edit' },
+      { label: 'Attendance setup', path: '/hr/setup', icon: SlidersHorizontal, ready: true, perm: 'attendance_edit' },
     ],
   },
   // Its own section, never folded. Everything above is OTHER people —
@@ -73,12 +80,68 @@ const GROUPS: Group[] = [
 // This section opens on a click; the rest stay in plain view
 const FOLDABLE = ['Productivity', 'People']
 
+/*
+  The HR home is two different things: the office (who is in, the week,
+  dispatch) and this person's own day (their scans, tasks, policies). On
+  one page they ran together, so they are two tabs. My day comes first
+  and opens by default; the tab last chosen is remembered on this
+  browser, so somebody who lives in Team stays there.
+*/
+type HomeTab = 'team' | 'me'
+const TAB_KEY = 'jk.hr.home_tab'
+
+function readTab(): HomeTab {
+  try { return localStorage.getItem(TAB_KEY) === 'team' ? 'team' : 'me' } catch { return 'me' }
+}
+
+function HomeTabs({ tab, onTab, due }: { tab: HomeTab; onTab: (t: HomeTab) => void; due: number }) {
+  const items: { id: HomeTab; label: string; icon: LucideIcon }[] = [
+    { id: 'me', label: 'My day', icon: Sun },
+    { id: 'team', label: 'Team', icon: Users },
+  ]
+  return (
+    <div role="tablist" aria-label="Home" className="mx-auto mb-6 flex max-w-6xl gap-1 border-b border-[#222]">
+      {items.map(({ id, label, icon: Icon }) => {
+        const on = tab === id
+        return (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={on}
+            onClick={() => onTab(id)}
+            className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
+              on ? 'border-orange-500 font-medium text-orange-400' : 'border-transparent text-gray-400 hover:text-white'
+            }`}
+          >
+            <Icon size={15} /> {label}
+            {/* What is waiting on this person — so Team being open never
+                hides an unread policy or a reminder due today. */}
+            {id === 'me' && due > 0 && (
+              <span className="ml-0.5 rounded-full bg-orange-500 px-1.5 text-[11px] font-semibold leading-[18px] text-white tabular-nums">
+                {due}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function HrLayout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const { can, ready: permsReady } = usePermissions()
   const [drawer, setDrawer] = useState(false)
   const [collapsed, setCollapsed] = useCollapsedSidebar()
   const [shut, setShut] = useState<string[]>(FOLDABLE)
+  const [homeTab, setHomeTab] = useState<HomeTab>(readTab)
+  const [due, setDue] = useState(0)
+  // Where My day draws its Dispatch card on the Team tab.
+  const [dispatchSlot, setDispatchSlot] = useState<HTMLElement | null>(null)
+  const pickTab = (t: HomeTab) => {
+    setHomeTab(t)
+    try { localStorage.setItem(TAB_KEY, t) } catch { /* private window: just not remembered */ }
+  }
 
   // Whichever section holds the page you are on stays open
   useEffect(() => {
@@ -225,7 +288,28 @@ export default function HrLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>
+          {/* On the home page: the office, or this person's own day — one
+              at a time. Every other page is just its page. */}
+          {/* Both tabs stay mounted and only one is shown: My day loads
+              once, keeps the badge on its tab true while Team is open,
+              and hands its Dispatch card to the Team tab — one load, not
+              two. */}
+          {pathname === '/hr' ? (
+            <>
+              <HomeTabs tab={homeTab} onTab={pickTab} due={due} />
+              <div hidden={homeTab !== 'me'}>
+                <MyDay onDue={setDue} dispatchInto={dispatchSlot} />
+              </div>
+              <div hidden={homeTab !== 'team'}>
+                {children}
+                <div ref={setDispatchSlot} className="mx-auto mt-4 max-w-6xl" />
+              </div>
+            </>
+          ) : (
+            children
+          )}
+        </main>
       </div>
 
       <BottomNav items={bottom} onMore={() => setDrawer(true)} moreActive={drawer} />

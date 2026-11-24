@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { LayoutDashboard, Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, QrCode, CalendarCheck, Wallet, BookOpen, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Users, Cake, FolderKanban, Sunrise, Moon, TrendingUp, CalendarOff, X, CheckCircle2, ChevronDown, Filter, AlarmClock, ListTodo, ListChecks, StickyNote, FileText, Plus, QrCode, CalendarCheck, Wallet, BookOpen, Megaphone, type LucideIcon } from 'lucide-react'
 import Header from './Header'
 import { WorkTimerBar } from './tasks/WorkTimer'
 import { supabase } from '../lib/supabase'
@@ -8,10 +8,11 @@ import { usePermissions } from '../lib/permissions'
 import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 import { istDate } from '../lib/format'
+import MyDay from './myday/MyDay'
 
 export type SalesPage = 'home' | 'evolution' | 'report' | 'performance' | 'leads'
 // Pages with their own route (not ?page=) — kept out of SalesPage so sales/Dashboard stays as it is
-type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'customers' | 'projects' | 'greetings' | 'scan' | 'attendance' | 'my-leave' |'my-payslips' | 'policies'
+type SalesNav = SalesPage | 'reminders' | 'tasks' | 'todos' | 'notes' | 'quotations' | 'quote-new' | 'customers' | 'projects' | 'greetings' | 'scan' | 'attendance' | 'my-leave' |'my-payslips' | 'policies' | 'digital'
 const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   reminders: '/sales/reminders',
   tasks: '/sales/tasks',
@@ -29,6 +30,8 @@ const OWN_ROUTE: Partial<Record<SalesNav, string>> = {
   'my-leave': '/sales/my-leave',
   'my-payslips': '/sales/my-payslips',
   policies: '/sales/policies',
+  // One Digital page for every role, not /sales/digital.
+  digital: '/digital',
 }
 
 type NavItem = { label: string; hint?: string; page?: SalesNav; icon: LucideIcon; perm?: string }
@@ -77,6 +80,9 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { label: 'All Quotations', page: 'quotations', icon: FileText, perm: 'mod_quotations' },
     ],
   },
+  // Clients' Facebook and Instagram — only for the people it is switched
+  // on for in Employees.
+  { title: 'Digital', items: [{ label: 'Social media', page: 'digital', icon: Megaphone, perm: 'mod_digital' }] },
   { title: 'Insights', items: [{ label: 'My Performance', page: 'performance', icon: TrendingUp }] },
   {
     title: 'Me',
@@ -321,7 +327,11 @@ export default function SalesLayout({ active, children }: { active: SalesNav; ch
             the bottom carries the four, and More opens this same drawer.
             A button in the top-left corner is the furthest point on a
             phone from the thumb holding it. */}
-        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>
+          {/* My day on the home page only — the greeting, attendance, leave. */}
+          {active === 'home' && <MyDay />}
+          {children}
+        </main>
       </div>
 
       <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />

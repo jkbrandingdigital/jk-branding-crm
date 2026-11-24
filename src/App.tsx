@@ -180,6 +180,23 @@ import AdminReception from './pages/admin/Reception'
 import AdminReceptionReport from './pages/admin/ReceptionReport'
 import HrReception from './pages/hr/Reception'
 import HrReceptionReport from './pages/hr/ReceptionReport'
+// Digital — clients' social pages. A switch, not a role: one page that sits
+// inside whatever layout the person already has. Connect is the public page
+// a client opens from the WhatsApp link — no CRM login.
+import DigitalPage from './pages/digital/Digital'
+import DigitalConnect from './pages/digital/Connect'
+// The Digital role's own side (/dm): home, their projects, and the same
+// everyday screens every role has.
+import DmDashboard from './pages/dm/Dashboard'
+import DmProjects from './pages/dm/Projects'
+import DmTasks from './pages/dm/Tasks'
+import DmTodos from './pages/dm/Todos'
+import DmReminders from './pages/dm/Reminders'
+import DmNotes from './pages/dm/Notes'
+import DmAttendance from './pages/dm/Attendance'
+import DmMyLeave from './pages/dm/MyLeave'
+import DmMyPayslips from './pages/dm/MyPayslips'
+import DmPolicies from './pages/dm/Policies'
 
 // Where a sub admin lands, in order. The first one they are allowed to
 // open becomes their home page.
@@ -263,6 +280,11 @@ function AppRoutes() {
           the role blocks because each of those ends in a catch-all
           (/hr/*, /admin/*) and the first match wins. */}
       <Route path="/scan" element={<Scan />} />
+
+      {/* Digital, for anyone with it switched on, whatever their role. Up
+          here for the same reason as /scan: the role blocks end in
+          catch-alls. */}
+      <Route path="/digital" element={may('mod_digital') ? <DigitalPage /> : <Navigate to={home} replace />} />
 
       {adminArea && (
         <>
@@ -474,6 +496,21 @@ function AppRoutes() {
           <Route path="/accounts/*" element={<AccountsDashboard />} />
         </>
       )}
+      {role === 'digital' && (
+        <>
+          <Route path="/dm/projects" element={<DmProjects />} />
+          <Route path="/dm/tasks" element={<DmTasks />} />
+          <Route path="/dm/todos" element={<DmTodos />} />
+          <Route path="/dm/reminders" element={<DmReminders />} />
+          <Route path="/dm/notes" element={<DmNotes />} />
+          <Route path="/dm/attendance" element={<DmAttendance />} />
+          <Route path="/dm/my-leave" element={<DmMyLeave />} />
+          <Route path="/dm/my-payslips" element={<DmMyPayslips />} />
+          <Route path="/dm/policies" element={<DmPolicies />} />
+          {/* catch-all LAST, like the other roles */}
+          <Route path="/dm/*" element={<DmDashboard />} />
+        </>
+      )}
       {role === 'reception' && (
         <>
           <Route path="/reception/add" element={<ReceptionAddVisitor />} />
@@ -499,7 +536,13 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <Routes>
+          {/* Public: a client connecting their Facebook page. Outside
+              AppRoutes on purpose — that one shows the login page to
+              anybody who is not signed in, and the client never is. */}
+          <Route path="/connect/:token" element={<DigitalConnect />} />
+          <Route path="*" element={<AppRoutes />} />
+        </Routes>
       </AuthProvider>
     </BrowserRouter>
   )

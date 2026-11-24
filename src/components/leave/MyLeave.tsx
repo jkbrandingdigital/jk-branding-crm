@@ -110,6 +110,10 @@ export default function MyLeave() {
   const [warn, setWarn] = useState<Warn | null>(null)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null)
+  // The request whose "Cancel request" was pressed and is waiting on a
+  // second tap — one stray tap must not throw a leave away.
+  const [asking, setAsking] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState<string | null>(null)
 
   const byHour = useMemo(
     () => bals.find((b) => b.code === type)?.unit === 'hour',
@@ -178,10 +182,15 @@ export default function MyLeave() {
     load()
   }
 
+  // Only while HR has not decided: leave_withdraw refuses anything else.
   async function withdraw(id: string) {
-    const { data } = await supabase.rpc('leave_withdraw', { p_id: id })
+    setCancelling(id)
+    const { data, error } = await supabase.rpc('leave_withdraw', { p_id: id })
+    setCancelling(null)
+    setAsking(null)
     const r = data as { ok: boolean; reason?: string } | null
-    if (!r?.ok) return setNote({ kind: 'bad', text: r?.reason ?? 'Not taken back.' })
+    if (error || !r?.ok) return setNote({ kind: 'bad', text: error?.message ?? r?.reason ?? 'Not cancelled.' })
+    setNote({ kind: 'ok', text: 'Request cancelled. HR will not see it any more.' })
     load()
   }
 
@@ -469,12 +478,33 @@ export default function MyLeave() {
                 </div>
 
                 {r.state === 'Waiting' && (
-                  <button
-                    onClick={() => withdraw(r.id)}
-                    className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-[#1a1a1a] hover:text-white"
-                  >
-                    <X size={13} /> Take it back
-                  </button>
+                  asking === r.id ? (
+                    <div className="flex shrink-0 items-center gap-2 text-xs">
+                      <span className="text-gray-400">Cancel it?</span>
+                      <button
+                        onClick={() => withdraw(r.id)}
+                        disabled={cancelling === r.id}
+                        className="flex items-center gap-1.5 rounded-lg bg-red-600/90 px-3 py-1.5 font-medium text-white transition-colors hover:bg-red-500 disabled:opacity-50"
+                      >
+                        {cancelling === r.id ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+                        Yes, cancel
+                      </button>
+                      <button
+                        onClick={() => setAsking(null)}
+                        disabled={cancelling === r.id}
+                        className="rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-gray-400 transition-colors hover:bg-[#1a1a1a] hover:text-white"
+                      >
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setAsking(r.id); setNote(null) }}
+                      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-[#1a1a1a] hover:text-white"
+                    >
+                      <X size={13} /> Cancel request
+                    </button>
+                  )
                 )}
               </li>
             ))}

@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase'
 import { usePermissions } from '../lib/permissions'
 import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
+import MyDay from './myday/MyDay'
 
 type NavItem = { label: string; path: string; icon: LucideIcon; ready: boolean; perm?: string }
 
@@ -259,7 +260,12 @@ export default function ManagerLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>
+          {/* The manager's own day first — they scan, take leave and sell
+              like anyone else — then the branch below it. */}
+          {pathname === '/manager' && <MyDay />}
+          {children}
+        </main>
       </div>
 
       <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />

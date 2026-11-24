@@ -9,6 +9,7 @@ import { usePermissions } from '../lib/permissions'
 import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
 import { supabase } from '../lib/supabase'
+import MyDay from './myday/MyDay'
 
 /*
   The accounts side of the CRM.
@@ -237,7 +238,12 @@ export default function AccountsLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>
+          {/* My day above the Finance dashboard — their own attendance and
+              leave, and the payments and price changes waiting on them. */}
+          {pathname === '/accounts' && <MyDay />}
+          {children}
+        </main>
       </div>
 
       <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />

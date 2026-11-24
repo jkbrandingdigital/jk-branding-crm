@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  CheckCircle2, Circle, Target, Phone, Users, CalendarCheck,
-  TrendingUp, ArrowRight, Sun, Sunrise, Moon,
+  CheckCircle2, Circle, Target, Phone, Users,
+  TrendingUp, ArrowRight,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { authUser, getUserProfile } from '../../lib/auth'
-import { istDate, prettyDate, inr } from '../../lib/format'
+import { authUser } from '../../lib/auth'
+import { istDate, inr } from '../../lib/format'
 import SopWidget from '../../components/policies/SopWidget'
 
 /*
+  The greeting, the date and "My attendance" now live in My day, which
+  SalesLayout puts above this page — the same greeting every role sees.
+  This page keeps what is the sales person's own: today's two forms, the
+  month against target, calls and leads.
+
   Where each card sends the person. evolution/report/performance/leads are
   tabs on the /sales shell (?page=…); policies and attendance are their own
   routes. One place to change if a path ever moves — nothing else in this
@@ -20,7 +25,6 @@ const PATHS = {
   report: '/sales?page=report',
   performance: '/sales?page=performance',
   leads: '/sales?page=leads',
-  attendance: '/sales/attendance',
   policies: '/sales/policies',
 }
 
@@ -49,21 +53,8 @@ type Activity = {
   leads_converted: number | null
 }
 
-function greet(): { text: string; icon: typeof Sun } {
-  // IST hour — the greeting should match the person's clock, not the server's
-  const h = Number(
-    new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).format(new Date()),
-  )
-  if (h < 12) return { text: 'Good morning', icon: Sunrise }
-  if (h < 17) return { text: 'Good afternoon', icon: Sun }
-  return { text: 'Good evening', icon: Moon }
-}
-
 export default function SalesHome() {
   const today = istDate()
-  const { text: hello, icon: HelloIcon } = greet()
-
-  const [name, setName] = useState('')
 
   const [evoDone, setEvoDone] = useState(false)
   const [reportDone, setReportDone] = useState(false)
@@ -84,13 +75,10 @@ export default function SalesHome() {
       const { data: { user } } = await authUser()
       if (!user) return
 
-      // All at once rather than one after another. The profile comes
-      // from the shared memo in lib/auth (SalesLayout has already read
-      // it), so it costs nothing here. The branch name is NOT fetched:
-      // the sidebar already shows it, and a second query for the same
-      // word is exactly the kind of duplicate the usage fix removed.
-      const [prof, evo, rep, tp, ap] = await Promise.all([
-        getUserProfile(user.id).catch(() => null),
+      // All at once rather than one after another. The branch name is NOT
+      // fetched: the sidebar already shows it, and a second query for the
+      // same word is exactly the kind of duplicate the usage fix removed.
+      const [evo, rep, tp, ap] = await Promise.all([
         supabase.from('daily_evolution').select('id').eq('user_id', user.id).eq('evolution_date', today).limit(1),
         supabase.from('daily_reports').select('id').eq('user_id', user.id).eq('work_date', today).limit(1),
         supabase.rpc('sales_target_performance'),
@@ -98,7 +86,6 @@ export default function SalesHome() {
       ])
 
       if (cancelled) return
-      setName(((prof?.full_name as string | undefined) || user.email || '').split(' ')[0])
       if (tp.error) setError(tp.error.message)
       if (ap.error) setError(ap.error.message)
 
@@ -128,17 +115,13 @@ export default function SalesHome() {
 
   return (
     <div className={`mx-auto max-w-6xl ${loading ? 'opacity-60' : ''}`}>
-      {/* Greeting */}
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <HelloIcon size={22} className="text-orange-400" />
-            {hello}{name ? `, ${name}` : ''}
-          </h1>
-          <p className="mt-1 text-sm text-gray-400">
-            {prettyDate(today)}
-          </p>
-        </div>
+      {/* The greeting is in My day above. This line names the section
+          and keeps the way to the full numbers. */}
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-sm font-medium text-gray-300">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-orange-500/15 text-orange-400"><Target size={15} /></span>
+          My sales
+        </h2>
         <Link
           to={PATHS.performance}
           className="flex w-fit items-center gap-1.5 rounded-lg border border-[#2a2a2a] px-3 py-2 text-sm text-gray-300 hover:border-[#3a3a3a] hover:text-white"
@@ -254,22 +237,6 @@ export default function SalesHome() {
         {/* Side column */}
         <aside className="space-y-6">
           <SopWidget policiesPath={PATHS.policies} />
-
-          <Link
-            to={PATHS.attendance}
-            className="flex items-center justify-between rounded-2xl border border-[#242424] bg-[#151515] p-5 transition-colors hover:border-[#3a3a3a]"
-          >
-            <span className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10 text-orange-400">
-                <CalendarCheck size={18} />
-              </span>
-              <span>
-                <span className="block text-sm font-medium">My attendance</span>
-                <span className="block text-xs text-gray-500">Your register &amp; hours</span>
-              </span>
-            </span>
-            <ArrowRight size={16} className="text-gray-500" />
-          </Link>
 
           <Link
             to={PATHS.leads}

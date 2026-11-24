@@ -1,6 +1,11 @@
 // src/components/hr/HrSetup.tsx
 //
-// Salary, holidays, and the rules. Route: /hr/setup
+// Attendance setup: shift timings and the rules. Route: /hr/setup
+//
+// Holidays and salaries used to live here too. Holidays moved to the
+// leave page (components/leave/HolidaysCard.tsx), next to the month they
+// affect; salaries to the payroll page (components/payroll/SalariesCard.tsx),
+// where a missing one gets noticed.
 //
 // Three things that have been decided and written into the database for
 // weeks with no way to reach them. Every screen in the leave module has
@@ -19,12 +24,11 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Wallet, CalendarDays, SlidersHorizontal, Plus, Trash2, Check, Loader2,
-  AlertTriangle, ChevronLeft, ChevronRight, Clock,
+  Wallet, SlidersHorizontal, Check, Loader2,
+  Clock,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { DateField } from '../DateField'
-import { CARD_TABLE } from '../CardTable'
 
 type Rules = {
   absent_penalty: number
@@ -36,19 +40,6 @@ type Rules = {
   can_see_pay: boolean
   can_set_pay: boolean
 }
-
-type PayRow = {
-  user_id: string; emp_code: string; full_name: string
-  branch: string | null; designation: string | null
-  monthly: number | null; day_rate: number | null; updated_at: string | null
-}
-
-type Holiday = {
-  id: string; holiday_on: string; name: string
-  branch_id: string | null; branch: string | null
-}
-
-type Branch = { id: string; name: string }
 
 type Shift = {
   branch_id: string
@@ -70,15 +61,6 @@ type Shift = {
 const hm = (t: string | null | undefined) => (t ? t.slice(0, 5) : '')
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
-const rupees = (n: number) =>
-  '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })
-
-/** Days from a to b inclusive. Both dates are YYYY-MM-DD. */
-const dayCount = (a: string, b: string) => {
-  const ms = new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()
-  return Math.round(ms / 86_400_000) + 1
-}
 
 const day = (d: string) =>
   new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {
@@ -145,23 +127,8 @@ function Num({
 
 export default function HrSetup() {
   const [rules, setRules] = useState<Rules | null>(null)
-  const [pay, setPay] = useState<PayRow[]>([])
-  const [holidays, setHolidays] = useState<Holiday[]>([])
-  const [branches, setBranches] = useState<Branch[]>([])
-  const [year, setYear] = useState(new Date().getFullYear())
 
-  const [editing, setEditing] = useState<string | null>(null)
-  const [amount, setAmount] = useState('')
   const [said, setSaid] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null)
-
-  // Holidays are entered as a stretch — Janmashtami is three days,
-  // Diwali is five — because typing a row each is the chore that leaves
-  // the calendar empty, and leave then quietly eats paid days on them.
-  // From alone is the single-day case, which is still ordinary.
-  const [hFrom, setHFrom] = useState('')
-  const [hTo, setHTo] = useState('')
-  const [hName, setHName] = useState('')
-  const [hBranch, setHBranch] = useState('')
 
   const [penalty, setPenalty] = useState('2')
   const [from, setFrom] = useState('')
@@ -176,18 +143,12 @@ export default function HrSetup() {
   const [savingShift, setSavingShift] = useState(false)
 
   const load = useCallback(async () => {
-    const [r, p, h, b, sh] = await Promise.all([
+    const [r, sh] = await Promise.all([
       supabase.rpc('rules_now'),
-      supabase.rpc('pay_list'),
-      supabase.rpc('holidays_list', { p_year: year }),
-      supabase.from('branches').select('id, name').order('name'),
       supabase.rpc('shifts_list'),
     ])
     const rr = (r.data ?? null) as unknown as Rules | null
     setRules(rr)
-    setPay((p.data ?? []) as unknown as PayRow[])
-    setHolidays((h.data ?? []) as unknown as Holiday[])
-    setBranches((b.data ?? []) as unknown as Branch[])
     const shiftRows = (sh.data ?? []) as unknown as Shift[]
     setShifts(shiftRows)
     // Keep whatever branch is open open across a reload, else the first.
@@ -197,7 +158,7 @@ export default function HrSetup() {
       setFrom(rr.absence_from)
       setLate(String(rr.late_allowed))
     }
-  }, [year])
+  }, [])
 
   useEffect(() => { load() }, [load])
 
@@ -234,40 +195,6 @@ export default function HrSetup() {
     load()
   }
 
-  async function savePay(id: string) {
-    const { data, error } = await supabase.rpc('pay_set', {
-      p_user: id, p_monthly: Number(amount),
-    })
-    const r = data as { ok: boolean; reason?: string } | null
-    if (error || !r?.ok) return setSaid({ kind: 'bad', text: error?.message ?? r?.reason ?? 'Not saved.' })
-    setSaid({ kind: 'ok', text: 'Saved.' })
-    setEditing(null)
-    load()
-  }
-
-  async function addHoliday() {
-    // To is optional on screen; blank means a single day. The server
-    // asks for both, so we fill it in here rather than making the
-    // common case (one day) take two taps.
-    const to = hTo || hFrom
-    const { data, error } = await supabase.rpc('holiday_set_range', {
-      p_from: hFrom, p_to: to, p_name: hName.trim(), p_branch: hBranch || null,
-    })
-    const r = data as { ok: boolean; reason?: string; days?: number } | null
-    if (error || !r?.ok) return setSaid({ kind: 'bad', text: error?.message ?? r?.reason ?? 'Not saved.' })
-    setSaid({
-      kind: 'ok',
-      text: r.days === 1 ? 'Holiday added.' : `${r.days} days added.`,
-    })
-    setHFrom(''); setHTo(''); setHName('')
-    load()
-  }
-
-  async function dropHoliday(id: string) {
-    await supabase.rpc('holiday_drop', { p_id: id })
-    load()
-  }
-
   async function saveRule(fn: string, args: Record<string, unknown>) {
     const { data, error } = await supabase.rpc(fn, args)
     const r = data as { ok: boolean; reason?: string } | null
@@ -276,14 +203,12 @@ export default function HrSetup() {
     load()
   }
 
-  const missing = pay.filter((p) => p.monthly === null).length
-
   return (
     <div className="mx-auto max-w-5xl">
       <header className="mb-2">
-        <h1 className="text-xl font-semibold">Setup</h1>
+        <h1 className="text-xl font-semibold">Attendance setup</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Salaries, holidays and the attendance rules.
+          Shift timings and the attendance rules. Holidays are on the Leave page, salaries on Payroll.
         </p>
       </header>
 
@@ -295,207 +220,6 @@ export default function HrSetup() {
           {said.text}
         </p>
       )}
-
-      {/* ── salary ───────────────────────────────────────────── */}
-      {rules?.can_see_pay && (
-        <Card icon={Wallet} title="Salary" hint={`${pay.length} people`}>
-          {missing > 0 && (
-            <p className="flex items-start gap-2 border-b border-amber-900/30 bg-amber-950/15 px-5 py-3 text-xs text-amber-200/90">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
-              {missing} {missing === 1 ? 'person has' : 'people have'} no salary on file. Until
-              one is set, their leave and their payslip both work out to zero —
-              they are at the top of the list.
-            </p>
-          )}
-
-          <div className="overflow-x-auto">
-            <table className={`w-full text-sm ${CARD_TABLE}`}>
-              <thead>
-                <tr className="border-b border-[#1f1f1f] text-left text-xs text-gray-500">
-                  <th className="px-5 py-2.5 font-normal">Name</th>
-                  <th className="px-3 py-2.5 font-normal">Branch</th>
-                  <th className="px-3 py-2.5 text-right font-normal">A month</th>
-                  <th className="px-3 py-2.5 text-right font-normal">A day</th>
-                  <th className="px-5 py-2.5"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#1a1a1a]">
-                {pay.map((p) => (
-                  <tr key={p.user_id} className="transition-colors hover:bg-[#181818]">
-                    {/* No label: on a card the name is the heading. */}
-                    <td data-label="" className="px-5 py-3">
-                      <p className="font-medium">{p.full_name}</p>
-                      <p className="font-mono text-[11px] text-gray-500">
-                        {p.emp_code}{p.designation && ` · ${p.designation}`}
-                      </p>
-                    </td>
-                    <td data-label="Branch" className="px-3 py-3 text-gray-400">{p.branch ?? '—'}</td>
-
-                    {editing === p.user_id ? (
-                      <td data-label="A month" colSpan={3} className="px-3 py-2">
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <input
-                            type="number" min="0" step="500" autoFocus
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            className="w-36 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] px-3 py-1.5 text-right text-sm text-white focus:border-orange-500 focus:outline-none"
-                          />
-                          <button
-                            onClick={() => savePay(p.user_id)}
-                            className="rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-orange-500"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => setEditing(null)}
-                            className="rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </td>
-                    ) : (
-                      <>
-                        <td data-label="A month" className={`px-3 py-3 text-right tabular-nums ${
-                          p.monthly === null ? 'text-amber-400' : 'text-gray-200'}`}>
-                          {p.monthly === null ? 'not set' : rupees(p.monthly)}
-                        </td>
-                        <td data-label="A day" className="px-3 py-3 text-right tabular-nums text-gray-500">
-                          {p.day_rate === null ? '—' : rupees(p.day_rate)}
-                        </td>
-                        <td data-label="" className="px-5 py-3 text-right">
-                          {rules.can_set_pay && (
-                            <button
-                              onClick={() => {
-                                setEditing(p.user_id)
-                                setAmount(p.monthly === null ? '' : String(p.monthly))
-                              }}
-                              className="rounded-lg border border-[#2a2a2a] px-3 py-1 text-xs text-gray-300 transition-colors hover:bg-[#1f1f1f] hover:text-white"
-                            >
-                              {p.monthly === null ? 'Set' : 'Change'}
-                            </button>
-                          )}
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <p className="border-t border-[#242424] px-5 py-3 text-xs text-gray-600">
-            A day is the month&rsquo;s salary divided by the days that month actually
-            has — January and February are not the same. You cannot set your own.
-          </p>
-        </Card>
-      )}
-
-      {/* ── holidays ─────────────────────────────────────────── */}
-      <Card icon={CalendarDays} title="Holidays">
-        <div className="flex items-center gap-1 border-b border-[#242424] px-5 py-2.5">
-          <button onClick={() => setYear((y) => y - 1)} className="rounded-lg p-1.5 text-gray-400 hover:bg-[#1f1f1f] hover:text-white" aria-label="Previous year">
-            <ChevronLeft size={15} />
-          </button>
-          <span className="min-w-[4rem] text-center text-sm tabular-nums">{year}</span>
-          <button onClick={() => setYear((y) => y + 1)} className="rounded-lg p-1.5 text-gray-400 hover:bg-[#1f1f1f] hover:text-white" aria-label="Next year">
-            <ChevronRight size={15} />
-          </button>
-        </div>
-
-        {holidays.length === 0 ? (
-          <p className="px-5 py-8 text-center text-sm text-gray-600">
-            Nothing set for {year}. Leave taken on these days still eats paid days
-            until they are here.
-          </p>
-        ) : (
-          <ul className="divide-y divide-[#1a1a1a]">
-            {holidays.map((h) => (
-              <li key={h.id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
-                <span className="w-28 shrink-0 text-gray-400">{day(h.holiday_on)}</span>
-                <span className="min-w-0 flex-1 truncate">{h.name}</span>
-                <span className="text-xs text-gray-500">
-                  {h.branch ?? 'every branch'}
-                </span>
-                {rules?.can_edit && (
-                  <button
-                    onClick={() => dropHoliday(h.id)}
-                    className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-950/40 hover:text-red-400"
-                    aria-label={`Remove ${h.name}`}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {rules?.can_edit && (
-          <div className="border-t border-[#242424] p-5">
-            {/* From and To. To is a hint "or a single day" when it is
-                blank — that is the common case and should not look like
-                a required field.
-                Below the row, the day count if a stretch is set, so the
-                person can see "3 days" before they tap Add. */}
-            <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1fr_1fr_auto]">
-              <div>
-                <label className="mb-1 block text-[11px] text-gray-500">From</label>
-                <DateField
-                  value={hFrom}
-                  onChange={(v) => setHFrom(v ?? '')}
-                  placeholder="dd mmm yyyy"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] text-gray-500">
-                  To <span className="text-gray-600">(or leave blank for a single day)</span>
-                </label>
-                <DateField
-                  value={hTo}
-                  onChange={(v) => setHTo(v ?? '')}
-                  placeholder="dd mmm yyyy"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] text-gray-500">What</label>
-                <input
-                  value={hName}
-                  onChange={(e) => setHName(e.target.value)}
-                  placeholder="e.g. Janmashtami"
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] text-gray-500">Branch</label>
-                <select value={hBranch} onChange={(e) => setHBranch(e.target.value)} className={inputCls}>
-                  <option value="">Every branch</option>
-                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              </div>
-              <div className="flex items-end">
-                <button
-                  onClick={addHoliday}
-                  disabled={!hFrom || hName.trim().length < 2}
-                  className="flex h-[42px] items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 text-sm font-medium text-white transition-colors hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Plus size={15} /> Add
-                </button>
-              </div>
-            </div>
-            {hFrom && hTo && hTo > hFrom && (
-              <p className="mt-2 text-xs text-gray-500">
-                {dayCount(hFrom, hTo)} days will be added.
-              </p>
-            )}
-            {hFrom && hTo && hTo < hFrom && (
-              <p className="mt-2 text-xs text-red-400">
-                The last day cannot be before the first.
-              </p>
-            )}
-          </div>
-        )}
-      </Card>
 
       {/* ── shift timings, per branch ────────────────────────── */}
       <Card

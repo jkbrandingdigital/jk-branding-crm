@@ -5,6 +5,7 @@ import Header from './Header'
 import { supabase } from '../lib/supabase'
 import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
+import MyDay from './myday/MyDay'
 
 export type ReceptionNav =
   | 'today' | 'add' | 'report'
@@ -177,7 +178,11 @@ export default function ReceptionLayout({ active, children }: { active: Receptio
           </div>
         )}
 
-        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>
+          {/* My day on Today's Visitors — attendance, leave, to-do. */}
+          {active === 'today' && <MyDay />}
+          {children}
+        </main>
       </div>
 
       <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />

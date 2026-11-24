@@ -151,6 +151,9 @@ export const ownHome = (role: string | null | undefined) =>
   : role === 'dispatch' ? '/dispatch'
   : role === 'accounts' ? '/accounts'
   : role === 'reception' ? '/reception'
+  // Not /digital: that is the client-workspace screen every role with the
+  // switch can open. The Digital role's own side lives under /dm.
+  : role === 'digital' ? '/dm'
   : '/sales'
 
 // Every right the app knows about, grouped for the toggles screen
@@ -184,6 +187,20 @@ export const PERMISSION_GROUPS: { title: string; items: { key: string; label: st
       { key: 'mod_dispatch', label: 'Dispatch & QC' },
       { key: 'dispatch_qc', label: 'Record quality check' },
       { key: 'dispatch_courier', label: 'Add courier & LR number' },
+    ],
+  },
+  {
+    title: 'Digital',
+    items: [
+      // Person by person, from the Digital box in Employees — never a
+      // role default, or the whole role would get it.
+      { key: 'mod_digital', label: 'Digital' },
+      { key: 'digital_view_all', label: 'See every client workspace' },
+      { key: 'digital_workspace_manage', label: 'Make workspaces & pick the team' },
+      { key: 'digital_connect', label: 'Connect pages & send client links' },
+      { key: 'digital_post_create', label: 'Write posts' },
+      { key: 'digital_post_edit', label: "Change anyone's post" },
+      { key: 'digital_publish', label: 'Schedule & publish' },
     ],
   },
 ]

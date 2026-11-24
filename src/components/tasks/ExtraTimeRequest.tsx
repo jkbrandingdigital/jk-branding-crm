@@ -32,19 +32,25 @@ type Pending = { id: string; minutes: number; reason: string; created_at: string
 const PICKS = [15, 30, 60, 120]
 
 export default function ExtraTimeRequest({
-  taskId, allowedMins, spentMins, locked = false, onChanged,
+  taskId, allowedMins, spentMins, locked = false, onChanged, pieces = 1, unitName = 'Quantity',
 }: {
   taskId: string
   allowedMins: number | null
   spentMins: number
   locked?: boolean
   onChanged?: () => void
+  // How many pieces the task has (5 banners). With more than one, the
+  // request says which one needs the time — so it goes to whoever does it.
+  pieces?: number
+  unitName?: string
 }) {
   const [mine, setMine] = useState(false)
   const [extra, setExtra] = useState(0)
   const [pending, setPending] = useState<Pending | null>(null)
   const [open, setOpen] = useState(false)
   const [minutes, setMinutes] = useState(30)
+  // 0 = the whole job; 1…n = that one piece
+  const [piece, setPiece] = useState(0)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -82,10 +88,16 @@ export default function ExtraTimeRequest({
       p_minutes: minutes,
       p_reason: reason.trim(),
     })
+    if (!error && piece > 0) {
+      // Which piece — set on the request just made.
+      const { error: e2 } = await supabase.rpc('task_time_request_set_piece', { p_task: taskId, p_piece: piece })
+      if (e2) { setBusy(false); return setErr(e2.message) }
+    }
     setBusy(false)
     if (error) return setErr(error.message)
     setOpen(false)
     setReason('')
+    setPiece(0)
     void load()
     onChanged?.()
   }
@@ -160,6 +172,26 @@ export default function ExtraTimeRequest({
 
               {err && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">{err}</p>}
 
+              {/* Which one needs it — only when there is more than one. */}
+              {pieces > 1 && (
+                <div>
+                  <label className="mb-1.5 block text-xs text-gray-400">For which one</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[0, ...Array.from({ length: pieces }, (_, i) => i + 1)].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setPiece(n)}
+                        className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                          piece === n ? 'bg-orange-500 font-medium text-black' : 'border border-[#2a2a2a] text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        {n === 0 ? 'Whole job' : `${unitName} ${n}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="mb-1.5 block text-xs text-gray-400">How much more</label>
                 <div className="mb-2 flex flex-wrap gap-1.5">
@@ -212,7 +244,7 @@ export default function ExtraTimeRequest({
                 className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
               >
                 {busy && <Loader2 size={15} className="animate-spin" />}
-                Send
+                Send{piece > 0 ? ` · ${unitName} ${piece}` : ''}
               </button>
             </div>
           </div>

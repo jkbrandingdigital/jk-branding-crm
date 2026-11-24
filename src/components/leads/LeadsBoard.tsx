@@ -119,6 +119,21 @@ const countOn = (f: Filters) =>
 // that would confuse the filter syntax instead of searching for them.
 const cleanQ = (s: string) => s.replace(/[,()%*\\"']/g, ' ').replace(/\s+/g, ' ').trim()
 
+/*
+  A phone number is typed every way there is: 9876543210, 98765 43210,
+  +91 98765-43210, 098765 43210. The lead was saved one way too. So a
+  search that looks like a number is matched on digits only, against
+  `phone_norm` — the last ten digits of the lead's phone, the same column
+  the duplicate check uses. lead_board_summary() and lead_lookup() do the
+  same (Leads_LP1_Phone_Search.sql), so the cards and the counts agree.
+*/
+const phoneDigits = (s: string): string | null => {
+  if (!/^[\d\s+\-.]+$/.test(s)) return null       // has letters: a name, not a number
+  const d = s.replace(/\D/g, '')
+  if (d.length < 4) return null
+  return d.length > 10 ? d.slice(-10) : d          // +91 / leading 0 dropped
+}
+
 // A timeout is the database saying "too much to look through", not a fault.
 // Say that in words the person can act on.
 const friendly = (m: string) =>
@@ -207,6 +222,8 @@ function applyLeadFilters(query: LeadQuery, f: Filters, text: string, openStageI
       `city.ilike.*${t}*`,
       `campaign_name.ilike.*${t}*`,
     ]
+    const digits = phoneDigits(t)
+    if (digits) parts.push(`phone_norm.ilike.*${digits}*`)
     if (/^\d+$/.test(t)) parts.push(`lead_no.eq.${t}`)
     qy = qy.or(parts.join(','))
   }

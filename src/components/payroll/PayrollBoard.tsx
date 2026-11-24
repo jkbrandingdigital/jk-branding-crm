@@ -21,7 +21,7 @@
 // the display — a second opinion in the browser is how a payslip and a
 // register start disagreeing.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -33,6 +33,7 @@ import {
   Users, Clock, Printer, FileText,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import SalariesCard from './SalariesCard'
 
 // ── The colours ────────────────────────────────────────────────
 // Orange is the brand's and it carries the money. Green is what has
@@ -196,6 +197,8 @@ export default function PayrollBoard() {
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null)
+  // Salaries live on this page now (moved from Setup), at the bottom.
+  const salRef = useRef<HTMLElement>(null)
 
   const [lKind, setLKind] = useState('earning')
   const [lLabel, setLLabel] = useState('')
@@ -514,8 +517,16 @@ export default function PayrollBoard() {
           {(sum?.no_salary ?? 0) > 0 && (
             <p className="no-print mt-3 flex items-start gap-2 rounded-xl border border-amber-900/40 bg-amber-950/15 px-4 py-3 text-xs text-amber-200/90">
               <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
-              {sum?.no_salary} {sum?.no_salary === 1 ? 'person has' : 'people have'} no salary
-              on file, so their slip comes to nothing. Set it under Setup and build again.
+              <span className="flex-1">
+                {sum?.no_salary} {sum?.no_salary === 1 ? 'person has' : 'people have'} no salary
+                on file, so their slip comes to nothing. Set it under Salaries and build again.
+              </span>
+              <button
+                onClick={() => salRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className="shrink-0 rounded-lg border border-amber-700/50 px-2.5 py-1 text-[11px] text-amber-200 hover:bg-amber-950/40"
+              >
+                Set salaries
+              </button>
             </p>
           )}
 
@@ -972,6 +983,11 @@ export default function PayrollBoard() {
           </Panel>
         </>
       )}
+
+      {/* ── everybody's salary ─────────────────────────────────
+           Shown whether or not a month is open: setting salaries is
+           the first thing a new payroll needs. */}
+      <SalariesCard ref={salRef} onSaved={() => { loadRuns(); loadSlips() }} />
 
       {/* ── one payslip, ready for paper ───────────────────────── */}
       {printing && (

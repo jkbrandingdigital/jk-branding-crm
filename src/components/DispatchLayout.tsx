@@ -8,6 +8,7 @@ import Header from './Header'
 import { usePermissions } from '../lib/permissions'
 import { BottomNav, MAIN_PAD, NavIcon, SIDEBAR_W, SidebarToggle, useCollapsedSidebar, type BottomItem } from './SidebarChrome'
 import { getCurrentUser, getUserProfile } from '../lib/auth'
+import MyDay from './myday/MyDay'
 
 /*
   The dispatch side of the CRM.
@@ -203,7 +204,12 @@ export default function DispatchLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>{children}</main>
+        <main className={`min-w-0 flex-1 ${MAIN_PAD}`}>
+          {/* My day above the register on the home page only — not on the
+              QC and Shipped filters, which are opened to get work done. */}
+          {pathname === '/dispatch' && <MyDay />}
+          {children}
+        </main>
       </div>
 
       <BottomNav items={bottom} onMore={() => setOpen(true)} moreActive={open} />
